@@ -1,0 +1,27 @@
+# ninja log v5
+3	268	1606883116467753250	include/Sample/SampleOpsTypes.h.inc	ce01c49b1ca7b12f
+4	269	1606883116467867594	include/Sample/SampleOpsTypes.cpp.inc	48cb3dcfa5c3eef4
+5	271	1606883116496213588	include/Sample/SampleOpsDialect.h.inc	fc40f545cfac24ad
+1	273	1606883116499926221	include/Sample/SampleOps.h.inc	7bb58d8cb31425e6
+3	273	1606883116499918425	include/Sample/SampleOps.cpp.inc	ae5c3f009eb10c1d
+273	2078	1606883118283424408	lib/Sample/CMakeFiles/obj.MLIRSample.dir/SampleDialect.cpp.o	e84884e15110cf0d
+275	2176	1606883118378269546	lib/Sample/CMakeFiles/obj.MLIRSample.dir/SampleOps.cpp.o	ed3f5117e578cd4b
+2176	2237	1606883118462979000	lib/libMLIRSample.a	31a4e641b180d08c
+276	2350	1606883118557622584	sample-translate/CMakeFiles/sample-translate.dir/sample-translate.cpp.o	42014a4071d6126a
+2350	3488	1606883119699964050	bin/sample-translate	427d6c8ef81db7f9
+278	17693	1606883133830327643	sample-opt/CMakeFiles/sample-opt.dir/sample-opt.cpp.o	12c37d65258a983a
+17694	19112	1606883135326347026	bin/sample-opt	ad32a12cb316fafc
+19112	19532	0	test/CMakeFiles/check-sample	e0f9bfce412cedbf
+11	50	1606883467861604501	include/Sample/SampleOps.h.inc	7bb58d8cb31425e6
+12	50	1606883467860993582	include/Sample/SampleOpsTypes.h.inc	ce01c49b1ca7b12f
+13	51	1606883467860993759	include/Sample/SampleOpsTypes.cpp.inc	48cb3dcfa5c3eef4
+13	51	1606883467861296738	include/Sample/SampleOpsDialect.h.inc	fc40f545cfac24ad
+12	51	1606883467861564289	include/Sample/SampleOps.cpp.inc	ae5c3f009eb10c1d
+52	1566	1606883469369192699	lib/Sample/CMakeFiles/obj.MLIRSample.dir/SampleDialect.cpp.o	e84884e15110cf0d
+52	1639	1606883469439944142	lib/Sample/CMakeFiles/obj.MLIRSample.dir/SampleOps.cpp.o	ed3f5117e578cd4b
+1639	1697	1606883469512245000	lib/libMLIRSample.a	31a4e641b180d08c
+54	1809	1606883469610869551	sample-translate/CMakeFiles/sample-translate.dir/sample-translate.cpp.o	42014a4071d6126a
+1809	3069	1606883470870041996	bin/sample-translate	427d6c8ef81db7f9
+53	15362	1606883483093575584	sample-opt/CMakeFiles/sample-opt.dir/sample-opt.cpp.o	12c37d65258a983a
+15363	17048	1606883484846651334	bin/sample-opt	ad32a12cb316fafc
+17048	17497	0	test/CMakeFiles/check-sample	e0f9bfce412cedbf

@@ -1,0 +1,1 @@
+set -o pipefail;{ : 'RUN: at line 1';   /Users/sasaki/dev/mlir-sample/build/bin/sample-translate --help | /Users/sasaki/dev/llvm-project/build/bin/FileCheck /Users/sasaki/dev/mlir-sample/test/Sample/sample-translate.mlir; }
