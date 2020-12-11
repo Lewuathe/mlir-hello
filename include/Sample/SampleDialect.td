@@ -15,7 +15,7 @@ def Sample_Dialect : Dialect {
         illustrate the basic setup required to develop MLIR-based tools without
         working inside of the LLVM source tree.
     }];
-    let cppNamespace = "::mlir::sample";
+    let cppNamespace = "::sample";
 }
 
 //===----------------------------------------------------------------------===//
