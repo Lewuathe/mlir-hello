@@ -69,5 +69,4 @@ def PrintOp : Sample_Op<"print", [NoSideEffect]> {
     let assemblyFormat = "$input attr-dict `:` type($input)";
 }
 
-
 #endif // SAMPLE_OPS

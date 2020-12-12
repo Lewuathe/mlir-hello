@@ -17,6 +17,7 @@
 
 #include "Sample/SampleDialect.h"
 #include "Sample/SampleOps.h"
+#include "Sample/SamplePasses.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -128,12 +129,18 @@ void SampleToAffineLowerPass::runOnFunction() {
 
   mlir::ConversionTarget target(getContext());
 
+  target.addIllegalDialect<sample::SampleDialect>();
   target.addLegalDialect<mlir::AffineDialect, mlir::StandardOpsDialect>();
   target.addLegalOp<sample::PrintOp>();
 
   mlir::OwningRewritePatternList patterns;
+  patterns.insert<ConstantOpLowering>(&getContext());
 
   if (mlir::failed(mlir::applyPartialConversion(getFunction(), target, std::move(patterns)))) {
     signalPassFailure();
   }
+}
+
+std::unique_ptr<mlir::Pass> sample::createLowerToAffinePass() {
+  return std::make_unique<SampleToAffineLowerPass>();
 }
