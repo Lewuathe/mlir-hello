@@ -4,6 +4,11 @@ This is the minimal example to look into the way to implement the hello-world ki
 
 ## Prerequisites
 
+* [LLVM](https://llvm.org/)
+* [MLIR](https://mlir.llvm.org/)
+* [CMake](https://cmake.org/)
+* [Ninja](https://ninja-build.org/)
+
 We need to build our own MLIR in the local machine in advance. Please follow the build instruction for MLIR [here](https://mlir.llvm.org/getting_started/).
 
 ## Building
