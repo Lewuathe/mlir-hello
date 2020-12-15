@@ -15,11 +15,11 @@ set(LIBS
         MLIRTargetLLVMIR
         MLIRTransforms
         MLIROptLib
-        MLIRSample
+        MLIRHello
         )
-add_llvm_executable(sample-opt sample-opt.cpp)
+add_llvm_executable(hello-opt hello-opt.cpp)
 
-llvm_update_compile_flags(sample-opt)
-target_link_libraries(sample-opt PRIVATE ${LIBS})
+llvm_update_compile_flags(hello-opt)
+target_link_libraries(hello-opt PRIVATE ${LIBS})
 
-mlir_check_all_link_libraries(sample-opt)
+mlir_check_all_link_libraries(hello-opt)

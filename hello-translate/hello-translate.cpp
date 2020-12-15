@@ -2,12 +2,12 @@
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Translation.h"
 
-#include "Sample/SampleDialect.h"
+#include "Hello/HelloDialect.h"
 
 int main(int argc, char **argv) {
   mlir::registerAllTranslations();
 
-  // TODO: Register sample translations here.
+  // TODO: Register hello translations here.
 
   return failed(
       mlir::mlirTranslateMain(argc, argv, "MLIR Translation Testing Tool"));

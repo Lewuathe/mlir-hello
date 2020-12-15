@@ -1,4 +1,4 @@
-// RUN: sample-translate --help | FileCheck %s
+// RUN: hello-translate --help | FileCheck %s
 // CHECK: --avx512-mlir-to-llvmir
 // CHECK: --deserialize-spirv
 // CHECK: --import-llvm

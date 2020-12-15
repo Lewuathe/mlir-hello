@@ -15,16 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef MLIR_SAMPLE_PASSES_H
-#define MLIR_SAMPLE_PASSES_H
+#ifndef HELLO_HELLODIALECT_H
+#define HELLO_HELLODIALECT_H
 
-#include <memory>
+#include "mlir/IR/Dialect.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinDialect.h"
+#include "mlir/IR/Dialect.h"
+#include "mlir/IR/StandardTypes.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 
-#include "mlir/Pass/Pass.h"
+#include "Hello/HelloOpsDialect.h.inc"
 
-namespace sample {
-  std::unique_ptr<mlir::Pass> createLowerToAffinePass();
-  std::unique_ptr<mlir::Pass> createLowerToLLVMPass();
-}
-
-#endif // MLIR_SAMPLE_PASSES_H
+#endif // HELLO_HELLODIALECT_H

@@ -1,44 +1,17 @@
-#ifndef SAMPLE_OPS
-#define SAMPLE_OPS
+#ifndef HELLO_OPS
+#define HELLO_OPS
 
-include "SampleDialect.td"
+include "HelloDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-def Sample_FooOp : Sample_Op<"foo", [NoSideEffect,
-                                             SameOperandsAndResultType]> {
-    let summary = "Illustrates how to define an operation.";
-    let description = [{
-        The `sample.foo` operation illustrates how to define a new
-        operation in a dialect. It uses an operation trait to declare that it
-        has no side effects.
-
-        This operation takes an integer argument and returns an integer.
-
-        Example:
-
-        ```mlir
-        %0 = constant 2 : i32
-        // Apply the foo operation to %0
-        %1 = sample.foo %0 : i32
-        ```
-    }];
-
-    let arguments = (ins I32:$input);
-    let results = (outs I32:$res);
-
-    let assemblyFormat = [{
-        $input attr-dict `:` type($input)
-    }];
-}
-
-def ConstantOp : Sample_Op<"constant", [NoSideEffect]> {
+def ConstantOp : Hello_Op<"constant", [NoSideEffect]> {
   let summary = "constant";
   let description = [{
     Constant operation turns a literal into an SSA value. The data is attached
     to the operation as an attribute. For example:
 
     ```mlir
-      %0 = "sample.constant"()
+      %0 = "hello.constant"()
       { value = dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64> }
       : () -> tensor<2x3xf64>
     ```
@@ -56,7 +29,7 @@ def ConstantOp : Sample_Op<"constant", [NoSideEffect]> {
   let results = (outs F64Tensor);
 }
 
-def PrintOp : Sample_Op<"print", [NoSideEffect]> {
+def PrintOp : Hello_Op<"print", [NoSideEffect]> {
     let summary = "print operation";
     let description = [{
         The "print" builtin operation prints a given input tensor, and produces
@@ -69,4 +42,4 @@ def PrintOp : Sample_Op<"print", [NoSideEffect]> {
     let assemblyFormat = "$input attr-dict `:` type($input)";
 }
 
-#endif // SAMPLE_OPS
+#endif // HELLO_OPS

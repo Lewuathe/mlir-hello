@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Sample/SampleDialect.h"
-#include "Sample/SampleOps.h"
-#include "Sample/SamplePasses.h"
+#include "Hello/HelloDialect.h"
+#include "Hello/HelloOps.h"
+#include "Hello/HelloPasses.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -45,10 +45,10 @@ static mlir::Value insertAllocAndDealloc(mlir::MemRefType type, mlir::Location l
   return alloc;
 }
 
-class ConstantOpLowering : public mlir::OpRewritePattern<sample::ConstantOp> {
-  using OpRewritePattern<sample::ConstantOp>::OpRewritePattern;
+class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
+  using OpRewritePattern<hello::ConstantOp>::OpRewritePattern;
 
-  mlir::LogicalResult matchAndRewrite(sample::ConstantOp op, mlir::PatternRewriter &rewriter) const final {
+  mlir::LogicalResult matchAndRewrite(hello::ConstantOp op, mlir::PatternRewriter &rewriter) const final {
     mlir::DenseElementsAttr constantValue = op.value();
     mlir::Location loc = op.getLoc();
 
@@ -107,7 +107,7 @@ class ConstantOpLowering : public mlir::OpRewritePattern<sample::ConstantOp> {
 };
 
 namespace {
-class SampleToAffineLowerPass : public mlir::PassWrapper<SampleToAffineLowerPass, mlir::FunctionPass> {
+class HelloToAffineLowerPass : public mlir::PassWrapper<HelloToAffineLowerPass, mlir::FunctionPass> {
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
     registry.insert<mlir::AffineDialect, mlir::StandardOpsDialect>();
   }
@@ -116,7 +116,7 @@ class SampleToAffineLowerPass : public mlir::PassWrapper<SampleToAffineLowerPass
 };
 }
 
-void SampleToAffineLowerPass::runOnFunction() {
+void HelloToAffineLowerPass::runOnFunction() {
   auto function = getFunction();
   if (function.getName() != "main") {
     return;
@@ -129,9 +129,9 @@ void SampleToAffineLowerPass::runOnFunction() {
 
   mlir::ConversionTarget target(getContext());
 
-  target.addIllegalDialect<sample::SampleDialect>();
+  target.addIllegalDialect<hello::HelloDialect>();
   target.addLegalDialect<mlir::AffineDialect, mlir::StandardOpsDialect>();
-  target.addLegalOp<sample::PrintOp>();
+  target.addLegalOp<hello::PrintOp>();
 
   mlir::OwningRewritePatternList patterns;
   patterns.insert<ConstantOpLowering>(&getContext());
@@ -141,6 +141,6 @@ void SampleToAffineLowerPass::runOnFunction() {
   }
 }
 
-std::unique_ptr<mlir::Pass> sample::createLowerToAffinePass() {
-  return std::make_unique<SampleToAffineLowerPass>();
+std::unique_ptr<mlir::Pass> hello::createLowerToAffinePass() {
+  return std::make_unique<HelloToAffineLowerPass>();
 }

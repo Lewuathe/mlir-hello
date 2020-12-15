@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Sample/SampleDialect.h"
-#include "Sample/SampleOps.h"
-#include "Sample/SamplePasses.h"
+#include "Hello/HelloDialect.h"
+#include "Hello/HelloOps.h"
+#include "Hello/HelloPasses.h"
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
@@ -31,11 +31,11 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/Sequence.h"
 
-namespace sample {
+namespace hello {
 class PrintOpLowering : public mlir::ConversionPattern {
 public:
   explicit PrintOpLowering(mlir::MLIRContext *context)
-    : mlir::ConversionPattern(sample::PrintOp::getOperationName(), 1, context) {}
+    : mlir::ConversionPattern(hello::PrintOp::getOperationName(), 1, context) {}
 
   mlir::LogicalResult matchAndRewrite(mlir::Operation *op,
                                       mlir::ArrayRef<mlir::Value> operands,
@@ -77,7 +77,7 @@ public:
     }
 
     // Generate a call to printf for the current element of the loop.
-    auto printOp = mlir::cast<sample::PrintOp>(op);
+    auto printOp = mlir::cast<hello::PrintOp>(op);
     auto elementLoad = rewriter.create<mlir::LoadOp>(loc, printOp.input(), loopIvs);
     rewriter.create<mlir::CallOp>(loc, printfRef, rewriter.getIntegerType(32),
                             mlir::ArrayRef<mlir::Value>({formatSpecifierCst, elementLoad}));
@@ -133,7 +133,7 @@ private:
 }
 
 namespace {
-class SampleToLLVMLoweringPass : public mlir::PassWrapper<SampleToLLVMLoweringPass, mlir::OperationPass<mlir::ModuleOp>> {
+class HelloToLLVMLoweringPass : public mlir::PassWrapper<HelloToLLVMLoweringPass, mlir::OperationPass<mlir::ModuleOp>> {
 public:
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
     registry.insert<mlir::LLVM::LLVMDialect, mlir::scf::SCFDialect>();
@@ -143,7 +143,7 @@ public:
 };
 }
 
-void SampleToLLVMLoweringPass::runOnOperation() {
+void HelloToLLVMLoweringPass::runOnOperation() {
   mlir::LLVMConversionTarget target(getContext());
   target.addLegalOp<mlir::ModuleOp, mlir::ModuleTerminatorOp>();
 
@@ -154,13 +154,13 @@ void SampleToLLVMLoweringPass::runOnOperation() {
   populateLoopToStdConversionPatterns(patterns, &getContext());
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
 
-  patterns.insert<sample::PrintOpLowering>(&getContext());
+  patterns.insert<hello::PrintOpLowering>(&getContext());
   auto module = getOperation();
   if (failed(applyFullConversion(module, target, std::move(patterns)))) {
     signalPassFailure();
   }
 }
 
-std::unique_ptr<mlir::Pass> sample::createLowerToLLVMPass() {
-  return std::make_unique<SampleToLLVMLoweringPass>();
+std::unique_ptr<mlir::Pass> hello::createLowerToLLVMPass() {
+  return std::make_unique<HelloToLLVMLoweringPass>();
 }
