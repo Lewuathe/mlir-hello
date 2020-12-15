@@ -1,6 +1,10 @@
 # MLIR Hello Dialect
 
-This is the minimal example to look into the way to implement the hello-world kind of program with MLIR. 
+This is the minimal example to look into the way to implement the hello-world kind of program with MLIR.
+
+## Prerequisites
+
+We need to build our own MLIR in the local machine in advance. Please follow the build instruction for MLIR [here](https://mlir.llvm.org/getting_started/.
 
 ## Building
 
