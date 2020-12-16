@@ -37,7 +37,7 @@ cmake --build . --target mlir-doc
 # Lower MLIR to LLVM IR
 $ ./build/bin/hello-opt ./test/Hello/print.mlir > /path/to/print.ll
 
-# Execute the code with LL
+# Execute the code with LLVM interpreter
 $ lli /path/to/print.ll 
 
 1.000000 1.000000 1.000000
