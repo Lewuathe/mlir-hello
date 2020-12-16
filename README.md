@@ -1,6 +1,6 @@
 # MLIR Hello Dialect
 
-This is the minimal example to look into the way to implement the hello-world kind of program with MLIR.
+This is the minimal example to look into the way to implement the hello-world kind of program with MLIR. The basic code structure is borrowed from [standalone](https://github.com/llvm/llvm-project/tree/main/mlir/examples/standalone) and [Toy language](https://github.com/llvm/llvm-project/tree/main/mlir/examples/toy) in LLVM project.
 
 ## Prerequisites
 
@@ -9,7 +9,7 @@ This is the minimal example to look into the way to implement the hello-world ki
 * [CMake](https://cmake.org/)
 * [Ninja](https://ninja-build.org/)
 
-We need to build our own MLIR in the local machine in advance. Please follow the build instruction for MLIR [here](https://mlir.llvm.org/getting_started/). The basic code structure is borrowed from [standalone](https://github.com/llvm/llvm-project/tree/main/mlir/examples/standalone) and [Toy language](https://github.com/llvm/llvm-project/tree/main/mlir/examples/toy) in LLVM project. 
+We need to build our own MLIR in the local machine in advance. Please follow the build instruction for MLIR [here](https://mlir.llvm.org/getting_started/). 
 
 ## Building
 
