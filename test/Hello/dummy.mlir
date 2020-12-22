@@ -1,11 +1,10 @@
-// RUN: hello-opt %s | hello-opt | FileCheck %s
+// RUN: hello-opt %s | FileCheck %s
 
+// CHECK: ; ModuleID = 'LLVMDialectModule'
+// CHECK-LABEL:  @bar
 module {
-    // CHECK-LABEL: func @bar()
     func @bar() {
         %0 = constant 1 : i32
-        // CHECK: %{{.*}} = hello.foo %{{.*}} : i32
-        %res = hello.foo %0 : i32
         return
     }
 }
