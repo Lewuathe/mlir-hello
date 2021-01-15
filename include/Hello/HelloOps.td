@@ -4,7 +4,7 @@
 include "HelloDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-def ConstantOp : Hello_Op<"constant", [NoSideEffect]> {
+def ConstantOp : Hello_Op<"constant", [ConstantLike, NoSideEffect]> {
   let summary = "constant";
   let description = [{
     Constant operation turns a literal into an SSA value. The data is attached

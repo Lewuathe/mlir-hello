@@ -1,3 +1,3 @@
-// RUN: hello-opt --show-dialects | FileCheck %s
-// CHECK: Available Dialects:
-// CHECK: hello
+// RUN: hello-opt --help | FileCheck %s
+// CHECK: OVERVIEW: Hello compiler
+// CHECK: USAGE: hello-opt [options] <input hello file>

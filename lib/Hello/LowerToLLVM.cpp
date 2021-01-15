@@ -95,9 +95,9 @@ private:
       return mlir::SymbolRefAttr::get("printf", context);
     }
 
-    auto llvmI32Ty = mlir::LLVM::LLVMType::getInt32Ty(context);
-    auto llvmI8PtrTy = mlir::LLVM::LLVMType::getInt8PtrTy(context);
-    auto llvmFnType = mlir::LLVM::LLVMType::getFunctionTy(llvmI32Ty, llvmI8PtrTy, true);
+    auto llvmI32Ty = mlir::IntegerType::get(context, 32);
+    auto llvmI8PtrTy = mlir::LLVM::LLVMPointerType::get(mlir::IntegerType::get(context, 8));
+    auto llvmFnType = mlir::LLVM::LLVMFunctionType::get(llvmI32Ty, llvmI8PtrTy, true);
 
     mlir::PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointToStart(module.getBody());
@@ -113,8 +113,7 @@ private:
     if (!(global = module.lookupSymbol<mlir::LLVM::GlobalOp>(name))) {
       mlir::OpBuilder::InsertionGuard insertGuard(builder);
       builder.setInsertionPointToStart(module.getBody());
-      auto type = mlir::LLVM::LLVMType::getArrayTy(
-          mlir::LLVM::LLVMType::getInt8Ty(builder.getContext()), value.size());
+      auto type = mlir::LLVM::LLVMArrayType::get(mlir::IntegerType::get(builder.getContext(), 8), value.size());
       global = builder.create<mlir::LLVM::GlobalOp>(loc, type, /*isConstant=*/true,
                                               mlir::LLVM::Linkage::Internal, name,
                                               builder.getStringAttr(value));
@@ -123,10 +122,13 @@ private:
     // Get the pointer to the first character in the global string.
     mlir::Value globalPtr = builder.create<mlir::LLVM::AddressOfOp>(loc, global);
     mlir::Value cst0 = builder.create<mlir::LLVM::ConstantOp>(
-        loc, mlir::LLVM::LLVMType::getInt64Ty(builder.getContext()),
-        builder.getIntegerAttr(builder.getIndexType(), 0));
+            loc, mlir::IntegerType::get(builder.getContext(), 64),
+            builder.getIntegerAttr(builder.getIndexType(), 0));
+
     return builder.create<mlir::LLVM::GEPOp>(
-        loc, mlir::LLVM::LLVMType::getInt8PtrTy(builder.getContext()), globalPtr,
+        loc,
+        mlir::LLVM::LLVMPointerType::get(mlir::IntegerType::get(builder.getContext(), 8)),
+        globalPtr,
         mlir::ArrayRef<mlir::Value>({cst0, cst0}));
   }
 };
