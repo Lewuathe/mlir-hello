@@ -27,6 +27,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/Sequence.h"
@@ -78,7 +79,7 @@ public:
 
     // Generate a call to printf for the current element of the loop.
     auto printOp = mlir::cast<hello::PrintOp>(op);
-    auto elementLoad = rewriter.create<mlir::LoadOp>(loc, printOp.input(), loopIvs);
+    auto elementLoad = rewriter.create<mlir::memref::LoadOp>(loc, printOp.input(), loopIvs);
     rewriter.create<mlir::CallOp>(loc, printfRef, rewriter.getIntegerType(32),
                             mlir::ArrayRef<mlir::Value>({formatSpecifierCst, elementLoad}));
 
@@ -92,7 +93,7 @@ private:
                                                    mlir::ModuleOp module) {
     auto *context = module.getContext();
     if (module.lookupSymbol<mlir::LLVM::LLVMFuncOp>("printf")) {
-      return mlir::SymbolRefAttr::get("printf", context);
+      return mlir::SymbolRefAttr::get(context, "printf");
     }
 
     auto llvmI32Ty = mlir::IntegerType::get(context, 32);
@@ -102,7 +103,7 @@ private:
     mlir::PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointToStart(module.getBody());
     rewriter.create<mlir::LLVM::LLVMFuncOp>(module.getLoc(), "printf", llvmFnType);
-    return mlir::SymbolRefAttr::get("printf", context);
+    return mlir::SymbolRefAttr::get(context, "printf");
   }
 
   static mlir::Value getOrCreateGlobalString(mlir::Location loc, mlir::OpBuilder &builder,
@@ -147,16 +148,22 @@ public:
 
 void HelloToLLVMLoweringPass::runOnOperation() {
   mlir::LLVMConversionTarget target(getContext());
-  target.addLegalOp<mlir::ModuleOp, mlir::ModuleTerminatorOp>();
+  target.addLegalOp<mlir::ModuleOp>();
 
   mlir::LLVMTypeConverter typeConverter(&getContext());
 
-  mlir::OwningRewritePatternList patterns;
-  populateAffineToStdConversionPatterns(patterns, &getContext());
-  populateLoopToStdConversionPatterns(patterns, &getContext());
+  mlir::RewritePatternSet patterns(&getContext());
+  populateAffineToStdConversionPatterns(patterns);
+  populateLoopToStdConversionPatterns(patterns);
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
+  patterns.add<hello::PrintOpLowering>(&getContext());
+//
+//  mlir::OwningRewritePatternList patterns;
+//  populateAffineToStdConversionPatterns(patterns, &getContext());
+//  populateLoopToStdConversionPatterns(patterns, &getContext());
+//  populateStdToLLVMConversionPatterns(typeConverter, patterns);
 
-  patterns.insert<hello::PrintOpLowering>(&getContext());
+//  patterns.insert<hello::PrintOpLowering>(&getContext());
   auto module = getOperation();
   if (failed(applyFullConversion(module, target, std::move(patterns)))) {
     signalPassFailure();

@@ -24,7 +24,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Support/MlirOptMain.h"
-#include "mlir/Target/LLVMIR.h"
+#include "mlir/Target/LLVMIR/Export.h"
 
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
@@ -135,6 +135,7 @@ int main(int argc, char **argv) {
   context.getOrLoadDialect<hello::HelloDialect>();
   context.getOrLoadDialect<mlir::StandardOpsDialect>();
   context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
+  context.getOrLoadDialect<mlir::memref::MemRefDialect>();
   mlir::OwningModuleRef module;
   if (int error = loadAndProcessMLIR(context, module)) {
     return error;

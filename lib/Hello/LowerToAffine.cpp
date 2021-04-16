@@ -21,6 +21,7 @@
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/Sequence.h"
@@ -32,7 +33,7 @@ static mlir::MemRefType convertTensorToMemRef(mlir::TensorType type) {
 
 static mlir::Value insertAllocAndDealloc(mlir::MemRefType type, mlir::Location loc,
                                          mlir::PatternRewriter &rewriter) {
-  auto alloc = rewriter.create<mlir::AllocOp>(loc, type);
+  auto alloc = rewriter.create<mlir::memref::AllocOp>(loc, type);
 
   // Make sure to allocate at the beginning of the block.
   auto *parentBlock = alloc->getBlock();
@@ -40,7 +41,7 @@ static mlir::Value insertAllocAndDealloc(mlir::MemRefType type, mlir::Location l
 
   // Make sure to deallocate this alloc at the end of the block. This is fine
   // as toy functions have no control flow.
-  auto dealloc = rewriter.create<mlir::DeallocOp>(loc, alloc);
+  auto dealloc = rewriter.create<mlir::memref::DeallocOp>(loc, alloc);
   dealloc->moveBefore(&parentBlock->back());
   return alloc;
 }
@@ -131,10 +132,10 @@ void HelloToAffineLowerPass::runOnFunction() {
 
   target.addIllegalDialect<hello::HelloDialect>();
   target.addLegalDialect<mlir::AffineDialect, mlir::StandardOpsDialect>();
-  target.addLegalOp<hello::PrintOp>();
+  target.addLegalOp<hello::PrintOp, hello::ConstantOp>();
 
-  mlir::OwningRewritePatternList patterns;
-  patterns.insert<ConstantOpLowering>(&getContext());
+  mlir::RewritePatternSet patterns(&getContext());
+  patterns.add<ConstantOpLowering>(&getContext());
 
   if (mlir::failed(mlir::applyPartialConversion(getFunction(), target, std::move(patterns)))) {
     signalPassFailure();

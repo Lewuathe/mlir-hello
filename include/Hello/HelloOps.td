@@ -18,10 +18,10 @@ def ConstantOp : Hello_Op<"constant", [ConstantLike, NoSideEffect]> {
   }];
 
   let builders = [
-    OpBuilderDAG<(ins "mlir::DenseElementsAttr":$value), [{
+    OpBuilder<(ins "mlir::DenseElementsAttr":$value), [{
       build($_builder, $_state, value.getType(), value);
     }]>,
-    OpBuilderDAG<(ins "double":$value)>
+    OpBuilder<(ins "double":$value)>
   ];
 
 //  let parser = [{ return ::parseConstantOp(parser, result); }];
