@@ -131,8 +131,8 @@ void HelloToAffineLowerPass::runOnFunction() {
   mlir::ConversionTarget target(getContext());
 
   target.addIllegalDialect<hello::HelloDialect>();
-  target.addLegalDialect<mlir::AffineDialect, mlir::StandardOpsDialect>();
-  target.addLegalOp<hello::PrintOp, hello::ConstantOp>();
+  target.addLegalDialect<mlir::AffineDialect, mlir::StandardOpsDialect, mlir::memref::MemRefDialect>();
+  target.addLegalOp<hello::PrintOp>();
 
   mlir::RewritePatternSet patterns(&getContext());
   patterns.add<ConstantOpLowering>(&getContext());
