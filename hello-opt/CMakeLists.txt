@@ -12,7 +12,7 @@ set(LIBS
         MLIRPass
         MLIRSideEffectInterfaces
         MLIRSupport
-        MLIRTargetLLVMIR
+        MLIRTargetLLVMIRExport
         MLIRTransforms
         MLIROptLib
         MLIRHello

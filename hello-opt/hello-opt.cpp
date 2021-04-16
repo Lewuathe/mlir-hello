@@ -24,7 +24,8 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Support/MlirOptMain.h"
-#include "mlir/Target/LLVMIR.h"
+#include "mlir/Target/LLVMIR/Export.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
@@ -42,7 +43,9 @@ static cl::opt<std::string> inputFilename(cl::Positional,
                                           cl::value_desc("filename"));
 
 int dumpLLVMIR(mlir::ModuleOp module) {
+  mlir::registerLLVMDialectTranslation(*module->getContext());
   // Convert the module to LLVM IR in a new LLVM IR context.
+
   llvm::LLVMContext llvmContext;
   auto llvmModule = mlir::translateModuleToLLVMIR(module, llvmContext);
   if (!llvmModule) {
@@ -135,6 +138,7 @@ int main(int argc, char **argv) {
   context.getOrLoadDialect<hello::HelloDialect>();
   context.getOrLoadDialect<mlir::StandardOpsDialect>();
   context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
+  context.getOrLoadDialect<mlir::memref::MemRefDialect>();
   mlir::OwningModuleRef module;
   if (int error = loadAndProcessMLIR(context, module)) {
     return error;
