@@ -24,6 +24,8 @@ LLVM_DIR=/path/to/llvm-project/build/lib/cmake/llvm \
 cmake --build . --target hello-opt
 ```
 
+To run the test, `check-hello` target will be usable.
+
 To build the documentation from the TableGen description of the dialect operations, run
 ```sh
 cmake --build . --target mlir-doc
