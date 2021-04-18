@@ -38,7 +38,7 @@ jobs:
       - name: Build LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
-          git submodule update
+          git submodule update --init --recursive
           cd thirdparty/llvm-project
           mkdir build && cd build
           cmake -G Ninja ../llvm -DLLVM_ENABLE_PROJECTS=mlir -DLLVM_BUILD_EXAMPLES=ON -DLLVM_ENABLE_ASSERTIONS=ON -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_RTTI=ON -DLLVM_TARGETS_TO_BUILD="host"
