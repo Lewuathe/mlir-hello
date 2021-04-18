@@ -1,0 +1,3 @@
+[submodule "thirdparty/llvm-project"]
+	path = thirdparty/llvm-project
+	url = https://github.com/llvm/llvm-project.git
