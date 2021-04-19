@@ -46,15 +46,15 @@ jobs:
 
       - name: Build mlir-hello
         run: |
-          export LLVM_DIR=$PWD/thirdparty/llvm-project/llvm/cmake-build-debug/lib/cmake/llvm
-          export MLIR_DIR=$PWD/thirdparty/llvm-project/llvm/cmake-build-debug/lib/cmake/mlir
+          export LLVM_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/llvm
+          export MLIR_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/mlir
           mkdir build && cd build
           cmake ..
           cmake --build . --target all
 
       - name: Test Norm
         run: |
-          export LLVM_DIR=$PWD/thirdparty/llvm-project/llvm/cmake-build-debug/lib/cmake/llvm
-          export MLIR_DIR=$PWD/thirdparty/llvm-project/llvm/cmake-build-debug/lib/cmake/mlir
+          export LLVM_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/llvm
+          export MLIR_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/mlir
           cd build
           cmake --build . --target check-hello
