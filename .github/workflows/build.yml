@@ -49,7 +49,7 @@ jobs:
           export LLVM_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/llvm
           export MLIR_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/mlir
           mkdir build && cd build
-          cmake ..
+          cmake -DLLVM_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/llvm -DMLIR_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/mlir ..
           cmake --build . --target all
 
       - name: Test Norm
