@@ -46,15 +46,18 @@ jobs:
 
       - name: Build mlir-hello
         run: |
-          export LLVM_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/llvm
-          export MLIR_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/mlir
           mkdir build && cd build
-          cmake -DLLVM_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/llvm -DMLIR_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/mlir ..
+          cmake \
+            -DLLVM_DIR=../thirdparty/llvm-project/llvm/build/lib/cmake/llvm \
+            -DMLIR_DIR=../thirdparty/llvm-project/llvm/build/lib/cmake/mlir \
+            ..
           cmake --build . --target all
 
       - name: Test mlir-hello
         run: |
-          export LLVM_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/llvm
-          export MLIR_DIR=$PWD/thirdparty/llvm-project/llvm/build/lib/cmake/mlir
           cd build
+          cmake \
+            -DLLVM_DIR=../thirdparty/llvm-project/llvm/build/lib/cmake/llvm \
+            -DMLIR_DIR=../thirdparty/llvm-project/llvm/build/lib/cmake/mlir \
+            ..
           cmake --build . --target check-hello
