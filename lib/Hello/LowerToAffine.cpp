@@ -77,6 +77,20 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
     // will need to generate a store for each of the elements. The following
     // functor recursively walks the dimensions of the constant shape,
     // generating a store when the recursion hits the base case.
+
+    // [4, 3] (1, 2, 3, 4, 5, 6, 7, 8)
+    // storeElements(0)
+    //   indices = [0]
+    //   storeElements(1)
+    //     indices = [0, 0]
+    //     storeElements(2)
+    //       store (const 1) [0, 0]
+    //     indices = [0]
+    //     indices = [0, 1]
+    //     storeElements(2)
+    //       store (const 2) [0, 1]
+    //  ...
+    //
     mlir::SmallVector<mlir::Value, 2> indices;
     auto valueIt = constantValue.getValues<mlir::FloatAttr>().begin();
     std::function<void(uint64_t)> storeElements = [&](uint64_t dimension) {
