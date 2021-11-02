@@ -1,4 +1,7 @@
 # This script helps you set up MLIR
+# Prerequisites: cmake, c compiler, make
+# also, make sure you do `git submodule update --init --recursive`
+# in this repo to get llvm-project under thirdparty
 
 # Set up MLIR
 LLVM_REPO=./thirdparty/llvm-project
