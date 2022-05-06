@@ -5,8 +5,12 @@ set(LIBS
         ${conversion_libs}
         MLIRAnalysis
         MLIRCallInterfaces
+        MLIRCastInterfaces
         MLIRExecutionEngine
         MLIRIR
+        MLIRLLVMCommonConversion
+        MLIRLLVMToLLVMIRTranslation
+        MLIRMemRef
         MLIRLLVMIR
         MLIRParser
         MLIRPass

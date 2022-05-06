@@ -21,7 +21,7 @@ def Hello_Dialect : Dialect {
 // Base hello operation definition.
 //===----------------------------------------------------------------------===//
 
-class Hello_Op<string mnemonic, list<OpTrait> traits = []> :
+class Hello_Op<string mnemonic, list<Trait> traits = []> :
         Op<Hello_Dialect, mnemonic, traits>;
 
 #endif // HELLO_DIALECT

@@ -20,7 +20,8 @@
 #include "Hello/HelloPasses.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -68,10 +69,10 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
     if (!valueShape.empty()) {
       for (auto i : llvm::seq<int64_t>(
           0, *std::max_element(valueShape.begin(), valueShape.end())))
-        constantIndices.push_back(rewriter.create<mlir::ConstantIndexOp>(loc, i));
+        constantIndices.push_back(rewriter.create<mlir::arith::ConstantIndexOp>(loc, i));
     } else {
       // This is the case of a tensor of rank 0.
-      constantIndices.push_back(rewriter.create<mlir::ConstantIndexOp>(loc, 0));
+      constantIndices.push_back(rewriter.create<mlir::arith::ConstantIndexOp>(loc, 0));
     }
     // The constant operation represents a multi-dimensional constant, so we
     // will need to generate a store for each of the elements. The following
@@ -98,7 +99,7 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
       // we store the element at the given index.
       if (dimension == valueShape.size()) {
         rewriter.create<mlir::AffineStoreOp>(
-            loc, rewriter.create<mlir::ConstantOp>(loc, *valueIt++), alloc,
+            loc, rewriter.create<mlir::arith::ConstantOp>(loc, *valueIt++), alloc,
             llvm::makeArrayRef(indices));
         return;
       }
@@ -122,36 +123,26 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
 };
 
 namespace {
-class HelloToAffineLowerPass : public mlir::PassWrapper<HelloToAffineLowerPass, mlir::FunctionPass> {
+class HelloToAffineLowerPass : public mlir::PassWrapper<HelloToAffineLowerPass, mlir::OperationPass<mlir::ModuleOp>> {
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
-    registry.insert<mlir::AffineDialect, mlir::StandardOpsDialect>();
+      registry.insert<mlir::AffineDialect, mlir::func::FuncDialect, mlir::memref::MemRefDialect>();
   }
 
-  void runOnFunction() final;
+  void runOnOperation() final;
 };
 }
 
-void HelloToAffineLowerPass::runOnFunction() {
-  auto function = getFunction();
-  if (function.getName() != "main") {
-    return;
-  }
-
-  if (function.getNumArguments() || function.getType().getNumResults()) {
-    function.emitError("expected 'main' to have 0 inputs and 0 results");
-    return signalPassFailure();
-  }
-
+void HelloToAffineLowerPass::runOnOperation() {
   mlir::ConversionTarget target(getContext());
 
   target.addIllegalDialect<hello::HelloDialect>();
-  target.addLegalDialect<mlir::AffineDialect, mlir::StandardOpsDialect, mlir::memref::MemRefDialect>();
+  target.addLegalDialect<mlir::AffineDialect, mlir::func::FuncDialect, mlir::arith::ArithmeticDialect, mlir::memref::MemRefDialect>();
   target.addLegalOp<hello::PrintOp>();
 
   mlir::RewritePatternSet patterns(&getContext());
   patterns.add<ConstantOpLowering>(&getContext());
 
-  if (mlir::failed(mlir::applyPartialConversion(getFunction(), target, std::move(patterns)))) {
+  if (mlir::failed(mlir::applyPartialConversion(getOperation(), target, std::move(patterns)))) {
     signalPassFailure();
   }
 }

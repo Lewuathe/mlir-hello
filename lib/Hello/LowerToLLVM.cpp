@@ -20,13 +20,16 @@
 #include "Hello/HelloPasses.h"
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
-#include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
-#include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
-#include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"
+#include "mlir/Conversion/ArithmeticToLLVM/ArithmeticToLLVM.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
+#include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -57,9 +60,9 @@ public:
     // Create a loop for each of the dimensions within the shape.
     mlir::SmallVector<mlir::Value, 4> loopIvs;
     for (unsigned i = 0, e = memRefShape.size(); i != e; ++i) {
-      auto lowerBound = rewriter.create<mlir::ConstantIndexOp>(loc, 0);
-      auto upperBound = rewriter.create<mlir::ConstantIndexOp>(loc, memRefShape[i]);
-      auto step = rewriter.create<mlir::ConstantIndexOp>(loc, 1);
+      auto lowerBound = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 0);
+      auto upperBound = rewriter.create<mlir::arith::ConstantIndexOp>(loc, memRefShape[i]);
+      auto step = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 1);
       auto loop =
           rewriter.create<mlir::scf::ForOp>(loc, lowerBound, upperBound, step);
       for (mlir::Operation &nested : *loop.getBody())
@@ -70,9 +73,9 @@ public:
       rewriter.setInsertionPointToEnd(loop.getBody());
 
       // Insert a newline after each of the inner dimensions of the shape.
-      if (i != e - 1)
-        rewriter.create<mlir::CallOp>(loc, printfRef, rewriter.getIntegerType(32),
-                                newLineCst);
+      if (i != e - 1) {
+        rewriter.create<mlir::func::CallOp>(loc, printfRef, rewriter.getIntegerType(32), newLineCst);
+      }
       rewriter.create<mlir::scf::YieldOp>(loc);
       rewriter.setInsertionPointToStart(loop.getBody());
     }
@@ -80,7 +83,7 @@ public:
     // Generate a call to printf for the current element of the loop.
     auto printOp = mlir::cast<hello::PrintOp>(op);
     auto elementLoad = rewriter.create<mlir::memref::LoadOp>(loc, printOp.input(), loopIvs);
-    rewriter.create<mlir::CallOp>(loc, printfRef, rewriter.getIntegerType(32),
+    rewriter.create<mlir::func::CallOp>(loc, printfRef, rewriter.getIntegerType(32),
                             mlir::ArrayRef<mlir::Value>({formatSpecifierCst, elementLoad}));
 
     // Notify the rewriter that this operation has been removed.
@@ -154,8 +157,8 @@ void HelloToLLVMLoweringPass::runOnOperation() {
 
   mlir::RewritePatternSet patterns(&getContext());
   populateAffineToStdConversionPatterns(patterns);
-  populateLoopToStdConversionPatterns(patterns);
-  populateStdToLLVMConversionPatterns(typeConverter, patterns);
+  populateSCFToControlFlowConversionPatterns(patterns);
+  mlir::arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);
   patterns.add<hello::PrintOpLowering>(&getContext());
 //
 //  mlir::OwningRewritePatternList patterns;

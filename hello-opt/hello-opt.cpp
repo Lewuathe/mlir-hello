@@ -20,10 +20,9 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/InitAllPasses.h"
-#include "mlir/Parser.h"
+#include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
-#include "mlir/Support/MlirOptMain.h"
 #include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 
@@ -68,33 +67,51 @@ int dumpLLVMIR(mlir::ModuleOp module) {
   return 0;
 }
 
-int loadMLIR(mlir::MLIRContext &context, mlir::OwningModuleRef &module) {
-  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
-      llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
-  if (std::error_code EC = fileOrErr.getError()) {
-    llvm::errs() << "Could not open input file: " << EC.message() << "\n";
-    return -1;
-  }
+int loadMLIR(mlir::MLIRContext &context, mlir::OwningOpRef<mlir::ModuleOp> &module) {
+//  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
+//      llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
+//  if (std::error_code EC = fileOrErr.getError()) {
+//    llvm::errs() << "Could not open input file: " << EC.message() << "\n";
+//    return -1;
+//  }
+//
+//  // Parse the input MLIR.
+//  llvm::SourceMgr sourceMgr;
+//  sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
+//  module = mlir::parseSourceFile(sourceMgr, &context);
+//  if (!module) {
+//    llvm::errs() << "Error can't load file " << inputFilename << "\n";
+//    return 3;
+//  }
+//  return 0;
 
-  // Parse the input MLIR.
-  llvm::SourceMgr sourceMgr;
-  sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
-  module = mlir::parseSourceFile(sourceMgr, &context);
-  if (!module) {
-    llvm::errs() << "Error can't load file " << inputFilename << "\n";
-    return 3;
-  }
-  return 0;
+// Otherwise, the input is '.mlir'.
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
+            llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
+    if (std::error_code ec = fileOrErr.getError()) {
+        llvm::errs() << "Could not open input file: " << ec.message() << "\n";
+        return -1;
+    }
+
+// Parse the input mlir.
+    llvm::SourceMgr sourceMgr;
+    sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
+    module = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
+    if (!module) {
+        llvm::errs() << "Error can't load file " << inputFilename << "\n";
+        return 3;
+    }
+    return 0;
 }
 
-int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningModuleRef &module) {
+int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningOpRef<mlir::ModuleOp> &module) {
   if (int error = loadMLIR(context, module)) {
     return error;
   }
 
   // Register passes to be applied in this compile process
   mlir::PassManager passManager(&context);
-  mlir::OpPassManager &optPm = passManager.nest<mlir::FuncOp>();
+  mlir::OpPassManager &optPm = passManager.nest<mlir::func::FuncOp>();
   optPm.addPass(hello::createLowerToAffinePass());
   passManager.addPass(hello::createLowerToLLVMPass());
 
@@ -115,8 +132,9 @@ int runJit(mlir::ModuleOp module) {
 
   // Create an MLIR execution engine. The execution engine eagerly JIT-compiles
   // the module.
-  auto maybeEngine = mlir::ExecutionEngine::create(
-      module, /*llvmModuleBuilder=*/nullptr, optPipeline);
+  mlir::ExecutionEngineOptions engineOptions;
+  engineOptions.transformer = optPipeline;
+  auto maybeEngine = mlir::ExecutionEngine::create(module, engineOptions);
   assert(maybeEngine && "failed to construct an execution engine");
   auto &engine = maybeEngine.get();
 
@@ -136,10 +154,11 @@ int main(int argc, char **argv) {
   mlir::registerAllPasses();
   mlir::MLIRContext context;
   context.getOrLoadDialect<hello::HelloDialect>();
-  context.getOrLoadDialect<mlir::StandardOpsDialect>();
+//  context.getOrLoadDialect<mlir::StandardOpsDialect>();
   context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
   context.getOrLoadDialect<mlir::memref::MemRefDialect>();
-  mlir::OwningModuleRef module;
+
+  mlir::OwningOpRef<mlir::ModuleOp> module;
   if (int error = loadAndProcessMLIR(context, module)) {
     return error;
   }

@@ -8,7 +8,6 @@ configure_lit_site_cfg(
 set(HELLO_TEST_DEPENDS
         FileCheck count not
         hello-opt
-        hello-translate
         )
 
 add_lit_testsuite(check-hello "Running the hello regression tests"
