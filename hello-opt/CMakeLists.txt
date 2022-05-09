@@ -3,6 +3,7 @@ get_property(conversion_libs GLOBAL PROPERTY MLIR_CONVERSION_LIBS)
 set(LIBS
         ${dialect_libs}
         ${conversion_libs}
+        MLIRHello
         MLIRAnalysis
         MLIRCallInterfaces
         MLIRCastInterfaces
@@ -19,7 +20,6 @@ set(LIBS
         MLIRTargetLLVMIRExport
         MLIRTransforms
         MLIROptLib
-        MLIRHello
         )
 add_llvm_executable(hello-opt hello-opt.cpp)
 

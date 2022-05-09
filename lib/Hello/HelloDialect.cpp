@@ -28,6 +28,8 @@ using namespace hello;
 // Hello dialect.
 //===----------------------------------------------------------------------===//
 
+#include "Hello/HelloOpsDialect.cpp.inc"
+
 void HelloDialect::initialize() {
   addOperations<
 #define GET_OP_LIST

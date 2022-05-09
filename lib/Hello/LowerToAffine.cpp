@@ -124,6 +124,9 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
 
 namespace {
 class HelloToAffineLowerPass : public mlir::PassWrapper<HelloToAffineLowerPass, mlir::OperationPass<mlir::ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(HelloToAffineLowerPass)
+
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
       registry.insert<mlir::AffineDialect, mlir::func::FuncDialect, mlir::memref::MemRefDialect>();
   }
@@ -136,7 +139,8 @@ void HelloToAffineLowerPass::runOnOperation() {
   mlir::ConversionTarget target(getContext());
 
   target.addIllegalDialect<hello::HelloDialect>();
-  target.addLegalDialect<mlir::AffineDialect, mlir::func::FuncDialect, mlir::arith::ArithmeticDialect, mlir::memref::MemRefDialect>();
+  target.addLegalDialect<mlir::AffineDialect, mlir::BuiltinDialect,
+    mlir::func::FuncDialect, mlir::arith::ArithmeticDialect, mlir::memref::MemRefDialect>();
   target.addLegalOp<hello::PrintOp>();
 
   mlir::RewritePatternSet patterns(&getContext());

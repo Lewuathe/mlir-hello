@@ -111,8 +111,14 @@ int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningOpRef<mlir::Modul
 
   // Register passes to be applied in this compile process
   mlir::PassManager passManager(&context);
+  mlir::applyPassManagerCLOptions(passManager);
+
+  passManager.addPass(mlir::createInlinerPass());
   mlir::OpPassManager &optPm = passManager.nest<mlir::func::FuncOp>();
-  optPm.addPass(hello::createLowerToAffinePass());
+  optPm.addPass(mlir::createCanonicalizerPass());
+  optPm.addPass(mlir::createCSEPass());
+//  optPm.addPass(hello::createLowerToAffinePass());
+  passManager.addPass(hello::createLowerToAffinePass());
   passManager.addPass(hello::createLowerToLLVMPass());
 
   if (mlir::failed(passManager.run(*module))) {
@@ -149,14 +155,16 @@ int runJit(mlir::ModuleOp module) {
 }
 
 int main(int argc, char **argv) {
+  mlir::registerMLIRContextCLOptions();
   mlir::registerPassManagerCLOptions();
+
   cl::ParseCommandLineOptions(argc, argv, "Hello compiler\n");
   mlir::registerAllPasses();
   mlir::MLIRContext context;
   context.getOrLoadDialect<hello::HelloDialect>();
-//  context.getOrLoadDialect<mlir::StandardOpsDialect>();
   context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
   context.getOrLoadDialect<mlir::memref::MemRefDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
 
   mlir::OwningOpRef<mlir::ModuleOp> module;
   if (int error = loadAndProcessMLIR(context, module)) {

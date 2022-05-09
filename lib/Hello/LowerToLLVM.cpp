@@ -22,6 +22,7 @@
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithmeticToLLVM/ArithmeticToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
@@ -141,6 +142,7 @@ private:
 namespace {
 class HelloToLLVMLoweringPass : public mlir::PassWrapper<HelloToLLVMLoweringPass, mlir::OperationPass<mlir::ModuleOp>> {
 public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(HelloToLLVMLoweringPass)
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
     registry.insert<mlir::LLVM::LLVMDialect, mlir::scf::SCFDialect>();
   }
@@ -160,6 +162,7 @@ void HelloToLLVMLoweringPass::runOnOperation() {
   populateSCFToControlFlowConversionPatterns(patterns);
   mlir::arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);
   patterns.add<hello::PrintOpLowering>(&getContext());
+  populateFuncToLLVMConversionPatterns(typeConverter, patterns);
 //
 //  mlir::OwningRewritePatternList patterns;
 //  populateAffineToStdConversionPatterns(patterns, &getContext());
