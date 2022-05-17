@@ -15,6 +15,7 @@ def Hello_Dialect : Dialect {
         for MLIR.
     }];
     let cppNamespace = "::hello";
+    let hasConstantMaterializer = 1;
 }
 
 //===----------------------------------------------------------------------===//

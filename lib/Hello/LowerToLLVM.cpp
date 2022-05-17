@@ -21,10 +21,12 @@
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithmeticToLLVM/ArithmeticToLLVM.h"
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
@@ -66,8 +68,9 @@ public:
       auto step = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 1);
       auto loop =
           rewriter.create<mlir::scf::ForOp>(loc, lowerBound, upperBound, step);
-      for (mlir::Operation &nested : *loop.getBody())
+      for (mlir::Operation &nested : *loop.getBody()) {
         rewriter.eraseOp(&nested);
+      }
       loopIvs.push_back(loop.getInductionVar());
 
       // Terminate the loop body.
@@ -140,7 +143,8 @@ private:
 }
 
 namespace {
-class HelloToLLVMLoweringPass : public mlir::PassWrapper<HelloToLLVMLoweringPass, mlir::OperationPass<mlir::ModuleOp>> {
+class HelloToLLVMLoweringPass
+        : public mlir::PassWrapper<HelloToLLVMLoweringPass, mlir::OperationPass<mlir::ModuleOp>> {
 public:
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(HelloToLLVMLoweringPass)
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
@@ -156,20 +160,18 @@ void HelloToLLVMLoweringPass::runOnOperation() {
   target.addLegalOp<mlir::ModuleOp>();
 
   mlir::LLVMTypeConverter typeConverter(&getContext());
-
   mlir::RewritePatternSet patterns(&getContext());
+
   populateAffineToStdConversionPatterns(patterns);
   populateSCFToControlFlowConversionPatterns(patterns);
   mlir::arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);
-  patterns.add<hello::PrintOpLowering>(&getContext());
-  populateFuncToLLVMConversionPatterns(typeConverter, patterns);
-//
-//  mlir::OwningRewritePatternList patterns;
-//  populateAffineToStdConversionPatterns(patterns, &getContext());
-//  populateLoopToStdConversionPatterns(patterns, &getContext());
-//  populateStdToLLVMConversionPatterns(typeConverter, patterns);
 
-//  patterns.insert<hello::PrintOpLowering>(&getContext());
+  mlir::populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
+  mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter, patterns);
+  populateFuncToLLVMConversionPatterns(typeConverter, patterns);
+
+  patterns.add<hello::PrintOpLowering>(&getContext());
+
   auto module = getOperation();
   if (failed(applyFullConversion(module, target, std::move(patterns)))) {
     signalPassFailure();
