@@ -43,3 +43,10 @@ void hello::ConstantOp::build(mlir::OpBuilder &builder, mlir::OperationState &st
   hello::ConstantOp::build(builder, state, dataType, dataAttribute);
 }
 
+mlir::Operation *HelloDialect::materializeConstant(mlir::OpBuilder &builder,
+                                                 mlir::Attribute value,
+                                                 mlir::Type type,
+                                                 mlir::Location loc) {
+    return builder.create<hello::ConstantOp>(loc, type,
+                                      value.cast<mlir::DenseElementsAttr>());
+}

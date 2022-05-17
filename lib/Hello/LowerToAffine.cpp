@@ -122,6 +122,19 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
   }
 };
 
+class PrintOpLowering : public mlir::OpConversionPattern<hello::PrintOp> {
+  using OpConversionPattern<hello::PrintOp>::OpConversionPattern;
+
+  mlir::LogicalResult matchAndRewrite(hello::PrintOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const final {
+      // We don't lower "hello.print" in this pass, but we need to update its
+      // operands.
+      rewriter.updateRootInPlace(op,
+                                 [&] { op->setOperands(adaptor.getOperands()); });
+      return mlir::success();
+  }
+};
+
 namespace {
 class HelloToAffineLowerPass : public mlir::PassWrapper<HelloToAffineLowerPass, mlir::OperationPass<mlir::ModuleOp>> {
 public:
@@ -141,10 +154,13 @@ void HelloToAffineLowerPass::runOnOperation() {
   target.addIllegalDialect<hello::HelloDialect>();
   target.addLegalDialect<mlir::AffineDialect, mlir::BuiltinDialect,
     mlir::func::FuncDialect, mlir::arith::ArithmeticDialect, mlir::memref::MemRefDialect>();
-  target.addLegalOp<hello::PrintOp>();
+  target.addDynamicallyLegalOp<hello::PrintOp>([](hello::PrintOp op) {
+      return llvm::none_of(op->getOperandTypes(),
+                           [](mlir::Type type) { return type.isa<mlir::TensorType>(); });
+  });
 
   mlir::RewritePatternSet patterns(&getContext());
-  patterns.add<ConstantOpLowering>(&getContext());
+  patterns.add<ConstantOpLowering, PrintOpLowering>(&getContext());
 
   if (mlir::failed(mlir::applyPartialConversion(getOperation(), target, std::move(patterns)))) {
     signalPassFailure();
