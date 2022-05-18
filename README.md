@@ -42,8 +42,8 @@ $ ./build/bin/hello-opt ./test/Hello/print.mlir > /path/to/print.ll
 # Execute the code with LLVM interpreter
 $ lli /path/to/print.ll 
 
-1.000000 1.000000 1.000000
-1.000000 1.000000 1.000000
+1.000000 2.000000 3.000000
+4.000000 5.000000 6.000000
 ```
 
 ## Operations
@@ -62,11 +62,15 @@ to the operation as an attribute. For example:
   : () -> tensor<2x3xf64>
 ```
 
+Interfaces: NoSideEffect (MemoryEffectOpInterface)
+
+Effects: MemoryEffects::Effect{}
+
 #### Attributes:
 
 | Attribute | MLIR Type | Description |
 | :-------: | :-------: | ----------- |
-`value` | ::mlir::DenseElementsAttr | 64-bit float elements attribute
+| `value` | ::mlir::DenseElementsAttr | 64-bit float elements attribute
 
 #### Results:
 
@@ -88,13 +92,13 @@ operation ::= `hello.print` $input attr-dict `:` type($input)
 The "print" builtin operation prints a given input tensor, and produces
 no results.
 
+Interfaces: NoSideEffect (MemoryEffectOpInterface)
+
+Effects: MemoryEffects::Effect{}
+
 #### Operands:
 
 | Operand | Description |
 | :-----: | ----------- |
-`input` | tensor of 64-bit float values or memref of 64-bit float values
+| `input` | tensor of 64-bit float values or memref of 64-bit float values
 
-
-# TODO
-
-- Pass all FileCheck test cases
