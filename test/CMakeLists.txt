@@ -7,6 +7,7 @@ configure_lit_site_cfg(
 
 set(HELLO_TEST_DEPENDS
         FileCheck count not
+        mlir-opt
         hello-opt
         )
 
