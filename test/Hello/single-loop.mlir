@@ -20,7 +20,7 @@
 // CHECK: }
 
 module {
-  func @main() {
+  func.func @main() {
     %A = memref.alloc() : memref<3xf32>
 
     affine.for %i = 0 to 2 {
