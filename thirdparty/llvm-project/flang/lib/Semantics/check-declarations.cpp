@@ -198,6 +198,12 @@ void CheckHelper::Check(
 }
 
 void CheckHelper::Check(const Symbol &symbol) {
+  if (symbol.name().size() > common::maxNameLen) {
+    messages_.Say(symbol.name(),
+        "%s has length %d, which is greater than the maximum name length "
+        "%d"_port_en_US,
+        symbol.name(), symbol.name().size(), common::maxNameLen);
+  }
   if (context_.HasError(symbol)) {
     return;
   }
@@ -457,6 +463,17 @@ void CheckHelper::CheckObjectEntity(
   CheckArraySpec(symbol, details.shape());
   Check(details.shape());
   Check(details.coshape());
+  if (details.shape().Rank() > common::maxRank) {
+    messages_.Say(
+        "'%s' has rank %d, which is greater than the maximum supported rank %d"_err_en_US,
+        symbol.name(), details.shape().Rank(), common::maxRank);
+  } else if (details.shape().Rank() + details.coshape().Rank() >
+      common::maxRank) {
+    messages_.Say(
+        "'%s' has rank %d and corank %d, whose sum is greater than the maximum supported rank %d"_err_en_US,
+        symbol.name(), details.shape().Rank(), details.coshape().Rank(),
+        common::maxRank);
+  }
   CheckAssumedTypeEntity(symbol, details);
   WarnMissingFinal(symbol);
   if (!details.coshape().empty()) {
@@ -880,14 +897,9 @@ void CheckHelper::CheckSubprogram(
     if (subprogram) {
       subprogramDetails = subprogram->detailsIf<SubprogramDetails>();
     }
-    if (entryScope->kind() != Scope::Kind::Subprogram) {
-      error = "ENTRY may appear only in a subroutine or function"_err_en_US;
-    } else if (!(entryScope->parent().IsGlobal() ||
-                   entryScope->parent().IsModule() ||
-                   entryScope->parent().IsSubmodule())) {
+    if (!(entryScope->parent().IsGlobal() || entryScope->parent().IsModule() ||
+            entryScope->parent().IsSubmodule())) {
       error = "ENTRY may not appear in an internal subprogram"_err_en_US;
-    } else if (FindSeparateModuleSubprogramInterface(subprogram)) {
-      error = "ENTRY may not appear in a separate module procedure"_err_en_US;
     } else if (subprogramDetails && details.isFunction() &&
         subprogramDetails->isFunction() &&
         !context_.HasError(details.result()) &&
@@ -1711,8 +1723,17 @@ void CheckHelper::Check(const Scope &scope) {
     for (const auto &pair : scope) {
       Check(*pair.second);
     }
+    int mainProgCnt{0};
     for (const Scope &child : scope.children()) {
       Check(child);
+      // A program shall consist of exactly one main program (5.2.2).
+      if (child.kind() == Scope::Kind::MainProgram) {
+        ++mainProgCnt;
+        if (mainProgCnt > 1) {
+          messages_.Say(child.sourceRange(),
+              "A source file cannot contain more than one main program"_err_en_US);
+        }
+      }
     }
     if (scope.kind() == Scope::Kind::BlockData) {
       CheckBlockData(scope);
@@ -1786,8 +1807,13 @@ void CheckHelper::CheckGenericOps(const Scope &scope) {
   auto addSpecifics{[&](const Symbol &generic) {
     const auto *details{generic.GetUltimate().detailsIf<GenericDetails>()};
     if (!details) {
-      if (generic.test(Symbol::Flag::Function)) {
-        Characterize(generic);
+      // Not a generic; ensure characteristics are defined if a function.
+      auto restorer{messages_.SetLocation(generic.name())};
+      if (IsFunction(generic) && !context_.HasError(generic)) {
+        if (const Symbol * result{FindFunctionResult(generic)};
+            result && !context_.HasError(*result)) {
+          Characterize(generic);
+        }
       }
       return;
     }
@@ -1799,8 +1825,8 @@ void CheckHelper::CheckGenericOps(const Scope &scope) {
     const std::vector<SourceName> &bindingNames{details->bindingNames()};
     for (std::size_t i{0}; i < specifics.size(); ++i) {
       const Symbol &specific{*specifics[i]};
+      auto restorer{messages_.SetLocation(bindingNames[i])};
       if (const Procedure * proc{Characterize(specific)}) {
-        auto restorer{messages_.SetLocation(bindingNames[i])};
         if (kind.IsAssignment()) {
           if (!CheckDefinedAssignment(specific, *proc)) {
             continue;
@@ -1831,7 +1857,9 @@ void CheckHelper::CheckGenericOps(const Scope &scope) {
 
 static const std::string *DefinesBindCName(const Symbol &symbol) {
   const auto *subp{symbol.detailsIf<SubprogramDetails>()};
-  if ((subp && !subp->isInterface()) || symbol.has<ObjectEntityDetails>()) {
+  if ((subp && !subp->isInterface() &&
+          ClassifyProcedure(symbol) != ProcedureDefinitionClass::Internal) ||
+      symbol.has<ObjectEntityDetails>()) {
     // Symbol defines data or entry point
     return symbol.GetBindName();
   } else {

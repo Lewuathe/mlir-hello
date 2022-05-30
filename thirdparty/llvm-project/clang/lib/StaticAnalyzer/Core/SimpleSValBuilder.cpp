@@ -104,6 +104,23 @@ SVal SimpleSValBuilder::evalComplement(NonLoc X) {
   }
 }
 
+// Checks if the negation the value and flipping sign preserve
+// the semantics on the operation in the resultType
+static bool isNegationValuePreserving(const llvm::APSInt &Value,
+                                      APSIntType ResultType) {
+  const unsigned ValueBits = Value.getSignificantBits();
+  if (ValueBits == ResultType.getBitWidth()) {
+    // The value is the lowest negative value that is representable
+    // in signed integer with bitWith of result type. The
+    // negation is representable if resultType is unsigned.
+    return ResultType.isUnsigned();
+  }
+
+  // If resultType bitWith is higher that number of bits required
+  // to represent RHS, the sign flip produce same value.
+  return ValueBits < ResultType.getBitWidth();
+}
+
 //===----------------------------------------------------------------------===//
 // Transfer function for binary operators.
 //===----------------------------------------------------------------------===//
@@ -202,22 +219,14 @@ SVal SimpleSValBuilder::MakeSymIntVal(const SymExpr *LHS,
     // Adjust addition/subtraction of negative value, to
     // subtraction/addition of the negated value.
     APSIntType resultIntTy = BasicVals.getAPSIntType(resultTy);
-    assert(resultIntTy.getBitWidth() >= RHS.getBitWidth() &&
-           "The result operation type must have at least the same "
-           "number of bits as its operands.");
-
-    llvm::APSInt ConvertedRHSValue = resultIntTy.convert(RHS);
-    // Check if the negation of the RHS is representable:
-    // * if resultIntTy is unsigned, then negation is always representable
-    // * if resultIntTy is signed, and RHS is not the lowest representable
-    //   signed value
-    if (resultIntTy.isUnsigned() || !ConvertedRHSValue.isMinSignedValue()) {
-      ConvertedRHS = &BasicVals.getValue(-ConvertedRHSValue);
+    if (isNegationValuePreserving(RHS, resultIntTy)) {
+      ConvertedRHS = &BasicVals.getValue(-resultIntTy.convert(RHS));
       op = (op == BO_Add) ? BO_Sub : BO_Add;
+    } else {
+      ConvertedRHS = &BasicVals.Convert(resultTy, RHS);
     }
-  } else {
+  } else
     ConvertedRHS = &BasicVals.Convert(resultTy, RHS);
-  }
 
   return makeNonLoc(LHS, op, *ConvertedRHS, resultTy);
 }
@@ -675,7 +684,6 @@ SVal SimpleSValBuilder::evalBinOpNN(ProgramStateRef state,
               assert(newRHS && "Invalid operation despite common type!");
               rhs = nonloc::ConcreteInt(*newRHS);
               lhs = nonloc::SymbolVal(symIntExpr->getLHS());
-
               continue;
             }
           }

@@ -275,13 +275,13 @@ defm : X86WriteRes<WriteFMoveX,        [Zn2FPU], 1, [1], 1>;
 defm : X86WriteRes<WriteFMoveY,        [Zn2FPU], 1, [1], 1>;
 defm : X86WriteResUnsupported<WriteFMoveZ>;
 
-defm : Zn2WriteResFpuPair<WriteFAdd,      [Zn2FPU0],  3>;
-defm : Zn2WriteResFpuPair<WriteFAddX,     [Zn2FPU0],  3>;
-defm : Zn2WriteResFpuPair<WriteFAddY,     [Zn2FPU0],  3>;
+defm : Zn2WriteResFpuPair<WriteFAdd,      [Zn2FPU23], 3>;
+defm : Zn2WriteResFpuPair<WriteFAddX,     [Zn2FPU23], 3>;
+defm : Zn2WriteResFpuPair<WriteFAddY,     [Zn2FPU23], 3>;
 defm : X86WriteResPairUnsupported<WriteFAddZ>;
-defm : Zn2WriteResFpuPair<WriteFAdd64,    [Zn2FPU0],  3>;
-defm : Zn2WriteResFpuPair<WriteFAdd64X,   [Zn2FPU0],  3>;
-defm : Zn2WriteResFpuPair<WriteFAdd64Y,   [Zn2FPU0],  3>;
+defm : Zn2WriteResFpuPair<WriteFAdd64,    [Zn2FPU23], 3>;
+defm : Zn2WriteResFpuPair<WriteFAdd64X,   [Zn2FPU23], 3>;
+defm : Zn2WriteResFpuPair<WriteFAdd64Y,   [Zn2FPU23], 3>;
 defm : X86WriteResPairUnsupported<WriteFAdd64Z>;
 defm : Zn2WriteResFpuPair<WriteFCmp,      [Zn2FPU01], 1>;
 defm : Zn2WriteResFpuPair<WriteFCmpX,     [Zn2FPU01], 1>;
@@ -1104,11 +1104,11 @@ def : InstRW<[WriteMicrocoded], (instregex "VPGATHER(Q|D)(Q|D)(Y?)rm")>;
 
 // HADD, HSUB PS/PD
 // PHADD|PHSUB (S) W/D.
-defm : Zn2WriteResPair<WriteFHAdd, [], 7>;
-defm : Zn2WriteResPair<WriteFHAddY, [], 7>;
-defm : Zn2WriteResPair<WritePHAdd, [], 3>;
-defm : Zn2WriteResPair<WritePHAddX, [], 3>;
-defm : Zn2WriteResPair<WritePHAddY, [], 3>;
+defm : Zn2WriteResFpuPair<WriteFHAdd, [], 7>;
+defm : Zn2WriteResFpuPair<WriteFHAddY, [], 7>;
+defm : Zn2WriteResFpuPair<WritePHAdd, [], 3>;
+defm : Zn2WriteResFpuPair<WritePHAddX, [], 3>;
+defm : Zn2WriteResFpuPair<WritePHAddY, [], 3>;
 
 // PCMPGTQ.
 def Zn2WritePCMPGTQr : SchedWriteRes<[Zn2FPU03]>;

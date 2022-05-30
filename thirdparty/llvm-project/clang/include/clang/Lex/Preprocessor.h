@@ -1280,13 +1280,10 @@ public:
   StringRef getLastMacroWithSpelling(SourceLocation Loc,
                                      ArrayRef<TokenValue> Tokens) const;
 
-  const std::string &getPredefines() const { return Predefines; }
-
   /// Set the predefines for this Preprocessor.
   ///
   /// These predefines are automatically injected when parsing the main file.
-  void setPredefines(const char *P) { Predefines = P; }
-  void setPredefines(StringRef P) { Predefines = std::string(P); }
+  void setPredefines(std::string P) { Predefines = std::move(P); }
 
   /// Return information about the specified preprocessor
   /// identifier token.
@@ -2241,6 +2238,16 @@ private:
   /// Return true if an error occurs parsing the arg list.
   bool ReadMacroParameterList(MacroInfo *MI, Token& LastTok);
 
+  /// Provide a suggestion for a typoed directive. If there is no typo, then
+  /// just skip suggesting.
+  ///
+  /// \param Tok - Token that represents the directive
+  /// \param Directive - String reference for the directive name
+  /// \param EndLoc - End location for fixit
+  void SuggestTypoedDirective(const Token &Tok,
+                              StringRef Directive,
+                              const SourceLocation &EndLoc) const;
+
   /// We just read a \#if or related directive and decided that the
   /// subsequent tokens are in the \#if'd out portion of the
   /// file.  Lex the rest of the file, until we see an \#endif.  If \p
@@ -2579,6 +2586,10 @@ public:
         !SourceMgr.isInMainFile(Identifier.getLocation()))
       emitRestrictExpansionWarning(Identifier);
   }
+
+  static void processPathForFileMacro(SmallVectorImpl<char> &Path,
+                                      const LangOptions &LangOpts,
+                                      const TargetInfo &TI);
 
 private:
   void emitMacroDeprecationWarning(const Token &Identifier) const;

@@ -267,6 +267,14 @@ generic-static)
                    -DLIBUNWIND_TEST_CONFIG="llvm-libunwind-static.cfg.in"
     check-runtimes
 ;;
+generic-merged)
+    clean
+    generate-cmake -C "${MONOREPO_ROOT}/libcxx/cmake/caches/Generic-merged.cmake" \
+                   -DLIBCXX_TEST_CONFIG="llvm-libc++-shared.cfg.in" \
+                   -DLIBCXXABI_TEST_CONFIG="llvm-libc++abi-merged.cfg.in" \
+                   -DLIBUNWIND_TEST_CONFIG="llvm-libunwind-merged.cfg.in"
+    check-runtimes
+;;
 generic-clang-13)
     export CC=clang-13
     export CXX=clang++-13
@@ -576,6 +584,15 @@ mingw-static)
           -C "${MONOREPO_ROOT}/libcxx/cmake/caches/MinGW.cmake" \
           -DLIBCXX_ENABLE_SHARED=OFF \
           -DLIBUNWIND_ENABLE_SHARED=OFF
+    echo "+++ Running the libc++ tests"
+    ${NINJA} -vC "${BUILD_DIR}" check-cxx
+;;
+mingw-dll-i686)
+    clean
+    generate-cmake \
+          -DCMAKE_C_COMPILER=i686-w64-mingw32-clang \
+          -DCMAKE_CXX_COMPILER=i686-w64-mingw32-clang++ \
+          -C "${MONOREPO_ROOT}/libcxx/cmake/caches/MinGW.cmake"
     echo "+++ Running the libc++ tests"
     ${NINJA} -vC "${BUILD_DIR}" check-cxx
 ;;

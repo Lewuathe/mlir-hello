@@ -42,7 +42,22 @@ New Features
 
 - Implemented P1165R1 (Make stateful allocator propagation more consistent for ``operator+(basic_string)``)
 
-- Implemented P0674R1 (Support arrays in make_shared and allocate_shared)
+- Implemented P0674R1 (Support arrays in ``make_shared`` and ``allocate_shared``)
+
+- Implemented P0980R1 (Making ``std::string`` constexpr)
+
+- Marked the following papers as "Complete" (note that some of those might have
+  been implemented in a previous release but not marked as such):
+
+    - P1207R4 (Movability of Single-pass Iterators);
+    - P1474R1 (Helpful pointers for ``ContiguousIterator``);
+    - P1522R1 (Iterator Difference Type and Integer Overflow);
+    - P1523R1 (Views and Size Types);
+    - P1456R1 (Move-only views);
+    - P1870R1 (``forwarding-range`` is too subtle);
+    - P1878R1 (Constraining Readable Types);
+    - P1970R2 (Consistency for ``size()`` functions: Add ``ranges::ssize``);
+    - P1983R0 (Wording for GB301, US296, US292, US291, and US283).
 
 - `pop_heap` now uses an algorithm known as "bottom-up heapsort" or
   "heapsort with bounce" to reduce the number of comparisons, and rearranges
@@ -102,8 +117,8 @@ ABI Changes
   ``_LIBCPP_ABI_USE_CXX03_NULLPTR_EMULATION`` will not be honoured anymore and there
   will be no way to opt back into the C++03 emulation of ``std::nullptr_t``.
 
-- On FreeBSD, NetBSD and DragonFlyBSD, ``std::random_device`` is now implemented on top of
-  ``arc4random()`` instead of reading from ``/dev/urandom``. Any implementation-defined
+- On FreeBSD, NetBSD, DragonFlyBSD and Solaris, ``std::random_device`` is now implemented on
+  top of ``arc4random()`` instead of reading from ``/dev/urandom``. Any implementation-defined
   token used when constructing a ``std::random_device`` will now be ignored instead of
   interpreted as a file to read entropy from.
 

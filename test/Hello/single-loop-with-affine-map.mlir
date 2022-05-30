@@ -3,7 +3,7 @@
 #map1 = affine_map<(d0) -> (d0+1)>
 
 module {
-  func @main() {
+  func.func @main() {
     %A = memref.alloc() : memref<10xf32>
 
     affine.for %i = 0 to 10 {

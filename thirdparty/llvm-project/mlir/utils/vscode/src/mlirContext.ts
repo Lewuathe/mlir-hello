@@ -42,6 +42,8 @@ export class MLIRContext implements vscode.Disposable {
         serverSettingName = 'server_path';
       } else if (document.languageId === 'pdll') {
         serverSettingName = 'pdll_server_path';
+      } else if (document.languageId === 'tablegen') {
+        serverSettingName = 'tablegen_server_path';
       } else {
         return;
       }
@@ -68,7 +70,9 @@ export class MLIRContext implements vscode.Disposable {
       }
     };
     // Process any existing documents.
-    vscode.workspace.textDocuments.forEach(startClientOnOpenDocument);
+    for (const textDoc of vscode.workspace.textDocuments) {
+      await startClientOnOpenDocument(textDoc);
+    }
 
     // Watch any new documents to spawn servers when necessary.
     this.subscriptions.push(
@@ -265,6 +269,9 @@ export class MLIRContext implements vscode.Disposable {
     }
     if (serverSettingName === 'server_path') {
       return 'mlir-lsp-server';
+    }
+    if (serverSettingName === 'tablegen_server_path') {
+      return 'tblgen-lsp-server';
     }
     return '';
   }

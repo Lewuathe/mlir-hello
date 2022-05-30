@@ -312,7 +312,7 @@ public:
 
   bool isTypeLegal(Type *Ty) const { return false; }
 
-  InstructionCost getRegUsageForType(Type *Ty) const { return 1; }
+  unsigned getRegUsageForType(Type *Ty) const { return 1; }
 
   bool shouldBuildLookupTables() const { return true; }
 
@@ -417,13 +417,17 @@ public:
   Optional<unsigned> getMaxVScale() const { return None; }
   Optional<unsigned> getVScaleForTuning() const { return None; }
 
-  bool shouldMaximizeVectorBandwidth() const { return false; }
+  bool
+  shouldMaximizeVectorBandwidth(TargetTransformInfo::RegisterKind K) const {
+    return false;
+  }
 
   ElementCount getMinimumVF(unsigned ElemWidth, bool IsScalable) const {
     return ElementCount::get(0, IsScalable);
   }
 
   unsigned getMaximumVF(unsigned ElemWidth, unsigned Opcode) const { return 0; }
+  unsigned getStoreMinimumVF(unsigned VF, Type *, Type *) const { return VF; }
 
   bool shouldConsiderAddressTypePromotion(
       const Instruction &I, bool &AllowPromotionWithoutCommonHeader) const {

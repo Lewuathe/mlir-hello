@@ -17,7 +17,8 @@ class GCNPredicateControl : PredicateControl {
 }
 
 // Except for the NONE field, this must be kept in sync with the
-// SIEncodingFamily enum in AMDGPUInstrInfo.cpp
+// SIEncodingFamily enum in SIInstrInfo.cpp and the columns of the
+// getMCOpcodeGen table.
 def SIEncodingFamily {
   int NONE = -1;
   int SI = 0;
@@ -30,6 +31,7 @@ def SIEncodingFamily {
   int SDWA10 = 7;
   int GFX90A = 8;
   int GFX940 = 9;
+  int GFX11 = 10;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1036,6 +1038,12 @@ def DepCtrMatchClass : AsmOperandClass {
   let ParserMethod = "parseDepCtrOps";
 }
 
+def SDelayMatchClass : AsmOperandClass {
+  let Name = "SDelayAlu";
+  let RenderMethod = "addImmOperands";
+  let ParserMethod = "parseSDelayAluOps";
+}
+
 def VReg32OrOffClass : AsmOperandClass {
   let Name = "VReg32OrOff";
   let ParserMethod = "parseVReg32OrOff";
@@ -1065,6 +1073,11 @@ def WAIT_FLAG : Operand <i32> {
 def DepCtrImm : Operand <i32> {
   let ParserMatchClass = DepCtrMatchClass;
   let PrintMethod = "printDepCtr";
+}
+
+def DELAY_FLAG : Operand <i32> {
+  let ParserMatchClass = SDelayMatchClass;
+  let PrintMethod = "printDelayFlag";
 }
 } // End OperandType = "OPERAND_IMMEDIATE"
 
@@ -1277,6 +1290,8 @@ def hwreg : NamedOperandU32<"Hwreg", NamedMatchClass<"Hwreg", 0>>;
 def exp_tgt : NamedOperandU32<"ExpTgt", NamedMatchClass<"ExpTgt", 0>> {
 
 }
+
+def wait_vdst : NamedOperandU8<"WaitVDST", NamedMatchClass<"WaitVDST">>;
 
 } // End OperandType = "OPERAND_IMMEDIATE"
 
@@ -2579,6 +2594,7 @@ def getMCOpcodeGen : InstrMapping {
   let RowFields = ["PseudoInstr"];
   let ColFields = ["Subtarget"];
   let KeyCol = [!cast<string>(SIEncodingFamily.NONE)];
+  // These columns must be kept in sync with the SIEncodingFamily enumeration.
   let ValueCols = [[!cast<string>(SIEncodingFamily.SI)],
                    [!cast<string>(SIEncodingFamily.VI)],
                    [!cast<string>(SIEncodingFamily.SDWA)],
@@ -2592,7 +2608,8 @@ def getMCOpcodeGen : InstrMapping {
                    [!cast<string>(SIEncodingFamily.GFX10)],
                    [!cast<string>(SIEncodingFamily.SDWA10)],
                    [!cast<string>(SIEncodingFamily.GFX90A)],
-                   [!cast<string>(SIEncodingFamily.GFX940)]];
+                   [!cast<string>(SIEncodingFamily.GFX940)],
+                   [!cast<string>(SIEncodingFamily.GFX11)]];
 }
 
 // Get equivalent SOPK instruction.
@@ -2618,14 +2635,6 @@ def getIfAddr64Inst : InstrMapping {
   let ColFields = ["IsAddr64"];
   let KeyCol = ["1"];
   let ValueCols = [["1"]];
-}
-
-def getMUBUFNoLdsInst : InstrMapping {
-  let FilterClass = "MUBUFLdsTable";
-  let RowFields = ["OpName"];
-  let ColFields = ["IsLds"];
-  let KeyCol = ["1"];
-  let ValueCols = [["0"]];
 }
 
 // Maps an atomic opcode to its returnless version.

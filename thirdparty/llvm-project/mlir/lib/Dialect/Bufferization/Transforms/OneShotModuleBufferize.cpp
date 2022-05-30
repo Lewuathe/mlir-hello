@@ -32,7 +32,7 @@
 // Example: `foo` fails bufferization because %0 is not equivalent to any bbArg.
 // ```
 // func @foo() -> tensor<?xf32> {
-//   %0 = linalg.init_tensor [...] : tensor<?xf32>
+//   %0 = bufferization.alloc_tensor(...) : tensor<?xf32>
 //   return %0 : tensor<?xf32>
 // }
 // ```
@@ -105,6 +105,8 @@ static FuncAnalysisState &getFuncAnalysisState(AnalysisState &state) {
 }
 
 /// Return the state (phase) of analysis of the FuncOp.
+/// Used for debug modes.
+LLVM_ATTRIBUTE_UNUSED
 static FuncOpAnalysisState getFuncOpAnalysisState(const AnalysisState &state,
                                                   func::FuncOp funcOp) {
   const FuncAnalysisState &funcState = getFuncAnalysisState(state);
@@ -342,10 +344,8 @@ getFuncOpsOrderedByCalls(ModuleOp moduleOp,
         return callOp->emitError() << "expected a CallOp";
       func::FuncOp calledFunction = getCalledFunction(callOp);
       assert(calledFunction && "could not retrieved called func::FuncOp");
-      auto it = callerMap.try_emplace(calledFunction, DenseSet<Operation *>{});
-      it.first->getSecond().insert(callOp);
-      if (calledBy[calledFunction].count(funcOp) == 0) {
-        calledBy[calledFunction].insert(funcOp);
+      callerMap[calledFunction].insert(callOp);
+      if (calledBy[calledFunction].insert(funcOp).second) {
         numberCallOpsContainedInFuncOp[funcOp]++;
       }
       return WalkResult::advance();
@@ -471,7 +471,10 @@ LogicalResult mlir::bufferization::runOneShotModuleBufferize(
     // would be invalidated.
     if (failed(bufferizeOp(funcOp, bufferizationState)))
       return failure();
-    foldMemRefCasts(funcOp);
+    // Change buffer return types to more precise layout maps.
+    if (options.functionBoundaryTypeConversion ==
+        BufferizationOptions::LayoutMapOption::InferLayoutMap)
+      foldMemRefCasts(funcOp);
   }
 
   // Check result.

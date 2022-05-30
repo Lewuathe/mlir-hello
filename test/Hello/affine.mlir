@@ -2,7 +2,7 @@
 
 // CHECK: llvm.func @main() -> f32
 module {
-  func @main() -> f32 {
+  func.func @main() -> f32 {
     %A = memref.alloc() : memref<2x3xf32>
     %B = memref.alloc() : memref<2x3xf32>
 

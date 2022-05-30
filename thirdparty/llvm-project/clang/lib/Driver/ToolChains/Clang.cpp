@@ -468,8 +468,8 @@ static bool addExceptionArgs(const ArgList &Args, types::ID InputType,
 
   if (types::isCXX(InputType)) {
     // Disable C++ EH by default on XCore and PS4/PS5.
-    bool CXXExceptionsEnabled =
-        Triple.getArch() != llvm::Triple::xcore && !Triple.isPS();
+    bool CXXExceptionsEnabled = Triple.getArch() != llvm::Triple::xcore &&
+                                !Triple.isPS() && !Triple.isDriverKit();
     Arg *ExceptionArg = Args.getLastArg(
         options::OPT_fcxx_exceptions, options::OPT_fno_cxx_exceptions,
         options::OPT_fexceptions, options::OPT_fno_exceptions);
@@ -1308,6 +1308,7 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
   // If we are offloading to a target via OpenMP we need to include the
   // openmp_wrappers folder which contains alternative system headers.
   if (JA.isDeviceOffloading(Action::OFK_OpenMP) &&
+      !Args.hasArg(options::OPT_nostdinc) &&
       (getToolChain().getTriple().isNVPTX() ||
        getToolChain().getTriple().isAMDGCN())) {
     if (!Args.hasArg(options::OPT_nobuiltininc)) {
@@ -1485,6 +1486,9 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
 
   addMacroPrefixMapArg(D, Args, CmdArgs);
   addCoveragePrefixMapArg(D, Args, CmdArgs);
+
+  Args.AddLastArg(CmdArgs, options::OPT_ffile_reproducible,
+                  options::OPT_fno_file_reproducible);
 }
 
 // FIXME: Move to target hook.
@@ -3471,7 +3475,9 @@ static void RenderOpenCLOptions(const ArgList &Args, ArgStringList &CmdArgs,
 
 static void RenderHLSLOptions(const ArgList &Args, ArgStringList &CmdArgs,
                               types::ID InputType) {
-  const unsigned ForwardedArguments[] = {options::OPT_dxil_validator_version};
+  const unsigned ForwardedArguments[] = {options::OPT_dxil_validator_version,
+                                         options::OPT_S, options::OPT_emit_llvm,
+                                         options::OPT_disable_llvm_passes};
 
   for (const auto &Arg : ForwardedArguments)
     if (const auto *A = Args.getLastArg(Arg))
@@ -4403,8 +4409,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       (JA.isHostOffloading(Action::OFK_OpenMP) &&
        Args.hasFlag(options::OPT_fopenmp_new_driver,
                     options::OPT_no_offload_new_driver, true)) ||
-      Args.hasFlag(options::OPT_offload_new_driver,
-                   options::OPT_no_offload_new_driver, false);
+      (JA.isHostOffloading(C.getActiveOffloadKinds()) &&
+       Args.hasFlag(options::OPT_offload_new_driver,
+                    options::OPT_no_offload_new_driver, false));
+
   bool IsUsingLTO = D.isUsingLTO(IsDeviceOffloadAction);
   auto LTOMode = D.getLTOMode(IsDeviceOffloadAction);
 
@@ -5985,7 +5993,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // FIXME: There's no reason for this to be restricted to X86. The backend
     // code needs to be changed to include the appropriate function calls
     // automatically.
-    if (!Triple.isX86())
+    if (!Triple.isX86() && !Triple.isAArch64())
       D.Diag(diag::err_drv_unsupported_opt_for_target)
           << A->getAsString(Args) << TripleStr;
   }
@@ -6081,6 +6089,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     Args.addOptOutFlag(CmdArgs, options::OPT_fopenmp_extensions,
                        options::OPT_fno_openmp_extensions);
   }
+
+  // Forward the new driver to change offloading code generation.
+  if (Args.hasArg(options::OPT_offload_new_driver))
+    CmdArgs.push_back("--offload-new-driver");
 
   SanitizeArgs.addArgs(TC, Args, CmdArgs, InputType);
 
@@ -6268,6 +6280,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-fgpu-defer-diag");
     }
   }
+
+  // Forward -nogpulib to -cc1.
+  if (Args.hasArg(options::OPT_nogpulib))
+    CmdArgs.push_back("-nogpulib");
 
   if (Arg *A = Args.getLastArg(options::OPT_fcf_protection_EQ)) {
     CmdArgs.push_back(
@@ -6977,22 +6993,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Host-side offloading recieves the device object files and embeds it in a
   // named section including the associated target triple and architecture.
-  for (const InputInfo Input : HostOffloadingInputs) {
-    const Action *OffloadAction = Input.getAction();
-    const ToolChain *TC = OffloadAction->getOffloadingToolChain();
-    const ArgList &TCArgs =
-        C.getArgsForToolChain(TC, OffloadAction->getOffloadingArch(),
-                              OffloadAction->getOffloadingDeviceKind());
-    StringRef File = C.getArgs().MakeArgString(TC->getInputFilename(Input));
-    StringRef Arch = (OffloadAction->getOffloadingArch())
-                         ? OffloadAction->getOffloadingArch()
-                         : TCArgs.getLastArgValue(options::OPT_march_EQ);
-
-    CmdArgs.push_back(Args.MakeArgString(
-        "-fembed-offload-object=" + File + "," +
-        Action::GetOffloadKindName(OffloadAction->getOffloadingDeviceKind()) +
-        "," + TC->getTripleString() + "," + Arch));
-  }
+  for (const InputInfo Input : HostOffloadingInputs)
+    CmdArgs.push_back(Args.MakeArgString("-fembed-offload-object=" +
+                                         TC.getInputFilename(Input)));
 
   if (Triple.isAMDGPU()) {
     handleAMDGPUCodeObjectVersionOptions(D, Args, CmdArgs);
@@ -7004,20 +7007,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // For all the host OpenMP offloading compile jobs we need to pass the targets
   // information using -fopenmp-targets= option.
   if (JA.isHostOffloading(Action::OFK_OpenMP)) {
-    SmallString<128> TargetInfo("-fopenmp-targets=");
+    SmallString<128> Targets("-fopenmp-targets=");
 
-    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
-    assert(Tgts && Tgts->getNumValues() &&
-           "OpenMP offloading has to have targets specified.");
-    for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
-      if (i)
-        TargetInfo += ',';
-      // We need to get the string from the triple because it may be not exactly
-      // the same as the one we get directly from the arguments.
-      llvm::Triple T(Tgts->getValue(i));
-      TargetInfo += T.getTriple();
-    }
-    CmdArgs.push_back(Args.MakeArgString(TargetInfo.str()));
+    SmallVector<std::string, 4> Triples;
+    auto TCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
+    std::transform(TCRange.first, TCRange.second, std::back_inserter(Triples),
+                   [](auto TC) { return TC.second->getTripleString(); });
+    CmdArgs.push_back(Args.MakeArgString(Targets + llvm::join(Triples, ",")));
   }
 
   bool VirtualFunctionElimination =
@@ -7593,6 +7589,11 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
   CmdArgs.push_back("-fno-dllexport-inlines");
  }
 
+ if (Args.hasFlag(options::OPT__SLASH_Zc_wchar_t_,
+                  options::OPT__SLASH_Zc_wchar_t, false)) {
+   CmdArgs.push_back("-fno-wchar");
+ }
+
   Arg *MostGeneralArg = Args.getLastArg(options::OPT__SLASH_vmg);
   Arg *BestCaseArg = Args.getLastArg(options::OPT__SLASH_vmb);
   if (MostGeneralArg && BestCaseArg)
@@ -7867,7 +7868,6 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
                           llvm::DebuggerKind::Default);
   renderDwarfFormat(D, Triple, Args, CmdArgs, DwarfVersion);
   RenderDebugInfoCompressionArgs(Args, CmdArgs, D, getToolChain());
-
 
   // Handle -fPIC et al -- the relocation-model affects the assembler
   // for some targets.
@@ -8236,6 +8236,42 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs, Inputs, Output));
 }
 
+void OffloadPackager::ConstructJob(Compilation &C, const JobAction &JA,
+                                   const InputInfo &Output,
+                                   const InputInfoList &Inputs,
+                                   const llvm::opt::ArgList &Args,
+                                   const char *LinkingOutput) const {
+  ArgStringList CmdArgs;
+
+  // Add the output file name.
+  assert(Output.isFilename() && "Invalid output.");
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(Output.getFilename());
+
+  // Create the inputs to bundle the needed metadata.
+  for (const InputInfo &Input : Inputs) {
+    const Action *OffloadAction = Input.getAction();
+    const ToolChain *TC = OffloadAction->getOffloadingToolChain();
+    const ArgList &TCArgs =
+        C.getArgsForToolChain(TC, OffloadAction->getOffloadingArch(),
+                              OffloadAction->getOffloadingDeviceKind());
+    StringRef File = C.getArgs().MakeArgString(TC->getInputFilename(Input));
+    StringRef Arch = (OffloadAction->getOffloadingArch())
+                         ? OffloadAction->getOffloadingArch()
+                         : TCArgs.getLastArgValue(options::OPT_march_EQ);
+
+    CmdArgs.push_back(Args.MakeArgString(
+        "--image=file=" + File + "," + "triple=" + TC->getTripleString() + "," +
+        "arch=" + Arch + "," + "kind=" +
+        Action::GetOffloadKindName(OffloadAction->getOffloadingDeviceKind())));
+  }
+
+  C.addCommand(std::make_unique<Command>(
+      JA, *this, ResponseFileSupport::None(),
+      Args.MakeArgString(getToolChain().GetProgramPath(getShortName())),
+      CmdArgs, Inputs, Output));
+}
+
 void LinkerWrapper::ConstructJob(Compilation &C, const JobAction &JA,
                                  const InputInfo &Output,
                                  const InputInfoList &Inputs,
@@ -8297,28 +8333,6 @@ void LinkerWrapper::ConstructJob(Compilation &C, const JobAction &JA,
         CmdArgs.push_back(
             Args.MakeArgString("-target-feature=" + TC->getTripleString() +
                                "=" + *(FeatureIt + 1)));
-    }
-
-    // Pass in the bitcode library to be linked during LTO.
-    for (auto &I :
-         llvm::make_range(OpenMPTCRange.first, OpenMPTCRange.second)) {
-      const ToolChain *TC = I.second;
-      if (!(TC->getTriple().isNVPTX() || TC->getTriple().isAMDGPU()))
-        continue;
-
-      const Driver &TCDriver = TC->getDriver();
-      const ArgList &TCArgs = C.getArgsForToolChain(TC, "", Action::OFK_OpenMP);
-      StringRef Arch = TCArgs.getLastArgValue(options::OPT_march_EQ);
-
-      ArgStringList BitcodeLibrary;
-      addOpenMPDeviceRTL(TCDriver, TCArgs, BitcodeLibrary, Arch,
-                         TC->getTriple());
-
-      if (!BitcodeLibrary.empty())
-        CmdArgs.push_back(Args.MakeArgString(
-            "-target-library=" +
-            Action::GetOffloadKindName(Action::OFK_OpenMP) + "-" +
-            TC->getTripleString() + "-" + Arch + "=" + BitcodeLibrary.back()));
     }
 
     // Pass in the optimization level to use for LTO.

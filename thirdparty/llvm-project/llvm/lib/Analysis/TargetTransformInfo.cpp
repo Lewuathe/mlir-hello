@@ -473,7 +473,7 @@ bool TargetTransformInfo::isTypeLegal(Type *Ty) const {
   return TTIImpl->isTypeLegal(Ty);
 }
 
-InstructionCost TargetTransformInfo::getRegUsageForType(Type *Ty) const {
+unsigned TargetTransformInfo::getRegUsageForType(Type *Ty) const {
   return TTIImpl->getRegUsageForType(Ty);
 }
 
@@ -626,8 +626,9 @@ Optional<unsigned> TargetTransformInfo::getVScaleForTuning() const {
   return TTIImpl->getVScaleForTuning();
 }
 
-bool TargetTransformInfo::shouldMaximizeVectorBandwidth() const {
-  return TTIImpl->shouldMaximizeVectorBandwidth();
+bool TargetTransformInfo::shouldMaximizeVectorBandwidth(
+    TargetTransformInfo::RegisterKind K) const {
+  return TTIImpl->shouldMaximizeVectorBandwidth(K);
 }
 
 ElementCount TargetTransformInfo::getMinimumVF(unsigned ElemWidth,
@@ -638,6 +639,11 @@ ElementCount TargetTransformInfo::getMinimumVF(unsigned ElemWidth,
 unsigned TargetTransformInfo::getMaximumVF(unsigned ElemWidth,
                                            unsigned Opcode) const {
   return TTIImpl->getMaximumVF(ElemWidth, Opcode);
+}
+
+unsigned TargetTransformInfo::getStoreMinimumVF(unsigned VF, Type *ScalarMemTy,
+                                                Type *ScalarValTy) const {
+  return TTIImpl->getStoreMinimumVF(VF, ScalarMemTy, ScalarValTy);
 }
 
 bool TargetTransformInfo::shouldConsiderAddressTypePromotion(

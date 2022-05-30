@@ -249,6 +249,43 @@ void OneShotAnalysisState::gatherYieldedTensors(Operation *op) {
   });
 }
 
+void OneShotAnalysisState::gatherUndefinedTensorUses(Operation *op) {
+  op->walk([&](Operation *op) {
+    // Skip unknown ops.
+    auto bufferizableOp = getOptions().dynCastBufferizableOp(op);
+    if (!bufferizableOp)
+      return WalkResult::skip();
+
+    // Check all tensor OpResults.
+    for (OpResult opResult : op->getOpResults()) {
+      if (!opResult.getType().isa<TensorType>())
+        continue;
+
+      // If there is no preceding memory write, the tensor contents are
+      // undefined.
+      // Note: If `findLastPrecedingWrite` reaches the end of the reverse SSA
+      // use-def chain, it returns that value, regardless of whether it is a
+      // memory write or not.
+      SetVector<Value> lastWrites = findLastPrecedingWrite(opResult);
+      bool isUndefined = llvm::none_of(lastWrites, [&](Value lastWrite) {
+        if (auto bufferizableOp = getOptions().dynCastBufferizableOp(lastWrite))
+          return bufferizableOp.isMemoryWrite(lastWrite.cast<OpResult>(),
+                                              *this);
+        return true;
+      });
+      if (isUndefined)
+        for (OpOperand &use : opResult.getUses())
+          undefinedTensorUses.insert(&use);
+    }
+
+    return WalkResult::advance();
+  });
+}
+
+bool OneShotAnalysisState::hasUndefinedContents(OpOperand *opOperand) const {
+  return undefinedTensorUses.contains(opOperand);
+}
+
 bool OneShotAnalysisState::isTensorYielded(Value tensor) const {
   return yieldedTensors.contains(tensor);
 }
@@ -342,7 +379,7 @@ getCommonEnclosingRepetitiveRegion(ArrayRef<Value> values) {
 
 /// Return `true` if the given tensor value is a memory write. Most values are
 /// tensor writes, but ops that define a tensor SSA value without specifying its
-/// contents (e.g., init_tensor) are not.
+/// contents (e.g., alloc_tensor) are not.
 static bool isMemoryWrite(Value value, const AnalysisState &state) {
   auto opResult = value.dyn_cast<OpResult>();
   if (!opResult)
@@ -818,7 +855,7 @@ annotateOpsWithBufferizationMarkers(Operation *op,
 /// %1 = scf.if %c -> (tensor<?xf32>) {
 ///   scf.yield %0 : tensor<?xf32>
 /// } else {
-///   %t = linalg.init_tensor : tensor<?xf32>
+///   %t = linalg.alloc_tensor : tensor<?xf32>
 ///   scf.yield %t : tensor<?xf32>
 /// }
 /// ```
@@ -915,8 +952,9 @@ LogicalResult bufferization::analyzeOp(Operation *op,
         failed(assertDestinationPassingStyle(op, state, aliasInfo, newOps));
   }
 
-  // Gather all yielded tensors.
+  // Gather some extra analysis data.
   state.gatherYieldedTensors(op);
+  state.gatherUndefinedTensorUses(op);
 
   // Analysis verification: After setting up alias/equivalence sets, each op
   // can check for expected invariants/limitations and fail the analysis if

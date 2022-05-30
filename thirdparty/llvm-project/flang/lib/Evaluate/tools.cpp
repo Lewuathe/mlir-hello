@@ -238,6 +238,16 @@ Expr<SomeReal> GetComplexPart(const Expr<SomeComplex> &z, bool isImaginary) {
       z.u);
 }
 
+Expr<SomeReal> GetComplexPart(Expr<SomeComplex> &&z, bool isImaginary) {
+  return common::visit(
+      [&](auto &&zk) {
+        static constexpr int kind{ResultType<decltype(zk)>::kind};
+        return AsCategoryExpr(
+            ComplexComponent<kind>{isImaginary, std::move(zk)});
+      },
+      z.u);
+}
+
 // Convert REAL to COMPLEX of the same kind. Preserving the real operand kind
 // and then applying complex operand promotion rules allows the result to have
 // the highest precision of REAL and COMPLEX operands as required by Fortran
@@ -1220,20 +1230,21 @@ bool IsPureProcedure(const Scope &scope) {
 bool IsFunction(const Symbol &symbol) {
   const Symbol &ultimate{symbol.GetUltimate()};
   return ultimate.test(Symbol::Flag::Function) ||
-      common::visit(
-          common::visitors{
-              [](const SubprogramDetails &x) { return x.isFunction(); },
-              [](const ProcEntityDetails &x) {
-                const auto &ifc{x.interface()};
-                return ifc.type() ||
-                    (ifc.symbol() && IsFunction(*ifc.symbol()));
+      (!ultimate.test(Symbol::Flag::Subroutine) &&
+          common::visit(
+              common::visitors{
+                  [](const SubprogramDetails &x) { return x.isFunction(); },
+                  [](const ProcEntityDetails &x) {
+                    const auto &ifc{x.interface()};
+                    return ifc.type() ||
+                        (ifc.symbol() && IsFunction(*ifc.symbol()));
+                  },
+                  [](const ProcBindingDetails &x) {
+                    return IsFunction(x.symbol());
+                  },
+                  [](const auto &) { return false; },
               },
-              [](const ProcBindingDetails &x) {
-                return IsFunction(x.symbol());
-              },
-              [](const auto &) { return false; },
-          },
-          ultimate.details());
+              ultimate.details()));
 }
 
 bool IsFunction(const Scope &scope) {
@@ -1266,7 +1277,8 @@ const Symbol *FindCommonBlockContaining(const Symbol &original) {
 
 bool IsProcedurePointer(const Symbol &original) {
   const Symbol &symbol{GetAssociationRoot(original)};
-  return symbol.has<ProcEntityDetails>() && IsPointer(symbol);
+  return IsPointer(symbol) &&
+      (symbol.has<ProcEntityDetails>() || symbol.has<SubprogramDetails>());
 }
 
 // 3.11 automatic data object
@@ -1388,10 +1400,14 @@ bool IsDeferredShape(const Symbol &symbol) {
 
 bool IsFunctionResult(const Symbol &original) {
   const Symbol &symbol{GetAssociationRoot(original)};
-  return (symbol.has<ObjectEntityDetails>() &&
-             symbol.get<ObjectEntityDetails>().isFuncResult()) ||
-      (symbol.has<ProcEntityDetails>() &&
-          symbol.get<ProcEntityDetails>().isFuncResult());
+  return common::visit(
+      common::visitors{
+          [](const EntityDetails &x) { return x.isFuncResult(); },
+          [](const ObjectEntityDetails &x) { return x.isFuncResult(); },
+          [](const ProcEntityDetails &x) { return x.isFuncResult(); },
+          [](const auto &) { return false; },
+      },
+      symbol.details());
 }
 
 bool IsKindTypeParameter(const Symbol &symbol) {

@@ -59,13 +59,29 @@ add_libc_unittest(
     libc.src.stdio.fread
     libc.src.stdio.fseek
     libc.src.stdio.fwrite
+  LINK_LIBRARIES
+    LibcMemoryHelpers
 )
 
-if(TARGET libc.test.src.stdio.fopencookie_test)
-  target_link_libraries(
-    libc.test.src.stdio.fopencookie_test PRIVATE LibcMemoryHelpers
-  )
-endif()
+add_libc_unittest(
+  sprintf_test
+  SUITE
+    libc_stdio_unittests
+  SRCS
+    sprintf_test.cpp
+  DEPENDS
+    libc.src.stdio.sprintf
+)
+
+add_libc_unittest(
+  snprintf_test
+  SUITE
+    libc_stdio_unittests
+  SRCS
+    snprintf_test.cpp
+  DEPENDS
+    libc.src.stdio.snprintf
+)
 
 add_subdirectory(printf_core)
 
