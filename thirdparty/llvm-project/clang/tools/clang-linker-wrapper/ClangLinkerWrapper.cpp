@@ -68,49 +68,55 @@ static cl::opt<std::string> LinkerUserPath("linker-path", cl::Required,
                                            cl::cat(ClangLinkerWrapperCategory));
 
 static cl::opt<std::string>
-    TargetFeatures("target-feature", cl::ZeroOrMore,
+    TargetFeatures("target-feature",
                    cl::desc("Target features for triple"),
                    cl::cat(ClangLinkerWrapperCategory));
 
-static cl::opt<std::string> OptLevel("opt-level", cl::ZeroOrMore,
+static cl::opt<std::string> OptLevel("opt-level",
                                      cl::desc("Optimization level for LTO"),
                                      cl::init("O2"),
                                      cl::cat(ClangLinkerWrapperCategory));
 
 static cl::list<std::string>
-    BitcodeLibraries("target-library", cl::ZeroOrMore,
+    BitcodeLibraries("target-library",
                      cl::desc("Path for the target bitcode library"),
                      cl::cat(ClangLinkerWrapperCategory));
 
 static cl::opt<bool> EmbedBitcode(
-    "target-embed-bc", cl::ZeroOrMore,
+    "target-embed-bc",
     cl::desc("Embed linked bitcode instead of an executable device image"),
-    cl::init(false), cl::cat(ClangLinkerWrapperCategory));
+    cl::cat(ClangLinkerWrapperCategory));
 
 static cl::opt<bool> DryRun(
-    "dry-run", cl::ZeroOrMore,
+    "dry-run",
     cl::desc("List the linker commands to be run without executing them"),
-    cl::init(false), cl::cat(ClangLinkerWrapperCategory));
+    cl::cat(ClangLinkerWrapperCategory));
 
 static cl::opt<bool>
-    PrintWrappedModule("print-wrapped-module", cl::ZeroOrMore,
+    PrintWrappedModule("print-wrapped-module",
                        cl::desc("Print the wrapped module's IR for testing"),
-                       cl::init(false), cl::cat(ClangLinkerWrapperCategory));
+                       cl::cat(ClangLinkerWrapperCategory));
 
 static cl::opt<std::string>
-    HostTriple("host-triple", cl::ZeroOrMore,
+    HostTriple("host-triple",
                cl::desc("Triple to use for the host compilation"),
                cl::init(sys::getDefaultTargetTriple()),
                cl::cat(ClangLinkerWrapperCategory));
 
 static cl::list<std::string>
-    PtxasArgs("ptxas-args", cl::ZeroOrMore,
+    PtxasArgs("ptxas-args",
               cl::desc("Argument to pass to the ptxas invocation"),
               cl::cat(ClangLinkerWrapperCategory));
 
-static cl::opt<bool> Verbose("v", cl::ZeroOrMore,
+static cl::list<std::string>
+    LinkerArgs("device-linker",
+               cl::desc("Arguments to pass to the device linker invocation"),
+               cl::value_desc("<value> or <triple>=<value>"),
+               cl::cat(ClangLinkerWrapperCategory));
+
+static cl::opt<bool> Verbose("v",
                              cl::desc("Verbose output from tools"),
-                             cl::init(false),
+                             
                              cl::cat(ClangLinkerWrapperCategory));
 
 static cl::opt<DebugKind> DebugInfo(
@@ -120,11 +126,11 @@ static cl::opt<DebugKind> DebugInfo(
                           "Direction information"),
                clEnumValN(FullDebugInfo, "g", "Full debugging support")));
 
-static cl::opt<bool> SaveTemps("save-temps", cl::ZeroOrMore,
+static cl::opt<bool> SaveTemps("save-temps",
                                cl::desc("Save intermediary results."),
                                cl::cat(ClangLinkerWrapperCategory));
 
-static cl::opt<std::string> CudaPath("cuda-path", cl::ZeroOrMore,
+static cl::opt<std::string> CudaPath("cuda-path",
                                      cl::desc("Save intermediary results."),
                                      cl::cat(ClangLinkerWrapperCategory));
 
@@ -224,6 +230,17 @@ void printCommands(ArrayRef<StringRef> CmdArgs) {
   llvm::errs() << " \"" << CmdArgs.front() << "\" ";
   for (auto IC = std::next(CmdArgs.begin()), IE = CmdArgs.end(); IC != IE; ++IC)
     llvm::errs() << *IC << (std::next(IC) != IE ? " " : "\n");
+}
+
+// Forward user requested arguments to the device linking job.
+void renderXLinkerArgs(SmallVectorImpl<StringRef> &Args, StringRef Triple) {
+  for (StringRef Arg : LinkerArgs) {
+    auto TripleAndValue = Arg.split('=');
+    if (TripleAndValue.second.empty())
+      Args.push_back(TripleAndValue.first);
+    else if (TripleAndValue.first == Triple)
+      Args.push_back(TripleAndValue.second);
+  }
 }
 
 std::string getMainExecutable(const char *Name) {
@@ -531,6 +548,7 @@ Expected<std::string> link(ArrayRef<std::string> InputFiles, Triple TheTriple,
   for (StringRef Input : InputFiles)
     CmdArgs.push_back(Input);
 
+  renderXLinkerArgs(CmdArgs, TheTriple.getTriple());
   if (Error Err = executeCommands(*NvlinkPath, CmdArgs))
     return std::move(Err);
 
@@ -599,6 +617,7 @@ Expected<std::string> link(ArrayRef<std::string> InputFiles, Triple TheTriple,
   for (StringRef Input : InputFiles)
     CmdArgs.push_back(Input);
 
+  renderXLinkerArgs(CmdArgs, TheTriple.getTriple());
   if (Error Err = executeCommands(*LLDPath, CmdArgs))
     return std::move(Err);
 
@@ -676,6 +695,7 @@ Expected<std::string> link(ArrayRef<std::string> InputFiles, Triple TheTriple,
   for (StringRef Input : InputFiles)
     CmdArgs.push_back(Input);
 
+  renderXLinkerArgs(CmdArgs, TheTriple.getTriple());
   if (Error Err = executeCommands(LinkerUserPath, CmdArgs))
     return std::move(Err);
 
@@ -992,8 +1012,14 @@ Error linkBitcodeFiles(SmallVectorImpl<std::string> &InputFiles,
   if (Error Err = LTOBackend->run(AddStream))
     return Err;
 
+  // If we are embedding bitcode we only need the intermediate output.
+  if (EmbedBitcode) {
+    InputFiles = NewInputFiles;
+    return Error::success();
+  }
+
   // Is we are compiling for NVPTX we need to run the assembler first.
-  if (TheTriple.isNVPTX() && !EmbedBitcode) {
+  if (TheTriple.isNVPTX()) {
     for (auto &File : Files) {
       auto FileOrErr = nvptx::assemble(File, TheTriple, Arch, !WholeProgram);
       if (!FileOrErr)

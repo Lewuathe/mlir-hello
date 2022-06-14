@@ -2870,7 +2870,8 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
   // None of these cases should fall through with an invalid Result
   // unless they've already reported an error.
   if (ExprType >= CompoundStmt && Tok.is(tok::l_brace)) {
-    Diag(Tok, diag::ext_gnu_statement_expr);
+    Diag(Tok, OpenLoc.isMacroID() ? diag::ext_gnu_statement_expr_macro
+                                  : diag::ext_gnu_statement_expr);
 
     checkCompoundToken(OpenLoc, tok::l_paren, CompoundToken::StmtExprBegin);
 
@@ -3275,7 +3276,7 @@ ExprResult Parser::ParseGenericSelectionExpression() {
       Ty = nullptr;
     } else {
       ColonProtectionRAIIObject X(*this);
-      TypeResult TR = ParseTypeName();
+      TypeResult TR = ParseTypeName(nullptr, DeclaratorContext::Association);
       if (TR.isInvalid()) {
         SkipUntil(tok::r_paren, StopAtSemi);
         return ExprError();

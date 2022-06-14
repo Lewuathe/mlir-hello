@@ -600,6 +600,14 @@ func.func @omp_atomic_write6(%addr : memref<i32>, %val : i32) {
 
 // -----
 
+func.func @omp_atomic_write(%addr : memref<memref<i32>>, %val : i32) {
+  // expected-error @below {{address must dereference to value type}}
+  omp.atomic.write %addr = %val : memref<memref<i32>>, i32
+  return
+}
+
+// -----
+
 func.func @omp_atomic_update1(%x: memref<i32>, %expr: f32) {
   // expected-error @below {{the type of the operand must be a pointer type whose element type is the same as that of the region argument}}
   omp.atomic.update %x : memref<i32> {
@@ -938,6 +946,36 @@ func.func @omp_atomic_capture(%x: memref<i32>, %v: memref<i32>, %expr: i32) {
       omp.yield(%newval : i32)
     }
     omp.atomic.read %v = %x : memref<i32>
+  }
+  return
+}
+
+// -----
+
+func.func @omp_atomic_capture(%x: memref<i32>, %v: memref<i32>, %expr: i32) {
+  // expected-error @below {{operations inside capture region must not have memory_order clause}}
+  omp.atomic.capture {
+    omp.atomic.update memory_order(seq_cst) %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x : memref<i32>
+  }
+  return
+}
+
+// -----
+
+func.func @omp_atomic_capture(%x: memref<i32>, %v: memref<i32>, %expr: i32) {
+  // expected-error @below {{operations inside capture region must not have memory_order clause}}
+  omp.atomic.capture {
+    omp.atomic.update %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x memory_order(seq_cst) : memref<i32>
   }
   return
 }

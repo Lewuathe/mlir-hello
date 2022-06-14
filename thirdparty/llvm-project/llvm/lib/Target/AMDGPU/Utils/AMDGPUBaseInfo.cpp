@@ -28,10 +28,10 @@
 #define GET_INSTRMAP_INFO
 #include "AMDGPUGenInstrInfo.inc"
 
-static llvm::cl::opt<unsigned> AmdhsaCodeObjectVersion(
-  "amdhsa-code-object-version", llvm::cl::Hidden,
-  llvm::cl::desc("AMDHSA Code Object Version"), llvm::cl::init(4),
-  llvm::cl::ZeroOrMore);
+static llvm::cl::opt<unsigned>
+    AmdhsaCodeObjectVersion("amdhsa-code-object-version", llvm::cl::Hidden,
+                            llvm::cl::desc("AMDHSA Code Object Version"),
+                            llvm::cl::init(4));
 
 namespace {
 
@@ -1276,12 +1276,13 @@ struct ExpTgt {
 };
 
 static constexpr ExpTgt ExpTgtInfo[] = {
-  {{"null"},  ET_NULL,   ET_NULL_MAX_IDX},
-  {{"mrtz"},  ET_MRTZ,   ET_MRTZ_MAX_IDX},
-  {{"prim"},  ET_PRIM,   ET_PRIM_MAX_IDX},
-  {{"mrt"},   ET_MRT0,   ET_MRT_MAX_IDX},
-  {{"pos"},   ET_POS0,   ET_POS_MAX_IDX},
-  {{"param"}, ET_PARAM0, ET_PARAM_MAX_IDX},
+  {{"null"},           ET_NULL,            ET_NULL_MAX_IDX},
+  {{"mrtz"},           ET_MRTZ,            ET_MRTZ_MAX_IDX},
+  {{"prim"},           ET_PRIM,            ET_PRIM_MAX_IDX},
+  {{"mrt"},            ET_MRT0,            ET_MRT_MAX_IDX},
+  {{"pos"},            ET_POS0,            ET_POS_MAX_IDX},
+  {{"dual_src_blend"}, ET_DUAL_SRC_BLEND0, ET_DUAL_SRC_BLEND_MAX_IDX},
+  {{"param"},          ET_PARAM0,          ET_PARAM_MAX_IDX},
 };
 
 bool getTgtName(unsigned Id, StringRef &Name, int &Index) {
@@ -1319,7 +1320,20 @@ unsigned getTgtId(const StringRef Name) {
 }
 
 bool isSupportedTgtId(unsigned Id, const MCSubtargetInfo &STI) {
-  return (Id != ET_POS4 && Id != ET_PRIM) || isGFX10Plus(STI);
+  switch (Id) {
+  case ET_NULL:
+    return !isGFX11Plus(STI);
+  case ET_POS4:
+  case ET_PRIM:
+    return isGFX10Plus(STI);
+  case ET_DUAL_SRC_BLEND0:
+  case ET_DUAL_SRC_BLEND1:
+    return isGFX11Plus(STI);
+  default:
+    if (Id >= ET_PARAM0 && Id <= ET_PARAM31)
+      return !isGFX11Plus(STI);
+    return true;
+  }
 }
 
 } // namespace Exp
@@ -1798,6 +1812,7 @@ bool isSGPR(unsigned Reg, const MCRegisterInfo* TRI) {
   CASE_VI_GFX9PLUS(TTMP0_TTMP1_TTMP2_TTMP3_TTMP4_TTMP5_TTMP6_TTMP7_TTMP8_TTMP9_TTMP10_TTMP11_TTMP12_TTMP13_TTMP14_TTMP15) \
   CASE_GFXPRE11_GFX11PLUS(M0) \
   CASE_GFXPRE11_GFX11PLUS(SGPR_NULL) \
+  CASE_GFXPRE11_GFX11PLUS_TO(SGPR_NULL64, SGPR_NULL) \
   }
 
 #define CASE_CI_VI(node) \
@@ -1810,6 +1825,9 @@ bool isSGPR(unsigned Reg, const MCRegisterInfo* TRI) {
 #define CASE_GFXPRE11_GFX11PLUS(node) \
   case node: return isGFX11Plus(STI) ? node##_gfx11plus : node##_gfxpre11;
 
+#define CASE_GFXPRE11_GFX11PLUS_TO(node, result) \
+  case node: return isGFX11Plus(STI) ? result##_gfx11plus : result##_gfxpre11;
+
 unsigned getMCReg(unsigned Reg, const MCSubtargetInfo &STI) {
   if (STI.getTargetTriple().getArch() == Triple::r600)
     return Reg;
@@ -1819,10 +1837,12 @@ unsigned getMCReg(unsigned Reg, const MCSubtargetInfo &STI) {
 #undef CASE_CI_VI
 #undef CASE_VI_GFX9PLUS
 #undef CASE_GFXPRE11_GFX11PLUS
+#undef CASE_GFXPRE11_GFX11PLUS_TO
 
 #define CASE_CI_VI(node)   case node##_ci: case node##_vi:   return node;
 #define CASE_VI_GFX9PLUS(node) case node##_vi: case node##_gfx9plus: return node;
 #define CASE_GFXPRE11_GFX11PLUS(node) case node##_gfx11plus: case node##_gfxpre11: return node;
+#define CASE_GFXPRE11_GFX11PLUS_TO(node, result)
 
 unsigned mc2PseudoReg(unsigned Reg) {
   MAP_REG2REG
@@ -1831,6 +1851,7 @@ unsigned mc2PseudoReg(unsigned Reg) {
 #undef CASE_CI_VI
 #undef CASE_VI_GFX9PLUS
 #undef CASE_GFXPRE11_GFX11PLUS
+#undef CASE_GFXPRE11_GFX11PLUS_TO
 #undef MAP_REG2REG
 
 bool isSISrcOperand(const MCInstrDesc &Desc, unsigned OpNo) {
@@ -2184,7 +2205,7 @@ Optional<int64_t> getSMRDEncodedLiteralOffset32(const MCSubtargetInfo &ST,
 }
 
 unsigned getNumFlatOffsetBits(const MCSubtargetInfo &ST, bool Signed) {
-  // Address offset is 12-bit signed for GFX10, 13-bit for GFX9.
+  // Address offset is 12-bit signed for GFX10, 13-bit for GFX9 and GFX11+.
   if (AMDGPU::isGFX10(ST))
     return Signed ? 12 : 11;
 

@@ -73,12 +73,12 @@ void RISCVTargetELFStreamer::finishAttributeSection() {
     return;
 
   if (AttributeSection) {
-    Streamer.SwitchSection(AttributeSection);
+    Streamer.switchSection(AttributeSection);
   } else {
     MCAssembler &MCA = getStreamer().getAssembler();
     AttributeSection = MCA.getContext().getELFSection(
         ".riscv.attributes", ELF::SHT_RISCV_ATTRIBUTES, 0);
-    Streamer.SwitchSection(AttributeSection);
+    Streamer.switchSection(AttributeSection);
 
     Streamer.emitInt8(ELFAttrs::Format_Version);
   }
@@ -180,6 +180,11 @@ void RISCVTargetELFStreamer::finish() {
   MCA.setELFHeaderEFlags(EFlags);
 }
 
+void RISCVTargetELFStreamer::reset() {
+  AttributeSection = nullptr;
+  Contents.clear();
+}
+
 namespace {
 class RISCVELFStreamer : public MCELFStreamer {
   static std::pair<unsigned, unsigned> getRelocPairForSize(unsigned Size) {
@@ -224,6 +229,11 @@ class RISCVELFStreamer : public MCELFStreamer {
                             : !A.getName().empty()) ||
            (B.isInSection() ? B.getSection().hasInstructions()
                             : !B.getName().empty());
+  }
+
+  void reset() override {
+    static_cast<RISCVTargetStreamer *>(getTargetStreamer())->reset();
+    MCELFStreamer::reset();
   }
 
 public:
