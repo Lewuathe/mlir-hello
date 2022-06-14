@@ -170,10 +170,10 @@ define dso_local i32 @lw_sw_global(i32 %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    lui a2, %hi(G)
 ; RV32I-NEXT:    lw a1, %lo(G)(a2)
+; RV32I-NEXT:    addi a3, a2, %lo(G)
 ; RV32I-NEXT:    sw a0, %lo(G)(a2)
-; RV32I-NEXT:    addi a2, a2, %lo(G)
-; RV32I-NEXT:    lw a3, 36(a2)
-; RV32I-NEXT:    sw a0, 36(a2)
+; RV32I-NEXT:    lw a2, 36(a3)
+; RV32I-NEXT:    sw a0, 36(a3)
 ; RV32I-NEXT:    mv a0, a1
 ; RV32I-NEXT:    ret
   %1 = load volatile i32, i32* @G
@@ -227,10 +227,9 @@ define i32 @lw_sw_far_local(i32* %a, i32 %b)  {
 ; RV32I-LABEL: lw_sw_far_local:
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    lui a2, 4
-; RV32I-NEXT:    addi a2, a2, -4
 ; RV32I-NEXT:    add a2, a0, a2
-; RV32I-NEXT:    lw a0, 0(a2)
-; RV32I-NEXT:    sw a1, 0(a2)
+; RV32I-NEXT:    lw a0, -4(a2)
+; RV32I-NEXT:    sw a1, -4(a2)
 ; RV32I-NEXT:    ret
   %1 = getelementptr inbounds i32, i32* %a, i64 4095
   %2 = load volatile i32, i32* %1
@@ -266,10 +265,9 @@ define i32 @lw_sw_really_far_local(i32* %a, i32 %b)  {
 ; RV32I-LABEL: lw_sw_really_far_local:
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    lui a2, 524288
-; RV32I-NEXT:    addi a2, a2, -2048
 ; RV32I-NEXT:    add a2, a0, a2
-; RV32I-NEXT:    lw a0, 0(a2)
-; RV32I-NEXT:    sw a1, 0(a2)
+; RV32I-NEXT:    lw a0, -2048(a2)
+; RV32I-NEXT:    sw a1, -2048(a2)
 ; RV32I-NEXT:    ret
   %1 = getelementptr inbounds i32, i32* %a, i32 536870400
   %2 = load volatile i32, i32* %1

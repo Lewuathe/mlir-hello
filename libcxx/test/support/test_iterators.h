@@ -721,6 +721,132 @@ public:
 private:
     decltype(base(std::declval<It>())) base_;
 };
+
+namespace adl {
+
+class Iterator {
+ public:
+  using value_type = int;
+  using difference_type = ptrdiff_t;
+
+ private:
+  value_type* ptr_ = nullptr;
+  int* iter_moves_ = nullptr;
+  int* iter_swaps_ = nullptr;
+
+  constexpr Iterator(int* p, int* iter_moves, int* iter_swaps)
+    : ptr_(p)
+    , iter_moves_(iter_moves)
+    , iter_swaps_(iter_swaps) {}
+
+ public:
+  constexpr Iterator() = default;
+  static constexpr Iterator TrackMoves(int* p, int& iter_moves) {
+    return Iterator(p, &iter_moves, /*iter_swaps=*/nullptr);
+  }
+  static constexpr Iterator TrackSwaps(int& iter_swaps) {
+    return Iterator(/*p=*/nullptr, /*iter_moves=*/nullptr, &iter_swaps);
+  }
+  static constexpr Iterator TrackSwaps(int* p, int& iter_swaps) {
+    return Iterator(p, /*iter_moves=*/nullptr, &iter_swaps);
+  }
+
+  constexpr int iter_moves() const { assert(iter_moves_); return *iter_moves_; }
+  constexpr int iter_swaps() const { assert(iter_swaps_); return *iter_swaps_; }
+
+  constexpr value_type& operator*() const { return *ptr_; }
+
+  constexpr Iterator operator+(difference_type n) const {
+    return Iterator(ptr_ + n, iter_moves_, iter_swaps_);
+  }
+
+  constexpr Iterator& operator++() { ++ptr_; return *this; }
+  constexpr Iterator operator++(int) {
+    Iterator prev = *this;
+    ++ptr_;
+    return prev;
+  }
+
+  constexpr Iterator& operator--() { --ptr_; return *this; }
+  constexpr Iterator operator--(int) {
+    Iterator prev = *this;
+    --ptr_;
+    return prev;
+  }
+
+  constexpr friend void iter_swap(Iterator a, Iterator) {
+    if (a.iter_swaps_) {
+      ++(*a.iter_swaps_);
+    }
+  }
+
+  constexpr friend value_type&& iter_move(Iterator iter) {
+    if (iter.iter_moves_) {
+      ++(*iter.iter_moves_);
+    }
+    return std::move(*iter);
+  }
+
+  constexpr friend bool operator==(const Iterator& lhs, const Iterator& rhs) { return lhs.ptr_ == rhs.ptr_; }
+};
+
+} // namespace adl
+
 #endif // TEST_STD_VER > 17
+
+template <class Sub, class Iterator>
+struct IteratorAdaptorBase {
+  using OutTraits = std::iterator_traits<Iterator>;
+  using iterator_category = typename OutTraits::iterator_category;
+  using value_type = typename OutTraits::value_type;
+  using pointer = typename OutTraits::pointer;
+  using reference = typename OutTraits::reference;
+  using difference_type = typename OutTraits::difference_type;
+
+  IteratorAdaptorBase() {}
+  IteratorAdaptorBase(Iterator) {}
+
+  Sub& sub() { return static_cast<Sub&>(*this); }
+  const Sub& sub() const { return static_cast<Sub&>(*this); }
+
+  const Iterator& base() const { return it_; }
+
+  reference get() const { return *it_; }
+  reference operator*() const { return *it_; }
+  pointer operator->() const { return it_; }
+  reference operator[](difference_type) const { return *it_; }
+
+  Sub& operator++() { return static_cast<Sub&>(*this); }
+  Sub& operator--() { return static_cast<Sub&>(*this); }
+  Sub operator++(int) { return static_cast<Sub&>(*this); }
+  Sub operator--(int) { return static_cast<Sub&>(*this); }
+
+  Sub& operator+=(difference_type) { return static_cast<Sub&>(*this); }
+  Sub& operator-=(difference_type) { return static_cast<Sub&>(*this); }
+  bool operator==(Sub) const { return false; }
+  bool operator!=(Sub) const { return false; }
+  bool operator==(Iterator b) const { return *this == Sub(b); }
+  bool operator!=(Iterator b) const { return *this != Sub(b); }
+
+  friend Sub operator+(Sub, difference_type) { Sub(); }
+  friend Sub operator+(difference_type, Sub) { Sub(); }
+  friend Sub operator-(Sub, difference_type) { Sub(); }
+  friend difference_type operator-(Sub, Sub) { return 0; }
+
+  friend bool operator<(Sub, Sub) { return false; }
+  friend bool operator>(Sub, Sub) { return false; }
+  friend bool operator<=(Sub, Sub) { return false; }
+  friend bool operator>=(Sub, Sub) { return false; }
+
+ private:
+  Iterator it_;
+};
+
+template <typename It>
+struct Cpp20HostileIterator
+    : IteratorAdaptorBase<Cpp20HostileIterator<It>, It> {
+  Cpp20HostileIterator() {}
+  Cpp20HostileIterator(It it);
+};
 
 #endif // SUPPORT_TEST_ITERATORS_H

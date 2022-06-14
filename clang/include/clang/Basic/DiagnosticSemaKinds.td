@@ -5589,10 +5589,12 @@ def warn_strict_prototypes : Extension<
   "a %select{function|block}0 declaration without a prototype is deprecated "
   "%select{in all versions of C|}0">, InGroup<StrictPrototypes>;
 def warn_non_prototype_changes_behavior : Warning<
-  "a function declaration without a prototype is deprecated in all versions of "
-  "C and is not supported in C2x">, InGroup<DeprecatedNonPrototype>;
-def note_func_decl_changes_behavior : Note<
-  "a function declaration without a prototype is not supported in C2x">;
+  "a function %select{declaration|definition}0 without a prototype is "
+  "deprecated in all versions of C %select{and is not supported in C2x|and is "
+  "treated as a zero-parameter prototype in C2x, conflicting with a "
+  "%select{previous|subsequent}2 %select{declaration|definition}3}1">,
+  InGroup<DeprecatedNonPrototype>;
+def note_conflicting_prototype : Note<"conflicting prototype is here">;
 def warn_missing_variable_declarations : Warning<
   "no previous extern declaration for non-static variable %0">,
   InGroup<DiagGroup<"missing-variable-declarations">>, DefaultIgnore;
@@ -6135,6 +6137,9 @@ def note_exits_block_captures_non_trivial_c_struct : Note<
 def note_exits_compound_literal_scope : Note<
   "jump exits lifetime of a compound literal that is non-trivial to destruct">;
 
+def err_func_returning_qualified_void : ExtWarn<
+  "function cannot return qualified void type %0">,
+  InGroup<DiagGroup<"qualified-void-return-type">>;
 def err_func_returning_array_function : Error<
   "function cannot return %select{array|function}0 type %1">;
 def err_field_declared_as_function : Error<"field %0 declared as a function">;
@@ -8729,6 +8734,10 @@ def warn_unused_result : Warning<
 def warn_unused_result_msg : Warning<
   "ignoring return value of function declared with %0 attribute: %1">,
   InGroup<UnusedResult>;
+def warn_unused_result_typedef_unsupported_spelling : Warning<
+  "'[[%select{nodiscard|gnu::warn_unused_result}0]]' attribute ignored when "
+  "applied to a typedef; consider using '__attribute__((warn_unused_result))' "
+  "or '[[clang::warn_unused_result]]' instead">, InGroup<IgnoredAttributes>;
 def warn_unused_volatile : Warning<
   "expression result unused; assign into a variable to force a volatile load">,
   InGroup<DiagGroup<"unused-volatile-lvalue">>;
@@ -10997,6 +11006,9 @@ def err_omp_append_args_with_varargs : Error<
   "'append_args' is not allowed with varargs functions">;
 def err_openmp_vla_in_task_untied : Error<
   "variable length arrays are not supported in OpenMP tasking regions with 'untied' clause">;
+def warn_omp_unterminated_declare_target : Warning<
+  "expected '#pragma omp end declare target' at end of file to match '#pragma omp %0'">,
+  InGroup<SourceUsesOpenMP>;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {

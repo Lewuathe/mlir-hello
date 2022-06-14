@@ -207,6 +207,11 @@ def int_amdgcn_s_sendmsghalt : GCCBuiltin<"__builtin_amdgcn_s_sendmsghalt">,
   Intrinsic <[], [llvm_i32_ty, llvm_i32_ty],
   [ImmArg<ArgIndex<0>>, IntrNoMem, IntrHasSideEffects]>;
 
+// gfx11 intrinsic
+// The first parameter is s_sendmsg immediate (i16). Return type is i32 or i64.
+def int_amdgcn_s_sendmsg_rtn : Intrinsic <[llvm_anyint_ty], [llvm_i32_ty],
+  [ImmArg<ArgIndex<0>>, IntrNoMem, IntrHasSideEffects]>;
+
 def int_amdgcn_s_barrier : GCCBuiltin<"__builtin_amdgcn_s_barrier">,
   Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects, IntrConvergent, IntrWillReturn]>;
 
@@ -1880,6 +1885,15 @@ def int_amdgcn_image_bvh_intersect_ray :
             [llvm_anyint_ty, llvm_float_ty, llvm_v3f32_ty, llvm_anyvector_ty,
              LLVMMatchType<1>, llvm_v4i32_ty],
             [IntrReadMem, IntrWillReturn]>;
+
+//===----------------------------------------------------------------------===//
+// GFX11 Intrinsics
+//===----------------------------------------------------------------------===//
+
+// llvm.amdgcn.permlane64 <src0>
+def int_amdgcn_permlane64 :
+  Intrinsic<[llvm_i32_ty], [llvm_i32_ty],
+            [IntrNoMem, IntrConvergent, IntrWillReturn]>;
 
 //===----------------------------------------------------------------------===//
 // Deep learning intrinsics.

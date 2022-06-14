@@ -293,7 +293,7 @@ static bool isInPlace(Value val) {
 /// Returns true if tensor materializes uninitialized into the computation.
 static bool isMaterializing(Value val) {
   return val.getDefiningOp<linalg::InitTensorOp>() ||
-         val.getDefiningOp<InitOp>();
+         val.getDefiningOp<bufferization::AllocTensorOp>();
 }
 
 /// Returns true when the tensor expression is admissable for codegen.
@@ -378,11 +378,14 @@ static vector::CombiningKind getCombiningKind(Reduction kind) {
 static Reduction getReduction(Kind kind) {
   switch (kind) {
   case Kind::kAddF:
+  case Kind::kAddC:
   case Kind::kAddI:
   case Kind::kSubF:
+  case Kind::kSubC:
   case Kind::kSubI:
     return kSum;
   case Kind::kMulF:
+  case Kind::kMulC:
   case Kind::kMulI:
     return kProduct;
   case Kind::kAndI:

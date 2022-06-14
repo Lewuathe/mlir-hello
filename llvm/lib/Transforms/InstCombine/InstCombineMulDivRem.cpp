@@ -140,7 +140,7 @@ static Value *foldMulSelectToNegate(BinaryOperator &I,
 }
 
 Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
-  if (Value *V = SimplifyMulInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifyMulInst(I.getOperand(0), I.getOperand(1),
                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
@@ -301,8 +301,15 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
     }
   }
 
-  /// i1 mul -> i1 and.
-  if (I.getType()->isIntOrIntVectorTy(1))
+  // Fold the following two scenarios:
+  //   1) i1 mul -> i1 and.
+  //   2) X * Y --> X & Y, iff X, Y can be only {0,1}.
+  // Note: We could use known bits to generalize this and related patterns with
+  // shifts/truncs
+  Type *Ty = I.getType();
+  if (Ty->isIntOrIntVectorTy(1) ||
+      (match(Op0, m_And(m_Value(), m_One())) &&
+       match(Op1, m_And(m_Value(), m_One()))))
     return BinaryOperator::CreateAnd(Op0, Op1);
 
   // X*(1 << Y) --> X << Y
@@ -335,7 +342,7 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
       X->getType()->isIntOrIntVectorTy(1) && X->getType() == Y->getType() &&
       (Op0->hasOneUse() || Op1->hasOneUse() || X == Y)) {
     Value *And = Builder.CreateAnd(X, Y, "mulbool");
-    return CastInst::Create(Instruction::ZExt, And, I.getType());
+    return CastInst::Create(Instruction::ZExt, And, Ty);
   }
   // (sext bool X) * (zext bool Y) --> sext (and X, Y)
   // (zext bool X) * (sext bool Y) --> sext (and X, Y)
@@ -345,42 +352,56 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
       X->getType()->isIntOrIntVectorTy(1) && X->getType() == Y->getType() &&
       (Op0->hasOneUse() || Op1->hasOneUse())) {
     Value *And = Builder.CreateAnd(X, Y, "mulbool");
-    return CastInst::Create(Instruction::SExt, And, I.getType());
+    return CastInst::Create(Instruction::SExt, And, Ty);
   }
 
   // (zext bool X) * Y --> X ? Y : 0
   // Y * (zext bool X) --> X ? Y : 0
   if (match(Op0, m_ZExt(m_Value(X))) && X->getType()->isIntOrIntVectorTy(1))
-    return SelectInst::Create(X, Op1, ConstantInt::get(I.getType(), 0));
+    return SelectInst::Create(X, Op1, ConstantInt::getNullValue(Ty));
   if (match(Op1, m_ZExt(m_Value(X))) && X->getType()->isIntOrIntVectorTy(1))
-    return SelectInst::Create(X, Op0, ConstantInt::get(I.getType(), 0));
+    return SelectInst::Create(X, Op0, ConstantInt::getNullValue(Ty));
 
-  // (sext bool X) * C --> X ? -C : 0
   Constant *ImmC;
-  if (match(Op0, m_SExt(m_Value(X))) && X->getType()->isIntOrIntVectorTy(1) &&
-      match(Op1, m_ImmConstant(ImmC))) {
-    Constant *NegC = ConstantExpr::getNeg(ImmC);
-    return SelectInst::Create(X, NegC, ConstantInt::getNullValue(I.getType()));
+  if (match(Op1, m_ImmConstant(ImmC))) {
+    // (sext bool X) * C --> X ? -C : 0
+    if (match(Op0, m_SExt(m_Value(X))) && X->getType()->isIntOrIntVectorTy(1)) {
+      Constant *NegC = ConstantExpr::getNeg(ImmC);
+      return SelectInst::Create(X, NegC, ConstantInt::getNullValue(Ty));
+    }
+
+    // (ashr i32 X, 31) * C --> (X < 0) ? -C : 0
+    const APInt *C;
+    if (match(Op0, m_OneUse(m_AShr(m_Value(X), m_APInt(C)))) &&
+        *C == C->getBitWidth() - 1) {
+      Constant *NegC = ConstantExpr::getNeg(ImmC);
+      Value *IsNeg = Builder.CreateIsNeg(X, "isneg");
+      return SelectInst::Create(IsNeg, NegC, ConstantInt::getNullValue(Ty));
+    }
   }
 
-  // (lshr X, 31) * Y --> (ashr X, 31) & Y
-  // Y * (lshr X, 31) --> (ashr X, 31) & Y
+  // (lshr X, 31) * Y --> (X < 0) ? Y : 0
   // TODO: We are not checking one-use because the elimination of the multiply
   //       is better for analysis?
-  // TODO: Should we canonicalize to '(X < 0) ? Y : 0' instead? That would be
-  //       more similar to what we're doing above.
   const APInt *C;
-  if (match(Op0, m_LShr(m_Value(X), m_APInt(C))) && *C == C->getBitWidth() - 1)
-    return BinaryOperator::CreateAnd(Builder.CreateAShr(X, *C), Op1);
-  if (match(Op1, m_LShr(m_Value(X), m_APInt(C))) && *C == C->getBitWidth() - 1)
-    return BinaryOperator::CreateAnd(Builder.CreateAShr(X, *C), Op0);
+  if (match(&I, m_c_BinOp(m_LShr(m_Value(X), m_APInt(C)), m_Value(Y))) &&
+      *C == C->getBitWidth() - 1) {
+    Value *IsNeg = Builder.CreateIsNeg(X, "isneg");
+    return SelectInst::Create(IsNeg, Y, ConstantInt::getNullValue(Ty));
+  }
+
+  // (and X, 1) * Y --> (trunc X) ? Y : 0
+  if (match(&I, m_c_BinOp(m_OneUse(m_And(m_Value(X), m_One())), m_Value(Y)))) {
+    Value *Tr = Builder.CreateTrunc(X, CmpInst::makeCmpResultType(Ty));
+    return SelectInst::Create(Tr, Y, ConstantInt::getNullValue(Ty));
+  }
 
   // ((ashr X, 31) | 1) * X --> abs(X)
   // X * ((ashr X, 31) | 1) --> abs(X)
   if (match(&I, m_c_BinOp(m_Or(m_AShr(m_Value(X),
-                                    m_SpecificIntAllowUndef(BitWidth - 1)),
-                             m_One()),
-                        m_Deferred(X)))) {
+                                      m_SpecificIntAllowUndef(BitWidth - 1)),
+                               m_One()),
+                          m_Deferred(X)))) {
     Value *Abs = Builder.CreateBinaryIntrinsic(
         Intrinsic::abs, X,
         ConstantInt::getBool(I.getContext(), I.hasNoSignedWrap()));
@@ -439,7 +460,7 @@ Instruction *InstCombinerImpl::foldFPSignBitOps(BinaryOperator &I) {
 }
 
 Instruction *InstCombinerImpl::visitFMul(BinaryOperator &I) {
-  if (Value *V = SimplifyFMulInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifyFMulInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -999,7 +1020,7 @@ static Instruction *narrowUDivURem(BinaryOperator &I,
 }
 
 Instruction *InstCombinerImpl::visitUDiv(BinaryOperator &I) {
-  if (Value *V = SimplifyUDivInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifyUDivInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
@@ -1069,7 +1090,7 @@ Instruction *InstCombinerImpl::visitUDiv(BinaryOperator &I) {
 }
 
 Instruction *InstCombinerImpl::visitSDiv(BinaryOperator &I) {
-  if (Value *V = SimplifySDivInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifySDivInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
@@ -1300,7 +1321,7 @@ static Instruction *foldFDivPowDivisor(BinaryOperator &I,
 Instruction *InstCombinerImpl::visitFDiv(BinaryOperator &I) {
   Module *M = I.getModule();
 
-  if (Value *V = SimplifyFDivInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifyFDivInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -1463,7 +1484,7 @@ Instruction *InstCombinerImpl::commonIRemTransforms(BinaryOperator &I) {
 }
 
 Instruction *InstCombinerImpl::visitURem(BinaryOperator &I) {
-  if (Value *V = SimplifyURemInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifyURemInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
@@ -1516,7 +1537,7 @@ Instruction *InstCombinerImpl::visitURem(BinaryOperator &I) {
 }
 
 Instruction *InstCombinerImpl::visitSRem(BinaryOperator &I) {
-  if (Value *V = SimplifySRemInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifySRemInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
@@ -1588,7 +1609,7 @@ Instruction *InstCombinerImpl::visitSRem(BinaryOperator &I) {
 }
 
 Instruction *InstCombinerImpl::visitFRem(BinaryOperator &I) {
-  if (Value *V = SimplifyFRemInst(I.getOperand(0), I.getOperand(1),
+  if (Value *V = simplifyFRemInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);

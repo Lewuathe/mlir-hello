@@ -6,12 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang-pseudo/Bracket.h"
 #include "clang-pseudo/DirectiveTree.h"
 #include "clang-pseudo/GLR.h"
-#include "clang-pseudo/Grammar.h"
-#include "clang-pseudo/LRGraph.h"
-#include "clang-pseudo/LRTable.h"
 #include "clang-pseudo/Token.h"
+#include "clang-pseudo/grammar/Grammar.h"
+#include "clang-pseudo/grammar/LRGraph.h"
+#include "clang-pseudo/grammar/LRTable.h"
 #include "clang/Basic/LangOptions.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/CommandLine.h"
@@ -89,6 +90,7 @@ int main(int argc, char *argv[]) {
       llvm::outs() << DirectiveStructure;
 
     ParseableStream = clang::pseudo::stripComments(cook(*Stream, LangOpts));
+    pairBrackets(*ParseableStream);
   }
 
   if (Grammar.getNumOccurrences()) {
@@ -109,6 +111,8 @@ int main(int argc, char *argv[]) {
     auto LRTable = clang::pseudo::LRTable::buildSLR(*G);
     if (PrintTable)
       llvm::outs() << LRTable.dumpForTests(*G);
+    if (PrintStatistics)
+      llvm::outs() << LRTable.dumpStatistics();
 
     if (ParseableStream) {
       clang::pseudo::ForestArena Arena;
@@ -130,7 +134,7 @@ int main(int argc, char *argv[]) {
         llvm::outs() << "Forest bytes: " << Arena.bytes()
                      << " nodes: " << Arena.nodeCount() << "\n";
         llvm::outs() << "GSS bytes: " << GSS.bytes()
-                     << " nodes: " << GSS.nodeCount() << "\n";
+                     << " nodes: " << GSS.nodesCreated() << "\n";
       }
     }
   }

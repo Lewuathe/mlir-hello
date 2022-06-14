@@ -29,7 +29,6 @@
 #include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/ModuleMap.h"
 #include "clang/Lex/PPCallbacks.h"
-#include "clang/Lex/PreprocessorExcludedConditionalDirectiveSkipMapping.h"
 #include "clang/Lex/Token.h"
 #include "clang/Lex/TokenLexer.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -558,6 +557,7 @@ private:
     CLK_Lexer,
     CLK_TokenLexer,
     CLK_CachingLexer,
+    CLK_DependencyDirectivesLexer,
     CLK_LexAfterModuleImport
   } CurLexerKind = CLK_Lexer;
 
@@ -2243,10 +2243,7 @@ private:
   ///
   /// \param Tok - Token that represents the directive
   /// \param Directive - String reference for the directive name
-  /// \param EndLoc - End location for fixit
-  void SuggestTypoedDirective(const Token &Tok,
-                              StringRef Directive,
-                              const SourceLocation &EndLoc) const;
+  void SuggestTypoedDirective(const Token &Tok, StringRef Directive) const;
 
   /// We just read a \#if or related directive and decided that the
   /// subsequent tokens are in the \#if'd out portion of the
@@ -2595,14 +2592,6 @@ private:
   void emitMacroDeprecationWarning(const Token &Identifier) const;
   void emitRestrictExpansionWarning(const Token &Identifier) const;
   void emitFinalMacroWarning(const Token &Identifier, bool IsUndef) const;
-
-  Optional<unsigned>
-  getSkippedRangeForExcludedConditionalBlock(SourceLocation HashLoc);
-
-  /// Contains the currently active skipped range mappings for skipping excluded
-  /// conditional directives.
-  ExcludedPreprocessorDirectiveSkipMapping
-      *ExcludedConditionalDirectiveSkipMappings;
 };
 
 /// Abstract base class that describes a handler that will receive

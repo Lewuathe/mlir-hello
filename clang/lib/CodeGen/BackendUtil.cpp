@@ -453,6 +453,7 @@ static bool initTargetOptions(DiagnosticsEngine &Diags,
   }
 
   Options.MCOptions.SplitDwarfFile = CodeGenOpts.SplitDwarfFile;
+  Options.MCOptions.EmitDwarfUnwind = CodeGenOpts.getEmitDwarfUnwind();
   Options.MCOptions.MCRelaxAll = CodeGenOpts.RelaxAll;
   Options.MCOptions.MCSaveTempLabels = CodeGenOpts.SaveTempLabels;
   Options.MCOptions.MCUseDwarfDirectory =
@@ -1221,6 +1222,6 @@ void clang::EmbedObject(llvm::Module *M, const CodeGenOptions &CGOpts,
     }
 
     llvm::embedBufferInModule(*M, **ObjectOrErr, ".llvm.offloading",
-                              Align(OffloadBinary::getAlignment()));
+                              Align(object::OffloadBinary::getAlignment()));
   }
 }

@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 //  This file defines a meta-engine for path-sensitive dataflow analysis that
-//  is built on GREngine, but provides the boilerplate to execute transfer
+//  is built on CoreEngine, but provides the boilerplate to execute transfer
 //  functions and build the ExplodedGraph at the expression level.
 //
 //===----------------------------------------------------------------------===//
@@ -613,6 +613,8 @@ void ExprEngine::printJson(raw_ostream &Out, ProgramStateRef State,
 }
 
 void ExprEngine::processEndWorklist() {
+  // This prints the name of the top-level function if we crash.
+  PrettyStackTraceLocationContext CrashInfo(getRootLocationContext());
   getCheckerManager().runCheckersForEndAnalysis(G, BR, *this);
 }
 

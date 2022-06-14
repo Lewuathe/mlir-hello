@@ -103,8 +103,11 @@ Tristate IsDefinedAssignment(
   if (!lhsType || !rhsType) {
     return Tristate::No; // error or rhs is untyped
   }
-  if (lhsType->IsUnlimitedPolymorphic() || rhsType->IsUnlimitedPolymorphic()) {
+  if (lhsType->IsUnlimitedPolymorphic()) {
     return Tristate::No;
+  }
+  if (rhsType->IsUnlimitedPolymorphic()) {
+    return Tristate::Maybe;
   }
   TypeCategory lhsCat{lhsType->category()};
   TypeCategory rhsCat{rhsType->category()};
@@ -665,7 +668,7 @@ bool HasImpureFinal(const DerivedTypeSpec &derived) {
           derived.typeSymbol().detailsIf<DerivedTypeDetails>()}) {
     const auto &finals{details->finals()};
     return std::any_of(finals.begin(), finals.end(),
-        [](const auto &x) { return !x.second->attrs().test(Attr::PURE); });
+        [](const auto &x) { return !IsPureProcedure(*x.second); });
   } else {
     return false;
   }

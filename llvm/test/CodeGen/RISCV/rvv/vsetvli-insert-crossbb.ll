@@ -505,8 +505,8 @@ define <vscale x 2 x i32> @test_vsetvli_x0_x0(<vscale x 2 x i32>* %x, <vscale x 
 ; CHECK-NEXT:    andi a0, a3, 1
 ; CHECK-NEXT:    beqz a0, .LBB9_2
 ; CHECK-NEXT:  # %bb.1: # %if
-; CHECK-NEXT:    vsetvli zero, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vle16.v v10, (a1)
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vwcvt.x.x.v v8, v10
 ; CHECK-NEXT:  .LBB9_2: # %if.end
 ; CHECK-NEXT:    vsetvli zero, zero, e32, m1, ta, mu
@@ -544,8 +544,8 @@ define <vscale x 2 x i32> @test_vsetvli_x0_x0_2(<vscale x 2 x i32>* %x, <vscale 
 ; CHECK-NEXT:    andi a0, a4, 1
 ; CHECK-NEXT:    beqz a0, .LBB10_2
 ; CHECK-NEXT:  # %bb.1: # %if
-; CHECK-NEXT:    vsetvli zero, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vle16.v v10, (a1)
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vwadd.wv v9, v9, v10
 ; CHECK-NEXT:  .LBB10_2: # %if.end
 ; CHECK-NEXT:    andi a0, a5, 1
@@ -747,7 +747,6 @@ define void @vector_init_vsetvli_fv2(i64 %N, double* %c) {
 ; CHECK-LABEL: vector_init_vsetvli_fv2:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    li a2, 0
-; CHECK-NEXT:    vsetivli zero, 4, e64, m1, ta, mu
 ; CHECK-NEXT:    vsetvli a3, zero, e64, m1, ta, mu
 ; CHECK-NEXT:    vmv.v.i v8, 0
 ; CHECK-NEXT:  .LBB15_1: # %for.body
@@ -812,14 +811,12 @@ for.end:                                          ; preds = %for.body
 ; Demonstrates a case where mutation in phase3 is problematic.  We mutate the
 ; vsetvli without considering that it changes the compatibility result of the
 ; vadd in the second block.
-; FIXME: This currently crashes with strict asserts enabled.
 define <vscale x 4 x i32> @cross_block_mutate(<vscale x 4 x i32> %a, <vscale x 4 x i32> %b,
 ; CHECK-LABEL: cross_block_mutate:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    vsetivli a0, 6, e32, m2, tu, mu
 ; CHECK-NEXT:    vmv.s.x v8, a0
 ; CHECK-NEXT:    vadd.vv v8, v8, v10, v0.t
-; CHECK-NEXT:    vsetvli zero, a0, e32, m2, tu, mu
 ; CHECK-NEXT:    ret
                                          <vscale x 4 x i1> %mask) {
 entry:
@@ -833,6 +830,61 @@ fallthrough:
                <vscale x 4 x i32> undef, <vscale x 4 x i32> %a.mod,
                <vscale x 4 x i32> %b, <vscale x 4 x i1> %mask, i64 %vl, i64 0)
   ret <vscale x 4 x i32> %res
+}
+
+define <vscale x 2 x i32> @pre_lmul(<vscale x 2 x i32> %x, <vscale x 2 x i32> %y, i1 %cond) nounwind {
+; CHECK-LABEL: pre_lmul:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    andi a1, a0, 1
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
+; CHECK-NEXT:    vsetvli a2, zero, e32, m1, ta, mu
+; CHECK-NEXT:    vadd.vv v8, v8, v9
+; CHECK-NEXT:    beqz a1, .LBB18_2
+; CHECK-NEXT:  # %bb.1: # %if
+; CHECK-NEXT:    vsetvli a1, zero, e32, m2, ta, mu
+; CHECK-NEXT:  .LBB18_2: # %if.end
+; CHECK-NEXT:    vsetvli zero, a0, e32, m1, ta, mu
+; CHECK-NEXT:    vadd.vv v8, v8, v9
+; CHECK-NEXT:    ret
+entry:
+  %vl = tail call i64 @llvm.riscv.vsetvlimax.i64(i64 3, i64 0)
+  %a = call <vscale x 2 x i32> @llvm.riscv.vadd.nxv2i32(<vscale x 2 x i32> undef, <vscale x 2 x i32> %x, <vscale x 2 x i32> %y, i64 %vl)
+  br i1 %cond, label %if, label %if.end
+
+if:
+  ; Deliberately change vtype - this could be an unknown call, but the broader
+  ; code quality is distractingly bad
+  tail call i64 @llvm.riscv.vsetvlimax.i64(i64 2, i64 1)
+  br label %if.end
+
+if.end:
+  %b = call <vscale x 2 x i32> @llvm.riscv.vadd.nxv2i32(<vscale x 2 x i32> undef, <vscale x 2 x i32> %a, <vscale x 2 x i32> %y, i64 %vl)
+  ret <vscale x 2 x i32> %b
+}
+
+define <vscale x 1 x double> @compat_store_consistency(i1 %cond, <vscale x 1 x double> %a, <vscale x 1 x double> %b, <vscale x 1 x double>* %p1, <vscale x 1 x float> %c, <vscale x 1 x float>* %p2) {
+; CHECK-LABEL: compat_store_consistency:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    andi a0, a0, 1
+; CHECK-NEXT:    vsetvli a3, zero, e64, m1, ta, mu
+; CHECK-NEXT:    vfadd.vv v8, v8, v9
+; CHECK-NEXT:    vs1r.v v8, (a1)
+; CHECK-NEXT:    beqz a0, .LBB19_2
+; CHECK-NEXT:  # %bb.1: # %if.then
+; CHECK-NEXT:    vse32.v v10, (a2)
+; CHECK-NEXT:  .LBB19_2: # %if.end
+; CHECK-NEXT:    ret
+entry:
+  %res = fadd <vscale x 1 x double> %a, %b
+  store <vscale x 1 x double> %res, <vscale x 1 x double>* %p1
+  br i1 %cond, label %if.then, label %if.end
+
+if.then:                                          ; preds = %entry
+  store <vscale x 1 x float> %c, <vscale x 1 x float>* %p2
+  br label %if.end
+
+if.end:                                           ; preds = %if.else, %if.then
+  ret <vscale x 1 x double> %res
 }
 
 declare i64 @llvm.riscv.vsetvlimax.i64(i64, i64)

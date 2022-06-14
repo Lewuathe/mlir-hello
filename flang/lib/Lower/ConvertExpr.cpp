@@ -30,13 +30,13 @@
 #include "flang/Lower/Mangler.h"
 #include "flang/Lower/Runtime.h"
 #include "flang/Lower/Support/Utils.h"
-#include "flang/Lower/Todo.h"
 #include "flang/Optimizer/Builder/Character.h"
 #include "flang/Optimizer/Builder/Complex.h"
 #include "flang/Optimizer/Builder/Factory.h"
 #include "flang/Optimizer/Builder/Runtime/Character.h"
 #include "flang/Optimizer/Builder/Runtime/RTBuilder.h"
 #include "flang/Optimizer/Builder/Runtime/Ragged.h"
+#include "flang/Optimizer/Builder/Todo.h"
 #include "flang/Optimizer/Dialect/FIRAttr.h"
 #include "flang/Optimizer/Dialect/FIRDialect.h"
 #include "flang/Optimizer/Dialect/FIROpsSupport.h"
@@ -839,7 +839,7 @@ public:
           mlir::Value rawLen = fir::getBase(genval(*lengthExpr));
           // F2018 7.4.4.2 point 5.
           funcPtrResultLength =
-              Fortran::lower::genMaxWithZero(builder, getLoc(), rawLen);
+              fir::factory::genMaxWithZero(builder, getLoc(), rawLen);
         }
       }
       if (!funcPtrResultLength)
@@ -2223,7 +2223,7 @@ public:
                   type->characterTypeSpec().length().GetExplicit()) {
             mlir::Value len = fir::getBase(genval(*lenExpr));
             // F2018 7.4.4.2 point 5.
-            len = Fortran::lower::genMaxWithZero(builder, getLoc(), len);
+            len = fir::factory::genMaxWithZero(builder, getLoc(), len);
             symMap.addSymbol(*arg,
                              replaceScalarCharacterLength(gen(*expr), len));
             continue;
@@ -7587,16 +7587,4 @@ void Fortran::lower::createArrayMergeStores(
   esp.outerLoop = llvm::None;
   esp.resetBindings();
   esp.incrementCounter();
-}
-
-mlir::Value Fortran::lower::genMaxWithZero(fir::FirOpBuilder &builder,
-                                           mlir::Location loc,
-                                           mlir::Value value) {
-  mlir::Value zero = builder.createIntegerConstant(loc, value.getType(), 0);
-  if (mlir::Operation *definingOp = value.getDefiningOp())
-    if (auto cst = mlir::dyn_cast<mlir::arith::ConstantOp>(definingOp))
-      if (auto intAttr = cst.getValue().dyn_cast<mlir::IntegerAttr>())
-        return intAttr.getInt() < 0 ? zero : value;
-  return Fortran::lower::genMax(builder, loc,
-                                llvm::SmallVector<mlir::Value>{value, zero});
 }

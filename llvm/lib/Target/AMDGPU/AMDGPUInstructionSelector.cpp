@@ -458,6 +458,24 @@ bool AMDGPUInstructionSelector::selectG_UADDO_USUBO_UADDE_USUBE(
   return true;
 }
 
+bool AMDGPUInstructionSelector::selectG_AMDGPU_MAD_64_32(
+    MachineInstr &I) const {
+  MachineBasicBlock *BB = I.getParent();
+  MachineFunction *MF = BB->getParent();
+  const bool IsUnsigned = I.getOpcode() == AMDGPU::G_AMDGPU_MAD_U64_U32;
+
+  unsigned Opc;
+  if (Subtarget->getGeneration() == AMDGPUSubtarget::GFX11)
+    Opc = IsUnsigned ? AMDGPU::V_MAD_U64_U32_gfx11_e64
+                     : AMDGPU::V_MAD_I64_I32_gfx11_e64;
+  else
+    Opc = IsUnsigned ? AMDGPU::V_MAD_U64_U32_e64 : AMDGPU::V_MAD_I64_I32_e64;
+  I.setDesc(TII.get(Opc));
+  I.addOperand(*MF, MachineOperand::CreateImm(0));
+  I.addImplicitDefUseOperands(*MF);
+  return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+}
+
 // TODO: We should probably legalize these to only using 32-bit results.
 bool AMDGPUInstructionSelector::selectG_EXTRACT(MachineInstr &I) const {
   MachineBasicBlock *BB = I.getParent();
@@ -1434,23 +1452,7 @@ bool AMDGPUInstructionSelector::selectDSGWSIntrinsic(MachineInstr &MI,
 
   if (HasVSrc) {
     Register VSrc = MI.getOperand(1).getReg();
-
-    if (STI.needsAlignedVGPRs()) {
-      // Add implicit aligned super-reg to force alignment on the data operand.
-      Register Undef = MRI->createVirtualRegister(&AMDGPU::VGPR_32RegClass);
-      BuildMI(*MBB, &*MIB, DL, TII.get(AMDGPU::IMPLICIT_DEF), Undef);
-      Register NewVR =
-          MRI->createVirtualRegister(&AMDGPU::VReg_64_Align2RegClass);
-      BuildMI(*MBB, &*MIB, DL, TII.get(AMDGPU::REG_SEQUENCE), NewVR)
-          .addReg(VSrc, 0, MI.getOperand(1).getSubReg())
-          .addImm(AMDGPU::sub0)
-          .addReg(Undef)
-          .addImm(AMDGPU::sub1);
-      MIB.addReg(NewVR, 0, AMDGPU::sub0);
-      MIB.addReg(NewVR, RegState::Implicit);
-    } else {
-      MIB.addReg(VSrc);
-    }
+    MIB.addReg(VSrc);
 
     if (!RBI.constrainGenericRegister(VSrc, AMDGPU::VGPR_32RegClass, *MRI))
       return false;
@@ -1458,6 +1460,8 @@ bool AMDGPUInstructionSelector::selectDSGWSIntrinsic(MachineInstr &MI,
 
   MIB.addImm(ImmOffset)
      .cloneMemRefs(MI);
+
+  TII.enforceOperandRCAlignment(*MIB, AMDGPU::OpName::data0);
 
   MI.eraseFromParent();
   return true;
@@ -1655,7 +1659,18 @@ bool AMDGPUInstructionSelector::selectImageIntrinsic(
                                           : AMDGPU::MIMGEncGfx10Default,
                                    NumVDataDwords, NumVAddrDwords);
   } else {
-    if (STI.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+    if (Subtarget->hasGFX90AInsts()) {
+      Opcode = AMDGPU::getMIMGOpcode(IntrOpcode, AMDGPU::MIMGEncGfx90a,
+                                     NumVDataDwords, NumVAddrDwords);
+      if (Opcode == -1) {
+        LLVM_DEBUG(
+            dbgs()
+            << "requested image instruction is not supported on this GPU\n");
+        return false;
+      }
+    }
+    if (Opcode == -1 &&
+        STI.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
       Opcode = AMDGPU::getMIMGOpcode(IntrOpcode, AMDGPU::MIMGEncGfx8,
                                      NumVDataDwords, NumVAddrDwords);
     if (Opcode == -1)
@@ -1713,7 +1728,13 @@ bool AMDGPUInstructionSelector::selectImageIntrinsic(
   if (IsGFX10Plus)
     MIB.addImm(IsA16 ? -1 : 0);
 
-  MIB.addImm(TFE); // tfe
+  if (!Subtarget->hasGFX90AInsts()) {
+    MIB.addImm(TFE); // tfe
+  } else if (TFE) {
+    LLVM_DEBUG(dbgs() << "TFE is not supported on this GPU\n");
+    return false;
+  }
+
   MIB.addImm(LWE); // lwe
   if (!IsGFX10Plus)
     MIB.addImm(DimInfo->DA ? -1 : 0);
@@ -1753,7 +1774,9 @@ bool AMDGPUInstructionSelector::selectImageIntrinsic(
   }
 
   MI.eraseFromParent();
-  return constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+  constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+  TII.enforceOperandRCAlignment(*MIB, AMDGPU::OpName::vaddr);
+  return true;
 }
 
 bool AMDGPUInstructionSelector::selectG_INTRINSIC_W_SIDE_EFFECTS(
@@ -3347,6 +3370,9 @@ bool AMDGPUInstructionSelector::select(MachineInstr &I) {
   case TargetOpcode::G_UADDE:
   case TargetOpcode::G_USUBE:
     return selectG_UADDO_USUBO_UADDE_USUBE(I);
+  case AMDGPU::G_AMDGPU_MAD_U64_U32:
+  case AMDGPU::G_AMDGPU_MAD_I64_I32:
+    return selectG_AMDGPU_MAD_64_32(I);
   case TargetOpcode::G_INTTOPTR:
   case TargetOpcode::G_BITCAST:
   case TargetOpcode::G_PTRTOINT:
@@ -3959,6 +3985,24 @@ AMDGPUInstructionSelector::selectScratchSAddr(MachineOperand &Root) const {
   }};
 }
 
+// Check whether the flat scratch SVS swizzle bug affects this access.
+bool AMDGPUInstructionSelector::checkFlatScratchSVSSwizzleBug(
+    Register VAddr, Register SAddr, uint64_t ImmOffset) const {
+  if (!Subtarget->hasFlatScratchSVSSwizzleBug())
+    return false;
+
+  // The bug affects the swizzling of SVS accesses if there is any carry out
+  // from the two low order bits (i.e. from bit 1 into bit 2) when adding
+  // voffset to (soffset + inst_offset).
+  auto VKnown = KnownBits->getKnownBits(VAddr);
+  auto SKnown = KnownBits::computeForAddSub(
+      true, false, KnownBits->getKnownBits(SAddr),
+      KnownBits::makeConstant(APInt(32, ImmOffset)));
+  uint64_t VMax = VKnown.getMaxValue().getZExtValue();
+  uint64_t SMax = SKnown.getMaxValue().getZExtValue();
+  return (VMax & 3) + (SMax & 3) >= 4;
+}
+
 InstructionSelector::ComplexRendererFns
 AMDGPUInstructionSelector::selectScratchSVAddr(MachineOperand &Root) const {
   Register Addr = Root.getReg();
@@ -3986,6 +4030,9 @@ AMDGPUInstructionSelector::selectScratchSVAddr(MachineOperand &Root) const {
 
   Register LHS = AddrDef->MI->getOperand(1).getReg();
   auto LHSDef = getDefSrcRegIgnoringCopies(LHS, *MRI);
+
+  if (checkFlatScratchSVSSwizzleBug(RHS, LHS, ImmOffset))
+    return None;
 
   if (LHSDef->MI->getOpcode() == AMDGPU::G_FRAME_INDEX) {
     int FI = LHSDef->MI->getOperand(1).getIndex();
