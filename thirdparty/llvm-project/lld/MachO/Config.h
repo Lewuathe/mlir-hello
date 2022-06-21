@@ -43,8 +43,8 @@ struct PlatformInfo {
 
 inline uint32_t encodeVersion(const llvm::VersionTuple &version) {
   return ((version.getMajor() << 020) |
-          (version.getMinor().getValueOr(0) << 010) |
-          version.getSubminor().getValueOr(0));
+          (version.getMinor().value_or(0) << 010) |
+          version.getSubminor().value_or(0));
 }
 
 enum class NamespaceKind {
@@ -185,6 +185,7 @@ struct Configuration {
   SectionRenameMap sectionRenameMap;
   SegmentRenameMap segmentRenameMap;
 
+  bool hasExplicitExports = false;
   SymbolPatterns exportedSymbols;
   SymbolPatterns unexportedSymbols;
   SymbolPatterns whyLive;

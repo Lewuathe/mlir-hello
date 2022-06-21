@@ -1186,8 +1186,11 @@ MachineInstr *X86InstrInfo::convertToThreeAddressWithLEA(unsigned MIOpc,
   case X86::SHL8ri:
   case X86::SHL16ri: {
     unsigned ShAmt = MI.getOperand(2).getImm();
-    MIB.addReg(0).addImm(1ULL << ShAmt)
-       .addReg(InRegLEA, RegState::Kill).addImm(0).addReg(0);
+    MIB.addReg(0)
+        .addImm(1LL << ShAmt)
+        .addReg(InRegLEA, RegState::Kill)
+        .addImm(0)
+        .addReg(0);
     break;
   }
   case X86::INC8r:
@@ -1350,7 +1353,7 @@ MachineInstr *X86InstrInfo::convertToThreeAddress(MachineInstr &MI,
     NewMI = BuildMI(MF, MI.getDebugLoc(), get(X86::LEA64r))
                 .add(Dest)
                 .addReg(0)
-                .addImm(1ULL << ShAmt)
+                .addImm(1LL << ShAmt)
                 .add(Src)
                 .addImm(0)
                 .addReg(0);
@@ -1374,7 +1377,7 @@ MachineInstr *X86InstrInfo::convertToThreeAddress(MachineInstr &MI,
         BuildMI(MF, MI.getDebugLoc(), get(Opc))
             .add(Dest)
             .addReg(0)
-            .addImm(1ULL << ShAmt)
+            .addImm(1LL << ShAmt)
             .addReg(SrcReg, getKillRegState(isKill))
             .addImm(0)
             .addReg(0);
@@ -4459,6 +4462,11 @@ bool X86InstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
         return false;
       case X86::COND_G: case X86::COND_GE:
       case X86::COND_L: case X86::COND_LE:
+        // If SF is used, but the instruction doesn't update the SF, then we
+        // can't do the optimization.
+        if (NoSignFlag)
+          return false;
+        LLVM_FALLTHROUGH;
       case X86::COND_O: case X86::COND_NO:
         // If OF is used, the instruction needs to clear it like CmpZero does.
         if (!ClearsOverflowFlag)

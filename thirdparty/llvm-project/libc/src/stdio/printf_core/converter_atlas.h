@@ -24,6 +24,7 @@
 
 // defines convert_oct
 // defines convert_hex
+#include "src/stdio/printf_core/hex_converter.h"
 
 // TODO(michaelrj): add a flag to disable float point values here
 // defines convert_float_decimal
@@ -35,5 +36,6 @@
 // defines convert_write_int
 
 // defines convert_pointer
+#include "src/stdio/printf_core/ptr_converter.h"
 
 #endif // LLVM_LIBC_SRC_STDIO_PRINTF_CORE_CONVERTER_ATLAS_H

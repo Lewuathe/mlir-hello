@@ -1654,11 +1654,13 @@ void BinaryFunction::postProcessJumpTables() {
                 "detected in function "
              << *this << '\n';
     }
-    for (unsigned I = 0; I < JT.OffsetEntries.size(); ++I) {
-      MCSymbol *Label =
-          getOrCreateLocalLabel(getAddress() + JT.OffsetEntries[I],
-                                /*CreatePastEnd*/ true);
-      JT.Entries.push_back(Label);
+    if (JT.Entries.empty()) {
+      for (unsigned I = 0; I < JT.OffsetEntries.size(); ++I) {
+        MCSymbol *Label =
+            getOrCreateLocalLabel(getAddress() + JT.OffsetEntries[I],
+                                  /*CreatePastEnd*/ true);
+        JT.Entries.push_back(Label);
+      }
     }
 
     const uint64_t BDSize =
@@ -1699,12 +1701,6 @@ void BinaryFunction::postProcessJumpTables() {
     }
   }
   clearList(JTSites);
-
-  // Free memory used by jump table offsets.
-  for (auto &JTI : JumpTables) {
-    JumpTable &JT = *JTI.second;
-    clearList(JT.OffsetEntries);
-  }
 
   // Conservatively populate all possible destinations for unknown indirect
   // branches.
@@ -1957,8 +1953,10 @@ bool BinaryFunction::buildCFG(MCPlusBuilder::AllocatorIdTy AllocatorId) {
     if (LI != Labels.end()) {
       // Always create new BB at branch destination.
       PrevBB = InsertBB ? InsertBB : PrevBB;
-      InsertBB = addBasicBlock(LI->first, LI->second,
-                               opts::PreserveBlocksAlignment && IsLastInstrNop);
+      InsertBB = addBasicBlockAt(LI->first, LI->second);
+      if (opts::PreserveBlocksAlignment && IsLastInstrNop)
+        InsertBB->setDerivedAlignment();
+
       if (PrevBB)
         updateOffset(LastInstrOffset);
     }
@@ -1997,8 +1995,9 @@ bool BinaryFunction::buildCFG(MCPlusBuilder::AllocatorIdTy AllocatorId) {
           auto L = BC.scopeLock();
           Label = BC.Ctx->createNamedTempSymbol("FT");
         }
-        InsertBB = addBasicBlock(
-            Offset, Label, opts::PreserveBlocksAlignment && IsLastInstrNop);
+        InsertBB = addBasicBlockAt(Offset, Label);
+        if (opts::PreserveBlocksAlignment && IsLastInstrNop)
+          InsertBB->setDerivedAlignment();
         updateOffset(LastInstrOffset);
       }
     }
@@ -2255,8 +2254,9 @@ void BinaryFunction::removeConditionalTailCalls() {
     // Link new BBs to the original input offset of the BB where the CTC
     // is, so we can map samples recorded in new BBs back to the original BB
     // seem in the input binary (if using BAT)
-    std::unique_ptr<BinaryBasicBlock> TailCallBB = createBasicBlock(
-        BB.getInputOffset(), BC.Ctx->createNamedTempSymbol("TC"));
+    std::unique_ptr<BinaryBasicBlock> TailCallBB =
+        createBasicBlock(BC.Ctx->createNamedTempSymbol("TC"));
+    TailCallBB->setOffset(BB.getInputOffset());
     TailCallBB->addInstruction(TailCallInstr);
     TailCallBB->setCFIState(CFIStateBeforeCTC);
 
@@ -3833,8 +3833,8 @@ BinaryBasicBlock *BinaryFunction::splitEdge(BinaryBasicBlock *From,
   // Link new BBs to the original input offset of the From BB, so we can map
   // samples recorded in new BBs back to the original BB seem in the input
   // binary (if using BAT)
-  std::unique_ptr<BinaryBasicBlock> NewBB =
-      createBasicBlock(From->getInputOffset(), Tmp);
+  std::unique_ptr<BinaryBasicBlock> NewBB = createBasicBlock(Tmp);
+  NewBB->setOffset(From->getInputOffset());
   BinaryBasicBlock *NewBBPtr = NewBB.get();
 
   // Update "From" BB

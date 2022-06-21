@@ -13,7 +13,9 @@
 
 #include "AMDGPUISelDAGToDAG.h"
 #include "AMDGPU.h"
+#include "AMDGPUSubtarget.h"
 #include "AMDGPUTargetMachine.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "MCTargetDesc/R600MCTargetDesc.h"
 #include "R600RegisterInfo.h"
 #include "SIMachineFunctionInfo.h"
@@ -2606,6 +2608,30 @@ bool AMDGPUDAGToDAGISel::SelectVOP3NoMods(SDValue In, SDValue &Src) const {
   return true;
 }
 
+bool AMDGPUDAGToDAGISel::SelectVINTERPModsImpl(SDValue In, SDValue &Src,
+                                               SDValue &SrcMods,
+                                               bool OpSel) const {
+  unsigned Mods;
+  if (SelectVOP3ModsImpl(In, Src, Mods, /* AllowAbs */ false)) {
+    if (OpSel)
+      Mods |= SISrcMods::OP_SEL_0;
+    SrcMods = CurDAG->getTargetConstant(Mods, SDLoc(In), MVT::i32);
+    return true;
+  }
+
+  return false;
+}
+
+bool AMDGPUDAGToDAGISel::SelectVINTERPMods(SDValue In, SDValue &Src,
+                                           SDValue &SrcMods) const {
+  return SelectVINTERPModsImpl(In, Src, SrcMods, /* OpSel */ false);
+}
+
+bool AMDGPUDAGToDAGISel::SelectVINTERPModsHi(SDValue In, SDValue &Src,
+                                             SDValue &SrcMods) const {
+  return SelectVINTERPModsImpl(In, Src, SrcMods, /* OpSel */ true);
+}
+
 bool AMDGPUDAGToDAGISel::SelectVOP3Mods0(SDValue In, SDValue &Src,
                                          SDValue &SrcMods, SDValue &Clamp,
                                          SDValue &Omod) const {
@@ -2739,6 +2765,21 @@ bool AMDGPUDAGToDAGISel::SelectVOP3PMods(SDValue In, SDValue &Src,
 bool AMDGPUDAGToDAGISel::SelectVOP3PModsDOT(SDValue In, SDValue &Src,
                                             SDValue &SrcMods) const {
   return SelectVOP3PMods(In, Src, SrcMods, true);
+}
+
+bool AMDGPUDAGToDAGISel::SelectDotIUVOP3PMods(SDValue In, SDValue &Src) const {
+  const ConstantSDNode *C = cast<ConstantSDNode>(In);
+  // Literal i1 value set in intrinsic, represents SrcMods for the next operand.
+  // 1 promotes packed values to signed, 0 treats them as unsigned.
+  assert(C->getAPIntValue().getBitWidth() == 1 && "expected i1 value");
+
+  unsigned Mods = SISrcMods::OP_SEL_1;
+  unsigned SrcSign = C->getAPIntValue().getZExtValue();
+  if (SrcSign == 1)
+    Mods ^= SISrcMods::NEG;
+
+  Src = CurDAG->getTargetConstant(Mods, SDLoc(In), MVT::i32);
+  return true;
 }
 
 bool AMDGPUDAGToDAGISel::SelectVOP3OpSel(SDValue In, SDValue &Src,

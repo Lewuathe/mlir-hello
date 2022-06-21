@@ -82,7 +82,8 @@ define double @half_to_double() strictfp {
 ; X64-NOF16C-NEXT:    pushq %rax
 ; X64-NOF16C-NEXT:    .cfi_def_cfa_offset 16
 ; X64-NOF16C-NEXT:    pinsrw $0, _a(%rip), %xmm0
-; X64-NOF16C-NEXT:    callq ___extendhfdf2
+; X64-NOF16C-NEXT:    callq ___extendhfsf2
+; X64-NOF16C-NEXT:    cvtss2sd %xmm0, %xmm0
 ; X64-NOF16C-NEXT:    popq %rax
 ; X64-NOF16C-NEXT:    retq
 ;
