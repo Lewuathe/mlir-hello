@@ -2539,6 +2539,14 @@ bool SelectionDAG::MaskedValueIsZero(SDValue V, const APInt &Mask,
   return Mask.isSubsetOf(computeKnownBits(V, DemandedElts, Depth).Zero);
 }
 
+/// MaskedVectorIsZero - Return true if 'Op' is known to be zero in
+/// DemandedElts.  We use this predicate to simplify operations downstream.
+bool SelectionDAG::MaskedVectorIsZero(SDValue V, const APInt &DemandedElts,
+                                      unsigned Depth /* = 0 */) const {
+  APInt Mask = APInt::getAllOnes(V.getScalarValueSizeInBits());
+  return Mask.isSubsetOf(computeKnownBits(V, DemandedElts, Depth).Zero);
+}
+
 /// MaskedValueIsAllOnes - Return true if '(Op & Mask) == Mask'.
 bool SelectionDAG::MaskedValueIsAllOnes(SDValue V, const APInt &Mask,
                                         unsigned Depth) const {
@@ -4979,9 +4987,11 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
     case ISD::CTTZ_ZERO_UNDEF:
       return getConstant(Val.countTrailingZeros(), DL, VT, C->isTargetOpcode(),
                          C->isOpaque());
-    case ISD::FP16_TO_FP: {
+    case ISD::FP16_TO_FP:
+    case ISD::BF16_TO_FP: {
       bool Ignored;
-      APFloat FPV(APFloat::IEEEhalf(),
+      APFloat FPV(Opcode == ISD::FP16_TO_FP ? APFloat::IEEEhalf()
+                                            : APFloat::BFloat(),
                   (Val.getBitWidth() == 16) ? Val : Val.trunc(16));
 
       // This can return overflow, underflow, or inexact; we don't care.
@@ -5055,11 +5065,13 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
       if (VT == MVT::i64 && C->getValueType(0) == MVT::f64)
         return getConstant(V.bitcastToAPInt().getZExtValue(), DL, VT);
       break;
-    case ISD::FP_TO_FP16: {
+    case ISD::FP_TO_FP16:
+    case ISD::FP_TO_BF16: {
       bool Ignored;
       // This can return overflow, underflow, or inexact; we don't care.
       // FIXME need to be more flexible about rounding mode.
-      (void)V.convert(APFloat::IEEEhalf(),
+      (void)V.convert(Opcode == ISD::FP_TO_FP16 ? APFloat::IEEEhalf()
+                                                : APFloat::BFloat(),
                       APFloat::rmNearestTiesToEven, &Ignored);
       return getConstant(V.bitcastToAPInt().getZExtValue(), DL, VT);
     }
@@ -6739,7 +6751,7 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     if (!TRI->hasStackRealignment(MF))
       while (NewAlign > Alignment && DL.exceedsNaturalStackAlignment(NewAlign))
-        NewAlign = NewAlign / 2;
+        NewAlign = NewAlign.previous();
 
     if (NewAlign > Alignment) {
       // Give the stack frame object a larger alignment if needed.
@@ -10662,10 +10674,9 @@ bool llvm::isNullOrNullSplat(SDValue N, bool AllowUndefs) {
 }
 
 bool llvm::isOneOrOneSplat(SDValue N, bool AllowUndefs) {
-  // TODO: may want to use peekThroughBitcast() here.
-  unsigned BitWidth = N.getScalarValueSizeInBits();
-  ConstantSDNode *C = isConstOrConstSplat(N, AllowUndefs);
-  return C && C->isOne() && C->getValueSizeInBits(0) == BitWidth;
+  ConstantSDNode *C =
+      isConstOrConstSplat(N, AllowUndefs, /*AllowTruncation*/ true);
+  return C && C->isOne();
 }
 
 bool llvm::isAllOnesOrAllOnesSplat(SDValue N, bool AllowUndefs) {

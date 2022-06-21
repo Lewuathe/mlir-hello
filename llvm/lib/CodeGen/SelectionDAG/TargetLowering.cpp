@@ -1539,6 +1539,19 @@ bool TargetLowering::SimplifyDemandedBits(
     // Only known if known in both the LHS and RHS.
     Known = KnownBits::commonBits(Known, Known2);
     break;
+  case ISD::VSELECT:
+    if (SimplifyDemandedBits(Op.getOperand(2), DemandedBits, DemandedElts,
+                             Known, TLO, Depth + 1))
+      return true;
+    if (SimplifyDemandedBits(Op.getOperand(1), DemandedBits, DemandedElts,
+                             Known2, TLO, Depth + 1))
+      return true;
+    assert(!Known.hasConflict() && "Bits known to be one AND zero?");
+    assert(!Known2.hasConflict() && "Bits known to be one AND zero?");
+
+    // Only known if known in both the LHS and RHS.
+    Known = KnownBits::commonBits(Known, Known2);
+    break;
   case ISD::SELECT_CC:
     if (SimplifyDemandedBits(Op.getOperand(3), DemandedBits, Known, TLO,
                              Depth + 1))
@@ -2065,7 +2078,8 @@ bool TargetLowering::SimplifyDemandedBits(
     // bit is demanded.
     InputDemandedBits.setBit(ExVTBits - 1);
 
-    if (SimplifyDemandedBits(Op0, InputDemandedBits, Known, TLO, Depth + 1))
+    if (SimplifyDemandedBits(Op0, InputDemandedBits, DemandedElts, Known, TLO,
+                             Depth + 1))
       return true;
     assert(!Known.hasConflict() && "Bits known to be one AND zero?");
 
@@ -2533,24 +2547,27 @@ bool TargetLowering::SimplifyDemandedBits(
       return 0;
     };
 
-    auto foldMul = [&](SDValue X, SDValue Y, unsigned ShlAmt) {
+    auto foldMul = [&](ISD::NodeType NT, SDValue X, SDValue Y, unsigned ShlAmt) {
       EVT ShiftAmtTy = getShiftAmountTy(VT, TLO.DAG.getDataLayout());
       SDValue ShlAmtC = TLO.DAG.getConstant(ShlAmt, dl, ShiftAmtTy);
       SDValue Shl = TLO.DAG.getNode(ISD::SHL, dl, VT, X, ShlAmtC);
-      SDValue Sub = TLO.DAG.getNode(ISD::SUB, dl, VT, Y, Shl);
-      return TLO.CombineTo(Op, Sub);
+      SDValue Res = TLO.DAG.getNode(NT, dl, VT, Y, Shl);
+      return TLO.CombineTo(Op, Res);
     };
 
     if (isOperationLegalOrCustom(ISD::SHL, VT)) {
       if (Op.getOpcode() == ISD::ADD) {
         // (X * MulC) + Op1 --> Op1 - (X << log2(-MulC))
         if (unsigned ShAmt = getShiftLeftAmt(Op0))
-          return foldMul(Op0.getOperand(0), Op1, ShAmt);
+          return foldMul(ISD::SUB, Op0.getOperand(0), Op1, ShAmt);
         // Op0 + (X * MulC) --> Op0 - (X << log2(-MulC))
         if (unsigned ShAmt = getShiftLeftAmt(Op1))
-          return foldMul(Op1.getOperand(0), Op0, ShAmt);
-        // TODO:
+          return foldMul(ISD::SUB, Op1.getOperand(0), Op0, ShAmt);
+      }
+      if (Op.getOpcode() == ISD::SUB) {
         // Op0 - (X * MulC) --> Op0 + (X << log2(-MulC))
+        if (unsigned ShAmt = getShiftLeftAmt(Op1))
+          return foldMul(ISD::ADD, Op1.getOperand(0), Op0, ShAmt);
       }
     }
 
@@ -2571,7 +2588,8 @@ bool TargetLowering::SimplifyDemandedBits(
 
   // If we know the value of all of the demanded bits, return this as a
   // constant.
-  if (DemandedBits.isSubsetOf(Known.Zero | Known.One)) {
+  if (!isTargetCanonicalConstantNode(Op) &&
+      DemandedBits.isSubsetOf(Known.Zero | Known.One)) {
     // Avoid folding to a constant if any OpaqueConstant is involved.
     const SDNode *N = Op.getNode();
     for (SDNode *Op :

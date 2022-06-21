@@ -753,7 +753,7 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
           .getManager();
 
   InlineAdvisor &Advisor = getAdvisor(MAMProxy, FAM, M);
-  Advisor.onPassEntry();
+  Advisor.onPassEntry(&InitialC);
 
   auto AdvisorOnExit = make_scope_exit([&] { Advisor.onPassExit(&InitialC); });
 
@@ -904,7 +904,7 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
       int CBCostMult =
           getStringFnAttrAsInt(
               *CB, InlineConstants::FunctionInlineCostMultiplierAttributeName)
-              .getValueOr(1);
+              .value_or(1);
 
       // Setup the data structure used to plumb customization into the
       // `InlineFunction` routine.

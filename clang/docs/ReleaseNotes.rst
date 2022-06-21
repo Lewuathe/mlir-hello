@@ -264,7 +264,9 @@ Improvements to Clang's diagnostics
 - ``-Wshift-overflow`` will not warn for signed left shifts in C++20 mode
   (and newer), as it will always wrap and never overflow. This fixes
   `Issue 52873 <https://github.com/llvm/llvm-project/issues/52873>`_.
-
+- When using class templates without arguments, clang now tells developers
+  that template arguments are missing in certain contexts.
+  This fixes `Issue 55962 <https://github.com/llvm/llvm-project/issues/55962>`_.
 
 Non-comprehensive list of changes in this release
 -------------------------------------------------
@@ -362,6 +364,11 @@ Attribute Changes in Clang
 - When the ``weak`` attribute is applied to a const qualified variable clang no longer
   tells the backend it is allowed to optimize based on initializer value.
 
+- Added the ``clang::annotate_type`` attribute, which can be used to add
+  annotations to types (see documentation for details).
+
+- Added half float to types that can be represented by ``__attribute__((mode(XX)))``.
+
 Windows Support
 ---------------
 
@@ -385,7 +392,6 @@ AIX Support
   when libraries depend on visibility to hide non-ABI facing entities). The
   ``-mignore-xcoff-visibility`` option can be manually specified on the
   command-line to recover the previous behavior if desired.
-
 
 C Language Changes in Clang
 ---------------------------
@@ -440,6 +446,10 @@ C++20 Feature Support
   that can be used for such compatibility. The demangler now demangles
   symbols with named module attachment.
 
+- As per "Conditionally Trivial Special Member Functions" (P0848), it is
+  now possible to overload destructors using concepts. Note that the rest
+  of the paper about other special member functions is not yet implemented.
+
 C++2b Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -473,6 +483,11 @@ ABI Changes in Clang
   (e.g. ``int : 0``) no longer prevents the structure from being considered a
   homogeneous floating-point or vector aggregate. The new behavior agrees with
   the AAPCS specification, and matches the similar bug fix in GCC 12.1.
+- All copy constructors can now be trivial if they are not user-provided,
+  regardless of the type qualifiers of the argument of the defaulted constructor,
+  fixing dr2171.
+  You can switch back to the old ABI behavior with the flag:
+  ``-fclang-abi-compat=14.0``.
 
 OpenMP Support in Clang
 -----------------------
@@ -492,6 +507,13 @@ X86 Support in Clang
 
 DWARF Support in Clang
 ----------------------
+
+- clang now adds DWARF information for inline strings in C/C++ programs,
+  allowing ``line:column`` symbolization of strings. Some debugging programs may
+  require updating, as this takes advantage of DWARF ``DW_TAG_variable``
+  structures *without* a ``DW_AT_name`` field, which is valid DWARF, but may be
+  handled incorrectly by some software (e.g. new failures with incorrect
+  assertions).
 
 Arm and AArch64 Support in Clang
 --------------------------------
@@ -558,6 +580,10 @@ Static Analyzer
   from common memory copy/manipulation functions such as ``memcpy``, ``mempcpy``, ``memmove``, ``memcmp``, `
   `strcmp``, ``strncmp``, ``strcpy``, ``strlen``, ``strsep`` and many more. Although
   this checker currently is in list of alpha checkers due to a false positive.
+
+- Added a new checker ``alpha.unix.Errno``. This can find the first read
+  of ``errno`` after successful standard function calls, such use of ``errno``
+  could be unsafe.
 
 - Deprecate the ``-analyzer-store region`` and
   ``-analyzer-opt-analyze-nested-blocks`` analyzer flags.

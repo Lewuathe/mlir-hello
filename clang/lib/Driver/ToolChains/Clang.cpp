@@ -3577,20 +3577,13 @@ static void RenderBuiltinOptions(const ToolChain &TC, const llvm::Triple &T,
     UseBuiltins = false;
 
   // Process the -fno-builtin-* options.
-  for (const auto &Arg : Args) {
-    const Option &O = Arg->getOption();
-    if (!O.matches(options::OPT_fno_builtin_))
-      continue;
-
-    Arg->claim();
+  for (const Arg *A : Args.filtered(options::OPT_fno_builtin_)) {
+    A->claim();
 
     // If -fno-builtin is specified, then there's no need to pass the option to
     // the frontend.
-    if (!UseBuiltins)
-      continue;
-
-    StringRef FuncName = Arg->getValue();
-    CmdArgs.push_back(Args.MakeArgString("-fno-builtin-" + FuncName));
+    if (UseBuiltins)
+      A->render(Args, CmdArgs);
   }
 
   // le32-specific flags:
@@ -5850,7 +5843,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       "standalone", "objc", "swift", "swift-5.0", "swift-4.2", "swift-4.1",
     };
 
-    if (find(kCFABIs, StringRef(A->getValue())) == std::end(kCFABIs))
+    if (!llvm::is_contained(kCFABIs, StringRef(A->getValue())))
       D.Diag(diag::err_drv_invalid_cf_runtime_abi) << A->getValue();
     else
       A->render(Args, CmdArgs);
@@ -6442,8 +6435,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     StringRef Val = A->getValue();
     Val = Val.empty() ? "0" : Val; // Treat "" as 0 or disable.
     bool Invalid = GNUCVer.tryParse(Val);
-    unsigned Minor = GNUCVer.getMinor().getValueOr(0);
-    unsigned Patch = GNUCVer.getSubminor().getValueOr(0);
+    unsigned Minor = GNUCVer.getMinor().value_or(0);
+    unsigned Patch = GNUCVer.getSubminor().value_or(0);
     if (Invalid || GNUCVer.getBuild() || Minor >= 100 || Patch >= 100) {
       D.Diag(diag::err_drv_invalid_value)
           << A->getAsString(Args) << A->getValue();

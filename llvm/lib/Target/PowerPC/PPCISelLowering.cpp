@@ -131,6 +131,11 @@ static cl::opt<bool>
                           cl::desc("disable vector permute decomposition"),
                           cl::init(true), cl::Hidden);
 
+cl::opt<bool> DisableAutoPairedVecSt(
+    "disable-auto-paired-vec-st",
+    cl::desc("disable automatically generated 32byte paired vector stores"),
+    cl::init(true), cl::Hidden);
+
 STATISTIC(NumTailCalls, "Number of tail calls");
 STATISTIC(NumSiblingCalls, "Number of sibling calls");
 STATISTIC(ShufflesHandledWithVPERM, "Number of shuffles lowered to a VPERM");
@@ -14552,6 +14557,11 @@ SDValue PPCTargetLowering::combineFPToIntToFP(SDNode *N,
 // builtins) into loads with swaps.
 SDValue PPCTargetLowering::expandVSXLoadForLE(SDNode *N,
                                               DAGCombinerInfo &DCI) const {
+  // Delay VSX load for LE combine until after LegalizeOps to prioritize other
+  // load combines.
+  if (DCI.isBeforeLegalizeOps())
+    return SDValue();
+
   SelectionDAG &DAG = DCI.DAG;
   SDLoc dl(N);
   SDValue Chain;
@@ -14586,13 +14596,6 @@ SDValue PPCTargetLowering::expandVSXLoadForLE(SDNode *N,
 
   MVT VecTy = N->getValueType(0).getSimpleVT();
 
-  // Do not expand to PPCISD::LXVD2X + PPCISD::XXSWAPD when the load is
-  // aligned and the type is a vector with elements up to 4 bytes
-  if (Subtarget.needsSwapsForVSXMemOps() && MMO->getAlign() >= Align(16) &&
-      VecTy.getScalarSizeInBits() <= 32) {
-    return SDValue();
-  }
-
   SDValue LoadOps[] = { Chain, Base };
   SDValue Load = DAG.getMemIntrinsicNode(PPCISD::LXVD2X, dl,
                                          DAG.getVTList(MVT::v2f64, MVT::Other),
@@ -14620,6 +14623,11 @@ SDValue PPCTargetLowering::expandVSXLoadForLE(SDNode *N,
 // builtins) into stores with swaps.
 SDValue PPCTargetLowering::expandVSXStoreForLE(SDNode *N,
                                                DAGCombinerInfo &DCI) const {
+  // Delay VSX store for LE combine until after LegalizeOps to prioritize other
+  // store combines.
+  if (DCI.isBeforeLegalizeOps())
+    return SDValue();
+
   SelectionDAG &DAG = DCI.DAG;
   SDLoc dl(N);
   SDValue Chain;
@@ -14656,13 +14664,6 @@ SDValue PPCTargetLowering::expandVSXStoreForLE(SDNode *N,
 
   SDValue Src = N->getOperand(SrcOpnd);
   MVT VecTy = Src.getValueType().getSimpleVT();
-
-  // Do not expand to PPCISD::XXSWAPD and PPCISD::STXVD2X when the load is
-  // aligned and the type is a vector with elements up to 4 bytes
-  if (Subtarget.needsSwapsForVSXMemOps() && MMO->getAlign() >= Align(16) &&
-      VecTy.getScalarSizeInBits() <= 32) {
-    return SDValue();
-  }
 
   // All stores are done as v2f64 and possible bit cast.
   if (VecTy != MVT::v2f64) {
@@ -14889,6 +14890,17 @@ SDValue PPCTargetLowering::combineVectorShuffle(ShuffleVectorSDNode *SVN,
   SDValue SToVLHS = isScalarToVec(LHS);
   SDValue SToVRHS = isScalarToVec(RHS);
   if (SToVLHS || SToVRHS) {
+    // FIXME: If both LHS and RHS are SCALAR_TO_VECTOR, but are not the
+    // same type and have differing element sizes, then do not perform
+    // the following transformation. The current transformation for
+    // SCALAR_TO_VECTOR assumes that both input vectors have the same
+    // element size. This will be updated in the future to account for
+    // differing sizes of the LHS and RHS.
+    if (SToVLHS && SToVRHS &&
+        (SToVLHS.getValueType().getScalarSizeInBits() !=
+         SToVRHS.getValueType().getScalarSizeInBits()))
+      return Res;
+
     int NumEltsIn = SToVLHS ? SToVLHS.getValueType().getVectorNumElements()
                             : SToVRHS.getValueType().getVectorNumElements();
     int NumEltsOut = ShuffV.size();

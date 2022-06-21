@@ -66,8 +66,14 @@ define float @test3(float %src) nounwind uwtable readnone {
 define double @test4(i16* nocapture %src) {
 ; LIBCALL-LABEL: test4:
 ; LIBCALL:       # %bb.0:
+; LIBCALL-NEXT:    pushq %rax
+; LIBCALL-NEXT:    .cfi_def_cfa_offset 16
 ; LIBCALL-NEXT:    pinsrw $0, (%rdi), %xmm0
-; LIBCALL-NEXT:    jmp __extendhfdf2@PLT # TAILCALL
+; LIBCALL-NEXT:    callq __extendhfsf2@PLT
+; LIBCALL-NEXT:    cvtss2sd %xmm0, %xmm0
+; LIBCALL-NEXT:    popq %rax
+; LIBCALL-NEXT:    .cfi_def_cfa_offset 8
+; LIBCALL-NEXT:    retq
 ;
 ; FP16-LABEL: test4:
 ; FP16:       # %bb.0:

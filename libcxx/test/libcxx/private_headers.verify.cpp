@@ -82,6 +82,7 @@ END-SCRIPT
 #include <__algorithm/lexicographical_compare.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/lexicographical_compare.h'}}
 #include <__algorithm/lower_bound.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/lower_bound.h'}}
 #include <__algorithm/make_heap.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/make_heap.h'}}
+#include <__algorithm/make_projected.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/make_projected.h'}}
 #include <__algorithm/max.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/max.h'}}
 #include <__algorithm/max_element.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/max_element.h'}}
 #include <__algorithm/merge.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/merge.h'}}
@@ -126,6 +127,7 @@ END-SCRIPT
 #include <__algorithm/ranges_is_partitioned.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_is_partitioned.h'}}
 #include <__algorithm/ranges_is_sorted.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_is_sorted.h'}}
 #include <__algorithm/ranges_is_sorted_until.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_is_sorted_until.h'}}
+#include <__algorithm/ranges_lexicographical_compare.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_lexicographical_compare.h'}}
 #include <__algorithm/ranges_lower_bound.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_lower_bound.h'}}
 #include <__algorithm/ranges_max.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_max.h'}}
 #include <__algorithm/ranges_max_element.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_max_element.h'}}
@@ -138,6 +140,7 @@ END-SCRIPT
 #include <__algorithm/ranges_replace.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_replace.h'}}
 #include <__algorithm/ranges_replace_if.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_replace_if.h'}}
 #include <__algorithm/ranges_reverse.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_reverse.h'}}
+#include <__algorithm/ranges_sort.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_sort.h'}}
 #include <__algorithm/ranges_swap_ranges.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_swap_ranges.h'}}
 #include <__algorithm/ranges_transform.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_transform.h'}}
 #include <__algorithm/ranges_upper_bound.h> // expected-error@*:* {{use of private header from outside its module: '__algorithm/ranges_upper_bound.h'}}
@@ -287,6 +290,7 @@ END-SCRIPT
 #include <__functional/bind_front.h> // expected-error@*:* {{use of private header from outside its module: '__functional/bind_front.h'}}
 #include <__functional/binder1st.h> // expected-error@*:* {{use of private header from outside its module: '__functional/binder1st.h'}}
 #include <__functional/binder2nd.h> // expected-error@*:* {{use of private header from outside its module: '__functional/binder2nd.h'}}
+#include <__functional/boyer_moore_searcher.h> // expected-error@*:* {{use of private header from outside its module: '__functional/boyer_moore_searcher.h'}}
 #include <__functional/compose.h> // expected-error@*:* {{use of private header from outside its module: '__functional/compose.h'}}
 #include <__functional/default_searcher.h> // expected-error@*:* {{use of private header from outside its module: '__functional/default_searcher.h'}}
 #include <__functional/function.h> // expected-error@*:* {{use of private header from outside its module: '__functional/function.h'}}

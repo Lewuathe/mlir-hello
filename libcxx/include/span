@@ -143,10 +143,18 @@ template<class R>
 #include <__utility/forward.h>
 #include <array>        // for array
 #include <cstddef>      // for byte
-#include <iterator> // TODO: Remove this include
 #include <limits>
 #include <type_traits>  // for remove_cv, etc
 #include <version>
+
+// standard-mandated includes
+
+// [iterator.range]
+#include <__iterator/access.h>
+#include <__iterator/data.h>
+#include <__iterator/empty.h>
+#include <__iterator/reverse_access.h>
+#include <__iterator/size.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
