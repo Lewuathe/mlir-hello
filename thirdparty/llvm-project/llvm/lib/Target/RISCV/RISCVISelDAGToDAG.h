@@ -24,8 +24,9 @@ class RISCVDAGToDAGISel : public SelectionDAGISel {
   const RISCVSubtarget *Subtarget = nullptr;
 
 public:
-  explicit RISCVDAGToDAGISel(RISCVTargetMachine &TargetMachine)
-      : SelectionDAGISel(TargetMachine) {}
+  explicit RISCVDAGToDAGISel(RISCVTargetMachine &TargetMachine,
+                             CodeGenOpt::Level OptLevel)
+      : SelectionDAGISel(TargetMachine, OptLevel) {}
 
   StringRef getPassName() const override {
     return "RISCV DAG->DAG Pattern Instruction Selection";
@@ -44,8 +45,9 @@ public:
   bool SelectInlineAsmMemoryOperand(const SDValue &Op, unsigned ConstraintID,
                                     std::vector<SDValue> &OutOps) override;
 
-  bool SelectAddrFI(SDValue Addr, SDValue &Base);
+  bool SelectFrameAddrRegImm(SDValue Addr, SDValue &Base, SDValue &Offset);
   bool SelectBaseAddr(SDValue Addr, SDValue &Base);
+  bool SelectAddrRegImm(SDValue Addr, SDValue &Base, SDValue &Offset);
 
   bool selectShiftMask(SDValue N, unsigned ShiftWidth, SDValue &ShAmt);
   bool selectShiftMaskXLen(SDValue N, SDValue &ShAmt) {

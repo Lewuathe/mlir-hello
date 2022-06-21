@@ -149,12 +149,11 @@ bool llvm::VerifySCEV = false;
 #endif
 
 static cl::opt<unsigned>
-MaxBruteForceIterations("scalar-evolution-max-iterations", cl::ReallyHidden,
-                        cl::ZeroOrMore,
-                        cl::desc("Maximum number of iterations SCEV will "
-                                 "symbolically execute a constant "
-                                 "derived loop"),
-                        cl::init(100));
+    MaxBruteForceIterations("scalar-evolution-max-iterations", cl::ReallyHidden,
+                            cl::desc("Maximum number of iterations SCEV will "
+                                     "symbolically execute a constant "
+                                     "derived loop"),
+                            cl::init(100));
 
 static cl::opt<bool, true> VerifySCEVOpt(
     "verify-scev", cl::Hidden, cl::location(VerifySCEV),
@@ -5928,13 +5927,8 @@ const SCEV *ScalarEvolution::createNodeForPHI(PHINode *PN) {
   if (const SCEV *S = createNodeFromSelectLikePHI(PN))
     return S;
 
-  // If the PHI has a single incoming value, follow that value, unless the
-  // PHI's incoming blocks are in a different loop, in which case doing so
-  // risks breaking LCSSA form. Instcombine would normally zap these, but
-  // it doesn't have DominatorTree information, so it may miss cases.
-  if (Value *V = SimplifyInstruction(PN, {getDataLayout(), &TLI, &DT, &AC}))
-    if (LI.replacementPreservesLCSSAForm(PN, V))
-      return getSCEV(V);
+  if (Value *V = simplifyInstruction(PN, {getDataLayout(), &TLI, &DT, &AC}))
+    return getSCEV(V);
 
   // If it's not a loop phi, we can't handle it yet.
   return getUnknown(PN);
@@ -6891,7 +6885,7 @@ ConstantRange ScalarEvolution::getRangeViaFactoring(const SCEV *Start,
       FalseValue = *FalseVal;
 
       // Re-apply the cast we peeled off earlier
-      if (CastOp.hasValue())
+      if (CastOp)
         switch (*CastOp) {
         default:
           llvm_unreachable("Unknown SCEV cast type!");
@@ -7832,7 +7826,7 @@ unsigned ScalarEvolution::getSmallConstantTripMultiple(const Loop *L) {
       Res = Multiple;
     Res = (unsigned)GreatestCommonDivisor64(*Res, Multiple);
   }
-  return Res.getValueOr(1);
+  return Res.value_or(1);
 }
 
 unsigned ScalarEvolution::getSmallConstantTripMultiple(const Loop *L,
@@ -8091,9 +8085,7 @@ void ScalarEvolution::forgetLoop(const Loop *L) {
 }
 
 void ScalarEvolution::forgetTopmostLoop(const Loop *L) {
-  while (Loop *Parent = L->getParentLoop())
-    L = Parent;
-  forgetLoop(L);
+  forgetLoop(L->getOutermostLoop());
 }
 
 void ScalarEvolution::forgetValue(Value *V) {
@@ -9741,7 +9733,7 @@ static Optional<APInt> MinOptional(Optional<APInt> X, Optional<APInt> Y) {
 /// equation are BW+1 bits wide (to avoid truncation when converting from
 /// the addrec to the equation).
 static Optional<APInt> TruncIfPossible(Optional<APInt> X, unsigned BitWidth) {
-  if (!X.hasValue())
+  if (!X)
     return None;
   unsigned W = X->getBitWidth();
   if (BitWidth > 1 && BitWidth < W && X->isIntN(BitWidth))
@@ -9810,7 +9802,7 @@ SolveQuadraticAddRecRange(const SCEVAddRecExpr *AddRec,
   APInt A, B, C, M;
   unsigned BitWidth;
   auto T = GetQuadraticEquation(AddRec);
-  if (!T.hasValue())
+  if (!T)
     return None;
 
   // Be careful about the return value: there can be two reasons for not
@@ -9855,7 +9847,7 @@ SolveQuadraticAddRecRange(const SCEVAddRecExpr *AddRec,
     // If SolveQuadraticEquationWrap returns None, it means that there can
     // be a solution, but the function failed to find it. We cannot treat it
     // as "no solution".
-    if (!SO.hasValue() || !UO.hasValue())
+    if (!SO || !UO)
       return { None, false };
 
     // Check the smaller value first to see if it leaves the range.
@@ -14518,12 +14510,23 @@ const SCEV *ScalarEvolution::applyLoopGuards(const SCEV *Expr, const Loop *L) {
         ExprsToRewrite.push_back(LHS);
     }
   };
-  // First, collect conditions from dominating branches. Starting at the loop
+
+  SmallVector<std::pair<Value *, bool>> Terms;
+  // First, collect information from assumptions dominating the loop.
+  for (auto &AssumeVH : AC.assumptions()) {
+    if (!AssumeVH)
+      continue;
+    auto *AssumeI = cast<CallInst>(AssumeVH);
+    if (!DT.dominates(AssumeI, L->getHeader()))
+      continue;
+    Terms.emplace_back(AssumeI->getOperand(0), true);
+  }
+
+  // Second, collect conditions from dominating branches. Starting at the loop
   // predecessor, climb up the predecessor chain, as long as there are
   // predecessors that can be found that have unique successors leading to the
   // original header.
   // TODO: share this logic with isLoopEntryGuardedByCond.
-  SmallVector<std::pair<Value *, bool>> Terms;
   for (std::pair<const BasicBlock *, const BasicBlock *> Pair(
            L->getLoopPredecessor(), L->getHeader());
        Pair.first; Pair = getPredecessorWithUniqueSuccessorForBB(Pair.first)) {
@@ -14568,19 +14571,6 @@ const SCEV *ScalarEvolution::applyLoopGuards(const SCEV *Expr, const Loop *L) {
         Worklist.push_back(R);
       }
     }
-  }
-
-  // Also collect information from assumptions dominating the loop.
-  for (auto &AssumeVH : AC.assumptions()) {
-    if (!AssumeVH)
-      continue;
-    auto *AssumeI = cast<CallInst>(AssumeVH);
-    auto *Cmp = dyn_cast<ICmpInst>(AssumeI->getOperand(0));
-    if (!Cmp || !DT.dominates(AssumeI, L->getHeader()))
-      continue;
-    const auto *LHS = getSCEV(Cmp->getOperand(0));
-    const auto *RHS = getSCEV(Cmp->getOperand(1));
-    CollectCondition(Cmp->getPredicate(), LHS, RHS, RewriteMap);
   }
 
   if (RewriteMap.empty())

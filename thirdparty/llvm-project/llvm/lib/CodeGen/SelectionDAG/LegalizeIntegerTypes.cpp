@@ -117,11 +117,12 @@ void DAGTypeLegalizer::PromoteIntegerResult(SDNode *N, unsigned ResNo) {
   case ISD::INSERT_VECTOR_ELT:
                          Res = PromoteIntRes_INSERT_VECTOR_ELT(N); break;
   case ISD::BUILD_VECTOR:
-                         Res = PromoteIntRes_BUILD_VECTOR(N); break;
-  case ISD::SCALAR_TO_VECTOR:
-                         Res = PromoteIntRes_SCALAR_TO_VECTOR(N); break;
+    Res = PromoteIntRes_BUILD_VECTOR(N);
+    break;
   case ISD::SPLAT_VECTOR:
-                         Res = PromoteIntRes_SPLAT_VECTOR(N); break;
+  case ISD::SCALAR_TO_VECTOR:
+    Res = PromoteIntRes_ScalarOp(N);
+    break;
   case ISD::STEP_VECTOR: Res = PromoteIntRes_STEP_VECTOR(N); break;
   case ISD::CONCAT_VECTORS:
                          Res = PromoteIntRes_CONCAT_VECTORS(N); break;
@@ -135,6 +136,8 @@ void DAGTypeLegalizer::PromoteIntegerResult(SDNode *N, unsigned ResNo) {
   case ISD::ZERO_EXTEND:
   case ISD::ANY_EXTEND:  Res = PromoteIntRes_INT_EXTEND(N); break;
 
+  case ISD::VP_FPTOSI:
+  case ISD::VP_FPTOUI:
   case ISD::STRICT_FP_TO_SINT:
   case ISD::STRICT_FP_TO_UINT:
   case ISD::FP_TO_SINT:
@@ -451,13 +454,13 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BITCAST(SDNode *N) {
     // as the widened input type would be a legal type, we can widen the bitcast
     // and handle the promotion after.
     if (NOutVT.isVector()) {
-      unsigned WidenInSize = NInVT.getSizeInBits();
-      unsigned OutSize = OutVT.getSizeInBits();
-      if (WidenInSize % OutSize == 0) {
-        unsigned Scale = WidenInSize / OutSize;
-        EVT WideOutVT = EVT::getVectorVT(*DAG.getContext(),
-                                         OutVT.getVectorElementType(),
-                                         OutVT.getVectorNumElements() * Scale);
+      TypeSize WidenInSize = NInVT.getSizeInBits();
+      TypeSize OutSize = OutVT.getSizeInBits();
+      if (WidenInSize.hasKnownScalarFactor(OutSize)) {
+        unsigned Scale = WidenInSize.getKnownScalarFactor(OutSize);
+        EVT WideOutVT =
+            EVT::getVectorVT(*DAG.getContext(), OutVT.getVectorElementType(),
+                             OutVT.getVectorElementCount() * Scale);
         if (isTypeLegal(WideOutVT)) {
           InOp = DAG.getBitcast(WideOutVT, GetWidenedVector(InOp));
           InOp = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OutVT, InOp,
@@ -669,6 +672,11 @@ SDValue DAGTypeLegalizer::PromoteIntRes_FP_TO_XINT(SDNode *N) {
       TLI.isOperationLegalOrCustom(ISD::STRICT_FP_TO_SINT, NVT))
     NewOpc = ISD::STRICT_FP_TO_SINT;
 
+  if (N->getOpcode() == ISD::VP_FPTOUI &&
+      !TLI.isOperationLegal(ISD::VP_FPTOUI, NVT) &&
+      TLI.isOperationLegalOrCustom(ISD::VP_FPTOSI, NVT))
+    NewOpc = ISD::VP_FPTOSI;
+
   SDValue Res;
   if (N->isStrictFPOpcode()) {
     Res = DAG.getNode(NewOpc, dl, {NVT, MVT::Other},
@@ -676,8 +684,12 @@ SDValue DAGTypeLegalizer::PromoteIntRes_FP_TO_XINT(SDNode *N) {
     // Legalize the chain result - switch anything that used the old chain to
     // use the new one.
     ReplaceValueWith(SDValue(N, 1), Res.getValue(1));
-  } else
+  } else if (NewOpc == ISD::VP_FPTOSI || NewOpc == ISD::VP_FPTOUI) {
+    Res = DAG.getNode(NewOpc, dl, NVT, {N->getOperand(0), N->getOperand(1),
+                      N->getOperand(2)});
+  } else {
     Res = DAG.getNode(NewOpc, dl, NVT, N->getOperand(0));
+  }
 
   // Assert that the converted value fits in the original type.  If it doesn't
   // (eg: because the value being converted is too big), then the result of the
@@ -687,8 +699,11 @@ SDValue DAGTypeLegalizer::PromoteIntRes_FP_TO_XINT(SDNode *N) {
   //   before legalization: fp-to-uint16, 65534. -> 0xfffe
   //   after legalization: fp-to-sint32, 65534. -> 0x0000fffe
   return DAG.getNode((N->getOpcode() == ISD::FP_TO_UINT ||
-                      N->getOpcode() == ISD::STRICT_FP_TO_UINT) ?
-                     ISD::AssertZext : ISD::AssertSext, dl, NVT, Res,
+                      N->getOpcode() == ISD::STRICT_FP_TO_UINT ||
+                      N->getOpcode() == ISD::VP_FPTOUI)
+                         ? ISD::AssertZext
+                         : ISD::AssertSext,
+                     dl, NVT, Res,
                      DAG.getValueType(N->getValueType(0).getScalarType()));
 }
 
@@ -1620,11 +1635,12 @@ bool DAGTypeLegalizer::PromoteIntegerOperand(SDNode *N, unsigned OpNo) {
   case ISD::CONCAT_VECTORS: Res = PromoteIntOp_CONCAT_VECTORS(N); break;
   case ISD::EXTRACT_VECTOR_ELT: Res = PromoteIntOp_EXTRACT_VECTOR_ELT(N); break;
   case ISD::INSERT_VECTOR_ELT:
-                          Res = PromoteIntOp_INSERT_VECTOR_ELT(N, OpNo);break;
-  case ISD::SCALAR_TO_VECTOR:
-                          Res = PromoteIntOp_SCALAR_TO_VECTOR(N); break;
+    Res = PromoteIntOp_INSERT_VECTOR_ELT(N, OpNo);
+    break;
   case ISD::SPLAT_VECTOR:
-                          Res = PromoteIntOp_SPLAT_VECTOR(N); break;
+  case ISD::SCALAR_TO_VECTOR:
+    Res = PromoteIntOp_ScalarOp(N);
+    break;
   case ISD::VSELECT:
   case ISD::SELECT:       Res = PromoteIntOp_SELECT(N, OpNo); break;
   case ISD::SELECT_CC:    Res = PromoteIntOp_SELECT_CC(N, OpNo); break;
@@ -1897,18 +1913,11 @@ SDValue DAGTypeLegalizer::PromoteIntOp_INSERT_VECTOR_ELT(SDNode *N,
                                 N->getOperand(1), Idx), 0);
 }
 
-SDValue DAGTypeLegalizer::PromoteIntOp_SCALAR_TO_VECTOR(SDNode *N) {
-  // Integer SCALAR_TO_VECTOR operands are implicitly truncated, so just promote
-  // the operand in place.
+SDValue DAGTypeLegalizer::PromoteIntOp_ScalarOp(SDNode *N) {
+  // Integer SPLAT_VECTOR/SCALAR_TO_VECTOR operands are implicitly truncated,
+  // so just promote the operand in place.
   return SDValue(DAG.UpdateNodeOperands(N,
                                 GetPromotedInteger(N->getOperand(0))), 0);
-}
-
-SDValue DAGTypeLegalizer::PromoteIntOp_SPLAT_VECTOR(SDNode *N) {
-  // Integer SPLAT_VECTOR operands are implicitly truncated, so just promote the
-  // operand in place.
-  return SDValue(
-      DAG.UpdateNodeOperands(N, GetPromotedInteger(N->getOperand(0))), 0);
 }
 
 SDValue DAGTypeLegalizer::PromoteIntOp_SELECT(SDNode *N, unsigned OpNo) {
@@ -1949,10 +1958,9 @@ SDValue DAGTypeLegalizer::PromoteIntOp_SETCC(SDNode *N, unsigned OpNo) {
   PromoteSetCCOperands(LHS, RHS, cast<CondCodeSDNode>(N->getOperand(2))->get());
 
   // The CC (#2) is always legal.
-  if (N->getNumOperands() == 3)
+  if (N->getOpcode() == ISD::SETCC)
     return SDValue(DAG.UpdateNodeOperands(N, LHS, RHS, N->getOperand(2)), 0);
 
-  assert(N->getNumOperands() == 5 && "Unexpected number of operands!");
   assert(N->getOpcode() == ISD::VP_SETCC && "Expected VP_SETCC opcode");
 
   return SDValue(DAG.UpdateNodeOperands(N, LHS, RHS, N->getOperand(2),
@@ -5226,7 +5234,7 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BUILD_VECTOR(SDNode *N) {
   return DAG.getBuildVector(NOutVT, dl, Ops);
 }
 
-SDValue DAGTypeLegalizer::PromoteIntRes_SCALAR_TO_VECTOR(SDNode *N) {
+SDValue DAGTypeLegalizer::PromoteIntRes_ScalarOp(SDNode *N) {
 
   SDLoc dl(N);
 
@@ -5236,35 +5244,19 @@ SDValue DAGTypeLegalizer::PromoteIntRes_SCALAR_TO_VECTOR(SDNode *N) {
   EVT OutVT = N->getValueType(0);
   EVT NOutVT = TLI.getTypeToTransformTo(*DAG.getContext(), OutVT);
   assert(NOutVT.isVector() && "This type must be promoted to a vector type");
-  EVT NOutVTElem = NOutVT.getVectorElementType();
-
-  SDValue Op = DAG.getNode(ISD::ANY_EXTEND, dl, NOutVTElem, N->getOperand(0));
-
-  return DAG.getNode(ISD::SCALAR_TO_VECTOR, dl, NOutVT, Op);
-}
-
-SDValue DAGTypeLegalizer::PromoteIntRes_SPLAT_VECTOR(SDNode *N) {
-  SDLoc dl(N);
-
-  SDValue SplatVal = N->getOperand(0);
-
-  assert(!SplatVal.getValueType().isVector() && "Input must be a scalar");
-
-  EVT OutVT = N->getValueType(0);
-  EVT NOutVT = TLI.getTypeToTransformTo(*DAG.getContext(), OutVT);
-  assert(NOutVT.isVector() && "Type must be promoted to a vector type");
   EVT NOutElemVT = NOutVT.getVectorElementType();
 
-  SDValue Op = DAG.getNode(ISD::ANY_EXTEND, dl, NOutElemVT, SplatVal);
+  SDValue Op = DAG.getNode(ISD::ANY_EXTEND, dl, NOutElemVT, N->getOperand(0));
 
-  return DAG.getNode(ISD::SPLAT_VECTOR, dl, NOutVT, Op);
+  return DAG.getNode(N->getOpcode(), dl, NOutVT, Op);
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_STEP_VECTOR(SDNode *N) {
   SDLoc dl(N);
   EVT OutVT = N->getValueType(0);
   EVT NOutVT = TLI.getTypeToTransformTo(*DAG.getContext(), OutVT);
-  assert(NOutVT.isVector() && "Type must be promoted to a vector type");
+  assert(NOutVT.isScalableVector() &&
+         "Type must be promoted to a scalable vector type");
   APInt StepVal = cast<ConstantSDNode>(N->getOperand(0))->getAPIntValue();
   return DAG.getStepVector(dl, NOutVT,
                            StepVal.sext(NOutVT.getScalarSizeInBits()));

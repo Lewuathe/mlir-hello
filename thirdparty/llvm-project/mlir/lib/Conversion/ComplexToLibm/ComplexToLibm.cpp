@@ -73,6 +73,12 @@ void mlir::populateComplexToLibmConversionPatterns(RewritePatternSet &patterns,
                                                     "csqrtf", "csqrt", benefit);
   patterns.add<ScalarOpToLibmCall<complex::TanhOp>>(patterns.getContext(),
                                                     "ctanhf", "ctanh", benefit);
+  patterns.add<ScalarOpToLibmCall<complex::CosOp>>(patterns.getContext(),
+                                                   "ccosf", "ccos", benefit);
+  patterns.add<ScalarOpToLibmCall<complex::SinOp>>(patterns.getContext(),
+                                                   "csinf", "csin", benefit);
+  patterns.add<ScalarOpToLibmCall<complex::ConjOp>>(patterns.getContext(),
+                                                    "conjf", "conj", benefit);
 }
 
 namespace {

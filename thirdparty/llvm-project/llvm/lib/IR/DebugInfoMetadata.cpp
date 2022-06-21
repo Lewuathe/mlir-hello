@@ -27,7 +27,7 @@ using namespace llvm;
 namespace llvm {
 // Use FS-AFDO discriminator.
 cl::opt<bool> EnableFSDiscriminator(
-    "enable-fs-discriminator", cl::Hidden, cl::init(false), cl::ZeroOrMore,
+    "enable-fs-discriminator", cl::Hidden,
     cl::desc("Enable adding flow sensitive discriminators"));
 } // namespace llvm
 
@@ -807,7 +807,7 @@ DIFile *DIFile::getImpl(LLVMContext &Context, MDString *Filename,
   assert((!Source || isCanonical(*Source)) && "Expected canonical MDString");
   DEFINE_GETIMPL_LOOKUP(DIFile, (Filename, Directory, CS, Source));
   Metadata *Ops[] = {Filename, Directory, CS ? CS->Value : nullptr,
-                     Source.getValueOr(nullptr)};
+                     Source.value_or(nullptr)};
   DEFINE_GETIMPL_STORE(DIFile, (CS, Source), Ops);
 }
 DICompileUnit::DICompileUnit(LLVMContext &C, StorageType Storage,

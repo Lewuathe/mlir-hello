@@ -228,6 +228,11 @@ public:
 
   const Stmt *getStmt() const;
 
+  const LocationContext *getRootLocationContext() const {
+    assert(G.roots_begin() != G.roots_end());
+    return (*G.roots_begin())->getLocation().getLocationContext();
+  }
+
   void GenerateAutoTransition(ExplodedNode *N);
   void enqueueEndOfPath(ExplodedNodeSet &S);
   void GenerateCallExitNode(ExplodedNode *N);
@@ -586,14 +591,6 @@ public:
   static std::pair<const ProgramPointTag *, const ProgramPointTag *>
     geteagerlyAssumeBinOpBifurcationTags();
 
-  SVal evalMinus(SVal X) {
-    return X.isValid() ? svalBuilder.evalMinus(X.castAs<NonLoc>()) : X;
-  }
-
-  SVal evalComplement(SVal X) {
-    return X.isValid() ? svalBuilder.evalComplement(X.castAs<NonLoc>()) : X;
-  }
-
   ProgramStateRef handleLValueBitCast(ProgramStateRef state, const Expr *Ex,
                                       const LocationContext *LCtx, QualType T,
                                       QualType ExTy, const CastExpr *CastE,
@@ -611,17 +608,6 @@ public:
                          StmtNodeBuilder &Bldr);
 
 public:
-  SVal evalBinOp(ProgramStateRef state, BinaryOperator::Opcode op,
-                 NonLoc L, NonLoc R, QualType T) {
-    return svalBuilder.evalBinOpNN(state, op, L, R, T);
-  }
-
-  SVal evalBinOp(ProgramStateRef state, BinaryOperator::Opcode op,
-                 NonLoc L, SVal R, QualType T) {
-    return R.isValid() ? svalBuilder.evalBinOpNN(state, op, L,
-                                                 R.castAs<NonLoc>(), T) : R;
-  }
-
   SVal evalBinOp(ProgramStateRef ST, BinaryOperator::Opcode Op,
                  SVal LHS, SVal RHS, QualType T) {
     return svalBuilder.evalBinOp(ST, Op, LHS, RHS, T);

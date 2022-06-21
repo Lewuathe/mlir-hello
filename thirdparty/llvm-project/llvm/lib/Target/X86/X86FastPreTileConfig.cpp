@@ -374,7 +374,7 @@ void X86FastPreTileConfig::convertPHI(MachineBasicBlock *MBB,
         // The PHI node is coverted to tileload instruction. Get the stack
         // address from tileload operands.
         MachineInstr *TileLoad = MRI->getVRegDef(InTileReg);
-        assert(TileLoad->getOpcode() == X86::PTILELOADDV);
+        assert(TileLoad && TileLoad->getOpcode() == X86::PTILELOADDV);
         Register InRowReg = TileLoad->getOperand(1).getReg();
         Register InColReg = TileLoad->getOperand(2).getReg();
         Register InStackAddrReg = TileLoad->getOperand(3).getReg();
@@ -515,7 +515,7 @@ bool X86FastPreTileConfig::configBasicBlock(MachineBasicBlock &MBB) {
       CfgSS = MFI->CreateStackObject(ST->getTileConfigSize(),
                                      ST->getTileConfigAlignment(), false);
     LastTileCfg = addFrameReference(
-        BuildMI(MBB, Before, DebugLoc(), TII->get(X86::LDTILECFG)), CfgSS);
+        BuildMI(MBB, Before, DebugLoc(), TII->get(X86::PLDTILECFGV)), CfgSS);
     LastShapeMI = nullptr;
     Change = true;
   };
@@ -663,6 +663,18 @@ bool X86FastPreTileConfig::runOnMachineFunction(MachineFunction &MFunc) {
   CfgSS = -1;
 
   unsigned NumVirtRegs = MRI->getNumVirtRegs();
+  // Abandon early if there is no tile register to config.
+  bool HasVirtTileReg = false;
+  for (unsigned I = 0, E = NumVirtRegs; I != E; ++I) {
+    Register VirtReg = Register::index2VirtReg(I);
+    if (MRI->getRegClass(VirtReg)->getID() == X86::TILERegClassID) {
+      HasVirtTileReg = true;
+      break;
+    }
+  }
+  if (!HasVirtTileReg)
+    return false;
+
   StackSlotForVirtReg.resize(NumVirtRegs);
   MayLiveAcrossBlocks.clear();
   // We will create register during config. *3 is to make sure
