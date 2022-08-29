@@ -428,7 +428,7 @@ LogicalResult mlir::loopUnrollByFactor(
   // 'upperBoundUnrolled' and 'stepUnrolled' for static and dynamic cases.
   OpBuilder boundsBuilder(forOp);
   auto loc = forOp.getLoc();
-  auto step = forOp.getStep();
+  Value step = forOp.getStep();
   Value upperBoundUnrolled;
   Value stepUnrolled;
   bool generateEpilogueLoop = true;
@@ -673,7 +673,7 @@ void mlir::collapseParallelLoops(
   // Presort combined dimensions.
   auto sortedDimensions = llvm::to_vector<3>(combinedDimensions);
   for (auto &dims : sortedDimensions)
-    std::sort(dims.begin(), dims.end());
+    llvm::sort(dims);
 
   // Normalize ParallelOp's iteration pattern.
   SmallVector<Value, 3> normalizedLowerBounds, normalizedSteps,

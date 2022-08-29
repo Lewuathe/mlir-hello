@@ -32,7 +32,14 @@
 
 namespace llvm {
 
+template <typename T> class ArrayRef;
+
 template <typename IteratorT> class iterator_range;
+
+template <class Iterator>
+using EnableIfConvertibleToInputIterator = std::enable_if_t<std::is_convertible<
+    typename std::iterator_traits<Iterator>::iterator_category,
+    std::input_iterator_tag>::value>;
 
 /// This is all the stuff common to all SmallVectors.
 ///
@@ -70,7 +77,7 @@ public:
   size_t size() const { return Size; }
   size_t capacity() const { return Capacity; }
 
-  LLVM_NODISCARD bool empty() const { return !Size; }
+  [[nodiscard]] bool empty() const { return !Size; }
 
 protected:
   /// Set the array size to \p N, which the current array must have enough
@@ -85,8 +92,8 @@ protected:
 
 template <class T>
 using SmallVectorSizeType =
-    typename std::conditional<sizeof(T) < 4 && sizeof(void *) >= 8, uint64_t,
-                              uint32_t>::type;
+    std::conditional_t<sizeof(T) < 4 && sizeof(void *) >= 8, uint64_t,
+                       uint32_t>;
 
 /// Figure out the offset of the first element.
 template <class T, typename = void> struct SmallVectorAlignmentAndSize {
@@ -305,8 +312,8 @@ public:
 /// copy these types with memcpy, there is no way for the type to observe this.
 /// This catches the important case of std::pair<POD, POD>, which is not
 /// trivially assignable.
-template <typename T, bool = (is_trivially_copy_constructible<T>::value) &&
-                             (is_trivially_move_constructible<T>::value) &&
+template <typename T, bool = (std::is_trivially_copy_constructible<T>::value) &&
+                             (std::is_trivially_move_constructible<T>::value) &&
                              std::is_trivially_destructible<T>::value>
 class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
   friend class SmallVectorTemplateCommon<T>;
@@ -328,8 +335,7 @@ protected:
   /// constructing elements as needed.
   template<typename It1, typename It2>
   static void uninitialized_move(It1 I, It1 E, It2 Dest) {
-    std::uninitialized_copy(std::make_move_iterator(I),
-                            std::make_move_iterator(E), Dest);
+    std::uninitialized_move(I, E, Dest);
   }
 
   /// Copy the range [I, E) onto the uninitialized memory starting with "Dest",
@@ -651,7 +657,7 @@ public:
     truncate(this->size() - NumItems);
   }
 
-  LLVM_NODISCARD T pop_back_val() {
+  [[nodiscard]] T pop_back_val() {
     T Result = ::std::move(this->back());
     this->pop_back();
     return Result;
@@ -660,11 +666,8 @@ public:
   void swap(SmallVectorImpl &RHS);
 
   /// Add the specified range to the end of the SmallVector.
-  template <typename in_iter,
-            typename = std::enable_if_t<std::is_convertible<
-                typename std::iterator_traits<in_iter>::iterator_category,
-                std::input_iterator_tag>::value>>
-  void append(in_iter in_start, in_iter in_end) {
+  template <typename ItTy, typename = EnableIfConvertibleToInputIterator<ItTy>>
+  void append(ItTy in_start, ItTy in_end) {
     this->assertSafeToAddRange(in_start, in_end);
     size_type NumInputs = std::distance(in_start, in_end);
     this->reserve(this->size() + NumInputs);
@@ -704,11 +707,8 @@ public:
   // FIXME: Consider assigning over existing elements, rather than clearing &
   // re-initializing them - for all assign(...) variants.
 
-  template <typename in_iter,
-            typename = std::enable_if_t<std::is_convertible<
-                typename std::iterator_traits<in_iter>::iterator_category,
-                std::input_iterator_tag>::value>>
-  void assign(in_iter in_start, in_iter in_end) {
+  template <typename ItTy, typename = EnableIfConvertibleToInputIterator<ItTy>>
+  void assign(ItTy in_start, ItTy in_end) {
     this->assertSafeToReferenceAfterClear(in_start, in_end);
     clear();
     append(in_start, in_end);
@@ -858,10 +858,7 @@ public:
     return I;
   }
 
-  template <typename ItTy,
-            typename = std::enable_if_t<std::is_convertible<
-                typename std::iterator_traits<ItTy>::iterator_category,
-                std::input_iterator_tag>::value>>
+  template <typename ItTy, typename = EnableIfConvertibleToInputIterator<ItTy>>
   iterator insert(iterator I, ItTy From, ItTy To) {
     // Convert iterator to elt# to avoid invalidating iterator when we reserve()
     size_t InsertElt = I - this->begin();
@@ -1197,10 +1194,7 @@ public:
     this->assign(Size, Value);
   }
 
-  template <typename ItTy,
-            typename = std::enable_if_t<std::is_convertible<
-                typename std::iterator_traits<ItTy>::iterator_category,
-                std::input_iterator_tag>::value>>
+  template <typename ItTy, typename = EnableIfConvertibleToInputIterator<ItTy>>
   SmallVector(ItTy S, ItTy E) : SmallVectorImpl<T>(N) {
     this->append(S, E);
   }
@@ -1212,7 +1206,13 @@ public:
   }
 
   SmallVector(std::initializer_list<T> IL) : SmallVectorImpl<T>(N) {
-    this->assign(IL);
+    this->append(IL);
+  }
+
+  template <typename U,
+            typename = std::enable_if_t<std::is_convertible<U, T>::value>>
+  explicit SmallVector(ArrayRef<U> A) : SmallVectorImpl<T>(N) {
+    this->append(A.begin(), A.end());
   }
 
   SmallVector(const SmallVector &RHS) : SmallVectorImpl<T>(N) {
@@ -1282,10 +1282,16 @@ SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(R &&Range) {
   return {std::begin(Range), std::end(Range)};
 }
 template <typename R>
-SmallVector<ValueTypeFromRangeType<R>,
-            CalculateSmallVectorDefaultInlinedElements<
-                ValueTypeFromRangeType<R>>::value>
-to_vector(R &&Range) {
+SmallVector<ValueTypeFromRangeType<R>> to_vector(R &&Range) {
+  return {std::begin(Range), std::end(Range)};
+}
+
+template <typename Out, unsigned Size, typename R>
+SmallVector<Out, Size> to_vector_of(R &&Range) {
+  return {std::begin(Range), std::end(Range)};
+}
+
+template <typename Out, typename R> SmallVector<Out> to_vector_of(R &&Range) {
   return {std::begin(Range), std::end(Range)};
 }
 

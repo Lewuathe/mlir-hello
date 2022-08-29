@@ -5,7 +5,7 @@ add_library(
   LibcTest.h
 )
 target_include_directories(LibcUnitTest PUBLIC ${LIBC_SOURCE_DIR})
-add_dependencies(LibcUnitTest libc.src.__support.CPP.type_traits)
+add_dependencies(LibcUnitTest libc.src.__support.CPP.type_traits libc.src.__support.uint128)
 target_link_libraries(LibcUnitTest PUBLIC libc_test_utils)
 
 add_library(
@@ -51,15 +51,8 @@ target_link_libraries(LibcMemoryHelpers LibcUnitTest)
 add_dependencies(
   LibcMemoryHelpers
   LibcUnitTest
-  libc.src.__support.CPP.array_ref
+  libc.src.__support.CPP.span
 )
-
-if(NOT LLVM_LIBC_FULL_BUILD) # TODO(michaelrj): make a more permanant solution.
-  return()
-endif()
-
-#currently stdio is fullbuild only, so this matcher that depends on a piece of
-#printf also has to be fullbuild only.
 
 add_library(
   LibcPrintfHelpers
@@ -71,6 +64,7 @@ target_link_libraries(LibcPrintfHelpers LibcUnitTest)
 add_dependencies(
   LibcPrintfHelpers
   LibcUnitTest
-  libc.utils.UnitTest.string_utils
+  libc.src.__support.FPUtil.fputil #FPBits
   libc.src.stdio.printf_core.core_structs
+  libc.utils.UnitTest.string_utils
 )

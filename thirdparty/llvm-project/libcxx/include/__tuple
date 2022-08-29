@@ -11,6 +11,7 @@
 #define _LIBCPP___TUPLE
 
 #include <__config>
+#include <__fwd/pair.h>
 #include <cstddef>
 #include <type_traits>
 
@@ -30,14 +31,14 @@ using __enable_if_tuple_size_imp = _Tp;
 template <class _Tp>
 struct _LIBCPP_TEMPLATE_VIS tuple_size<__enable_if_tuple_size_imp<
     const _Tp,
-    typename enable_if<!is_volatile<_Tp>::value>::type,
+    __enable_if_t<!is_volatile<_Tp>::value>,
     integral_constant<size_t, sizeof(tuple_size<_Tp>)>>>
     : public integral_constant<size_t, tuple_size<_Tp>::value> {};
 
 template <class _Tp>
 struct _LIBCPP_TEMPLATE_VIS tuple_size<__enable_if_tuple_size_imp<
     volatile _Tp,
-    typename enable_if<!is_const<_Tp>::value>::type,
+    __enable_if_t<!is_const<_Tp>::value>,
     integral_constant<size_t, sizeof(tuple_size<_Tp>)>>>
     : public integral_constant<size_t, tuple_size<_Tp>::value> {};
 
@@ -167,22 +168,22 @@ struct _LIBCPP_TEMPLATE_VIS tuple_size<tuple<_Tp...> >
 };
 
 template <size_t _Ip, class ..._Tp>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 typename tuple_element<_Ip, tuple<_Tp...> >::type&
 get(tuple<_Tp...>&) _NOEXCEPT;
 
 template <size_t _Ip, class ..._Tp>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 const typename tuple_element<_Ip, tuple<_Tp...> >::type&
 get(const tuple<_Tp...>&) _NOEXCEPT;
 
 template <size_t _Ip, class ..._Tp>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 typename tuple_element<_Ip, tuple<_Tp...> >::type&&
 get(tuple<_Tp...>&&) _NOEXCEPT;
 
 template <size_t _Ip, class ..._Tp>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 const typename tuple_element<_Ip, tuple<_Tp...> >::type&&
 get(const tuple<_Tp...>&&) _NOEXCEPT;
 
@@ -193,23 +194,23 @@ get(const tuple<_Tp...>&&) _NOEXCEPT;
 template <class _T1, class _T2> struct __tuple_like<pair<_T1, _T2> > : true_type {};
 
 template <size_t _Ip, class _T1, class _T2>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 typename tuple_element<_Ip, pair<_T1, _T2> >::type&
 get(pair<_T1, _T2>&) _NOEXCEPT;
 
 template <size_t _Ip, class _T1, class _T2>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 const typename tuple_element<_Ip, pair<_T1, _T2> >::type&
 get(const pair<_T1, _T2>&) _NOEXCEPT;
 
 #ifndef _LIBCPP_CXX03_LANG
 template <size_t _Ip, class _T1, class _T2>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 typename tuple_element<_Ip, pair<_T1, _T2> >::type&&
 get(pair<_T1, _T2>&&) _NOEXCEPT;
 
 template <size_t _Ip, class _T1, class _T2>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 const typename tuple_element<_Ip, pair<_T1, _T2> >::type&&
 get(const pair<_T1, _T2>&&) _NOEXCEPT;
 #endif
@@ -221,23 +222,23 @@ template <class _Tp, size_t _Size> struct _LIBCPP_TEMPLATE_VIS array;
 template <class _Tp, size_t _Size> struct __tuple_like<array<_Tp, _Size> > : true_type {};
 
 template <size_t _Ip, class _Tp, size_t _Size>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 _Tp&
 get(array<_Tp, _Size>&) _NOEXCEPT;
 
 template <size_t _Ip, class _Tp, size_t _Size>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 const _Tp&
 get(const array<_Tp, _Size>&) _NOEXCEPT;
 
 #ifndef _LIBCPP_CXX03_LANG
 template <size_t _Ip, class _Tp, size_t _Size>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 _Tp&&
 get(array<_Tp, _Size>&&) _NOEXCEPT;
 
 template <size_t _Ip, class _Tp, size_t _Size>
-_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX11
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_SINCE_CXX14
 const _Tp&&
 get(const array<_Tp, _Size>&&) _NOEXCEPT;
 #endif
@@ -393,7 +394,7 @@ struct __tuple_sfinae_base {
   template <template <class, class...> class _Trait,
             class ..._LArgs, class ..._RArgs>
   static auto __do_test(__tuple_types<_LArgs...>, __tuple_types<_RArgs...>)
-    -> __all<typename enable_if<_Trait<_LArgs, _RArgs>::value, bool>::type{true}...>;
+    -> __all<__enable_if_t<_Trait<_LArgs, _RArgs>::value, bool>{true}...>;
   template <template <class...> class>
   static auto __do_test(...) -> false_type;
 

@@ -132,9 +132,15 @@ size_t Communication::Read(void *dst, size_t dst_len,
   if (m_read_thread_enabled) {
     // We have a dedicated read thread that is getting data for us
     size_t cached_bytes = GetCachedBytes(dst, dst_len);
-    if (cached_bytes > 0 || (timeout && timeout->count() == 0)) {
+    if (cached_bytes > 0) {
       status = eConnectionStatusSuccess;
       return cached_bytes;
+    }
+    if (timeout && timeout->count() == 0) {
+      if (error_ptr)
+        error_ptr->SetErrorString("Timed out.");
+      status = eConnectionStatusTimedOut;
+      return 0;
     }
 
     if (!m_connection_sp) {
@@ -155,11 +161,25 @@ size_t Communication::Read(void *dst, size_t dst_len,
       }
 
       if (event_type & eBroadcastBitReadThreadDidExit) {
+        // If the thread exited of its own accord, it either means it
+        // hit an end-of-file condition or lost connection
+        // (we verified that we had an connection above).
+        if (!m_connection_sp) {
+          if (error_ptr)
+            error_ptr->SetErrorString("Lost connection.");
+          status = eConnectionStatusLostConnection;
+        } else
+          status = eConnectionStatusEndOfFile;
+
         if (GetCloseOnEOF())
           Disconnect(nullptr);
-        break;
+        return 0;
       }
     }
+
+    if (error_ptr)
+      error_ptr->SetErrorString("Timed out.");
+    status = eConnectionStatusTimedOut;
     return 0;
   }
 
@@ -356,7 +376,7 @@ lldb::thread_result_t Communication::ReadThread() {
     case eConnectionStatusLostConnection: // Lost connection while connected to
                                           // a valid connection
       done = true;
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     case eConnectionStatusTimedOut: // Request timed out
       if (error.Fail())
         LLDB_LOG(log, "error: {0}, status = {1}", error,

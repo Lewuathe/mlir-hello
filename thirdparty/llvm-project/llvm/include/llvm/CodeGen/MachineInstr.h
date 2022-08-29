@@ -144,24 +144,26 @@ private:
   ///
   /// This has to be defined eagerly due to the implementation constraints of
   /// `PointerSumType` where it is used.
-  class ExtraInfo final
-      : TrailingObjects<ExtraInfo, MachineMemOperand *, MCSymbol *, MDNode *> {
+  class ExtraInfo final : TrailingObjects<ExtraInfo, MachineMemOperand *,
+                                          MCSymbol *, MDNode *, uint32_t> {
   public:
     static ExtraInfo *create(BumpPtrAllocator &Allocator,
                              ArrayRef<MachineMemOperand *> MMOs,
                              MCSymbol *PreInstrSymbol = nullptr,
                              MCSymbol *PostInstrSymbol = nullptr,
-                             MDNode *HeapAllocMarker = nullptr) {
+                             MDNode *HeapAllocMarker = nullptr,
+                             uint32_t CFIType = 0) {
       bool HasPreInstrSymbol = PreInstrSymbol != nullptr;
       bool HasPostInstrSymbol = PostInstrSymbol != nullptr;
       bool HasHeapAllocMarker = HeapAllocMarker != nullptr;
+      bool HasCFIType = CFIType != 0;
       auto *Result = new (Allocator.Allocate(
-          totalSizeToAlloc<MachineMemOperand *, MCSymbol *, MDNode *>(
+          totalSizeToAlloc<MachineMemOperand *, MCSymbol *, MDNode *, uint32_t>(
               MMOs.size(), HasPreInstrSymbol + HasPostInstrSymbol,
-              HasHeapAllocMarker),
+              HasHeapAllocMarker, HasCFIType),
           alignof(ExtraInfo)))
           ExtraInfo(MMOs.size(), HasPreInstrSymbol, HasPostInstrSymbol,
-                    HasHeapAllocMarker);
+                    HasHeapAllocMarker, HasCFIType);
 
       // Copy the actual data into the trailing objects.
       std::copy(MMOs.begin(), MMOs.end(),
@@ -174,6 +176,8 @@ private:
             PostInstrSymbol;
       if (HasHeapAllocMarker)
         Result->getTrailingObjects<MDNode *>()[0] = HeapAllocMarker;
+      if (HasCFIType)
+        Result->getTrailingObjects<uint32_t>()[0] = CFIType;
 
       return Result;
     }
@@ -196,6 +200,10 @@ private:
       return HasHeapAllocMarker ? getTrailingObjects<MDNode *>()[0] : nullptr;
     }
 
+    uint32_t getCFIType() const {
+      return HasCFIType ? getTrailingObjects<uint32_t>()[0] : 0;
+    }
+
   private:
     friend TrailingObjects;
 
@@ -208,6 +216,7 @@ private:
     const bool HasPreInstrSymbol;
     const bool HasPostInstrSymbol;
     const bool HasHeapAllocMarker;
+    const bool HasCFIType;
 
     // Implement the `TrailingObjects` internal API.
     size_t numTrailingObjects(OverloadToken<MachineMemOperand *>) const {
@@ -219,14 +228,17 @@ private:
     size_t numTrailingObjects(OverloadToken<MDNode *>) const {
       return HasHeapAllocMarker;
     }
+    size_t numTrailingObjects(OverloadToken<uint32_t>) const {
+      return HasCFIType;
+    }
 
     // Just a boring constructor to allow us to initialize the sizes. Always use
     // the `create` routine above.
     ExtraInfo(int NumMMOs, bool HasPreInstrSymbol, bool HasPostInstrSymbol,
-              bool HasHeapAllocMarker)
+              bool HasHeapAllocMarker, bool HasCFIType)
         : NumMMOs(NumMMOs), HasPreInstrSymbol(HasPreInstrSymbol),
           HasPostInstrSymbol(HasPostInstrSymbol),
-          HasHeapAllocMarker(HasHeapAllocMarker) {}
+          HasHeapAllocMarker(HasHeapAllocMarker), HasCFIType(HasCFIType) {}
   };
 
   /// Enumeration of the kinds of inline extra info available. It is important
@@ -572,12 +584,9 @@ public:
 
   /// Returns true if the instruction has implicit definition.
   bool hasImplicitDef() const {
-    for (unsigned I = getNumExplicitOperands(), E = getNumOperands();
-      I != E; ++I) {
-      const MachineOperand &MO = getOperand(I);
+    for (const MachineOperand &MO : implicit_operands())
       if (MO.isDef() && MO.isImplicit())
         return true;
-    }
     return false;
   }
 
@@ -760,6 +769,16 @@ public:
     return nullptr;
   }
 
+  /// Helper to extract a CFI type hash if one has been added.
+  uint32_t getCFIType() const {
+    if (!Info)
+      return 0;
+    if (ExtraInfo *EI = Info.get<EIIK_OutOfLine>())
+      return EI->getCFIType();
+
+    return 0;
+  }
+
   /// API for querying MachineInstr properties. They are the same as MCInstrDesc
   /// queries but they are bundle aware.
 
@@ -926,6 +945,8 @@ public:
   /// For example, if the instruction has a unique labels attached
   /// to it, duplicating it would cause multiple definition errors.
   bool isNotDuplicable(QueryType Type = AnyInBundle) const {
+    if (getPreInstrSymbol() || getPostInstrSymbol())
+      return true;
     return hasProperty(MCID::NotDuplicable, Type);
   }
 
@@ -1620,7 +1641,7 @@ public:
   /// argument area of a function (if it does not change).  If the instruction
   /// does multiple loads, this returns true only if all of the loads are
   /// dereferenceable and invariant.
-  bool isDereferenceableInvariantLoad(AAResults *AA) const;
+  bool isDereferenceableInvariantLoad() const;
 
   /// If the specified instruction is a PHI that always merges together the
   /// same virtual register, return the register, otherwise return 0.
@@ -1789,6 +1810,9 @@ public:
   /// instruction is removed or duplicated.
   void setHeapAllocMarker(MachineFunction &MF, MDNode *MD);
 
+  /// Set the CFI type for the instruction.
+  void setCFIType(MachineFunction &MF, uint32_t Type);
+
   /// Return the MIFlags which represent both MachineInstrs. This
   /// should be used when merging two MachineInstrs into one. This routine does
   /// not modify the MIFlags of this MachineInstr.
@@ -1867,7 +1891,7 @@ private:
   /// based on the number of pointers.
   void setExtraInfo(MachineFunction &MF, ArrayRef<MachineMemOperand *> MMOs,
                     MCSymbol *PreInstrSymbol, MCSymbol *PostInstrSymbol,
-                    MDNode *HeapAllocMarker);
+                    MDNode *HeapAllocMarker, uint32_t CFIType);
 };
 
 /// Special DenseMapInfo traits to compare MachineInstr* by *value* of the
