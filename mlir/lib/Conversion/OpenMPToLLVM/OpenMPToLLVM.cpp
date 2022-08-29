@@ -77,11 +77,27 @@ struct RegionLessOpWithVarOperandsConversion
     return success();
   }
 };
+
+struct ReductionOpConversion : public ConvertOpToLLVMPattern<omp::ReductionOp> {
+  using ConvertOpToLLVMPattern<omp::ReductionOp>::ConvertOpToLLVMPattern;
+  LogicalResult
+  matchAndRewrite(omp::ReductionOp curOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (curOp.accumulator().getType().isa<MemRefType>()) {
+      // TODO: Support memref type in variable operands
+      return rewriter.notifyMatchFailure(curOp, "memref is not supported yet");
+    }
+    rewriter.replaceOpWithNewOp<omp::ReductionOp>(
+        curOp, TypeRange(), adaptor.getOperands(), curOp->getAttrs());
+    return success();
+  }
+};
 } // namespace
 
 void mlir::configureOpenMPToLLVMConversionLegality(
     ConversionTarget &target, LLVMTypeConverter &typeConverter) {
-  target.addDynamicallyLegalOp<mlir::omp::ParallelOp, mlir::omp::WsLoopOp,
+  target.addDynamicallyLegalOp<mlir::omp::CriticalOp, mlir::omp::ParallelOp,
+                               mlir::omp::WsLoopOp, mlir::omp::SimdLoopOp,
                                mlir::omp::MasterOp, mlir::omp::SectionsOp,
                                mlir::omp::SingleOp>([&](Operation *op) {
     return typeConverter.isLegal(&op->getRegion(0)) &&
@@ -95,14 +111,19 @@ void mlir::configureOpenMPToLLVMConversionLegality(
             return typeConverter.isLegal(op->getOperandTypes()) &&
                    typeConverter.isLegal(op->getResultTypes());
           });
+  target.addDynamicallyLegalOp<mlir::omp::ReductionOp>([&](Operation *op) {
+    return typeConverter.isLegal(op->getOperandTypes());
+  });
 }
 
 void mlir::populateOpenMPToLLVMConversionPatterns(LLVMTypeConverter &converter,
                                                   RewritePatternSet &patterns) {
   patterns.add<
+      ReductionOpConversion, RegionOpConversion<omp::CriticalOp>,
+      RegionOpConversion<omp::MasterOp>, ReductionOpConversion,
       RegionOpConversion<omp::MasterOp>, RegionOpConversion<omp::ParallelOp>,
       RegionOpConversion<omp::WsLoopOp>, RegionOpConversion<omp::SectionsOp>,
-      RegionOpConversion<omp::SingleOp>,
+      RegionOpConversion<omp::SimdLoopOp>, RegionOpConversion<omp::SingleOp>,
       RegionLessOpWithVarOperandsConversion<omp::AtomicReadOp>,
       RegionLessOpWithVarOperandsConversion<omp::AtomicWriteOp>,
       RegionLessOpWithVarOperandsConversion<omp::FlushOp>,

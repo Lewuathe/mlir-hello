@@ -41,10 +41,6 @@ createLinalgTilingPass(ArrayRef<int64_t> tileSizes = {},
                            linalg::LinalgTilingLoopType::Loops);
 
 std::unique_ptr<OperationPass<func::FuncOp>>
-createLinalgPromotionPass(bool dynamicBuffers, bool useAlloca);
-std::unique_ptr<OperationPass<func::FuncOp>> createLinalgPromotionPass();
-
-std::unique_ptr<OperationPass<func::FuncOp>>
 createLinalgInlineScalarOperandsPass();
 
 /// Create a pass to convert Linalg operations to scf.for loops and
@@ -101,36 +97,16 @@ std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategyPadPass(
     const linalg::LinalgTransformationFilter &filter =
         linalg::LinalgTransformationFilter());
 
-/// Create a LinalgStrategyPromotePass.
-std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategyPromotePass(
-    StringRef opName = "",
-    const linalg::LinalgPromotionOptions &opt =
-        linalg::LinalgPromotionOptions(),
-    const linalg::LinalgTransformationFilter &filter =
-        linalg::LinalgTransformationFilter());
-
-/// Create a LinalgStrategyGeneralizePass.
-std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategyGeneralizePass(
-    StringRef opName = "", const linalg::LinalgTransformationFilter &filter =
-                               linalg::LinalgTransformationFilter());
-
 /// Create a LinalgStrategyDecomposePass.
 // TODO: if/when we need finer control add an `opName` parameter.
 std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategyDecomposePass(
     const linalg::LinalgTransformationFilter &filter =
         linalg::LinalgTransformationFilter());
 
-/// Create a LinalgStrategyInterchangePass.
-std::unique_ptr<OperationPass<func::FuncOp>>
-createLinalgStrategyInterchangePass(
-    ArrayRef<int64_t> iteratorInterchange = {},
-    const linalg::LinalgTransformationFilter &filter =
-        linalg::LinalgTransformationFilter());
-
 /// Create a LinalgStrategyPeelPass.
 std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategyPeelPass(
     StringRef opName = "",
-    linalg::LinalgPeelOptions opt = linalg::LinalgPeelOptions(),
+    const linalg::LinalgPeelOptions &opt = linalg::LinalgPeelOptions(),
     const linalg::LinalgTransformationFilter &filter =
         linalg::LinalgTransformationFilter());
 

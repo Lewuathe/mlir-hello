@@ -49,6 +49,11 @@ template <typename B, typename S> struct Range {
 
   void Slide(BaseType slide) { base += slide; }
 
+  void ShrinkFront(S s) {
+    base += s;
+    size -= std::min(s, size);
+  }
+
   bool Union(const Range &rhs) {
     if (DoesAdjoinOrIntersect(rhs)) {
       auto new_end = std::max<BaseType>(GetRangeEnd(), rhs.GetRangeEnd());
@@ -445,6 +450,13 @@ public:
 
   void Append(const Entry &entry) { m_entries.emplace_back(entry); }
 
+  bool Erase(uint32_t start, uint32_t end) {
+    if (start >= end || end > m_entries.size())
+      return false;
+    m_entries.erase(begin() + start, begin() + end);
+    return true;
+  }
+
   void Sort() {
     if (m_entries.size() > 1)
       std::stable_sort(m_entries.begin(), m_entries.end(),
@@ -621,11 +633,26 @@ public:
     return nullptr;
   }
 
+  uint32_t FindEntryIndexThatContainsOrFollows(B addr) const {
+#ifdef ASSERT_RANGEMAP_ARE_SORTED
+    assert(IsSorted());
+#endif
+    const AugmentedEntry *entry = static_cast<const AugmentedEntry *>(
+        FindEntryThatContainsOrFollows(addr));
+    if (entry)
+      return std::distance(m_entries.begin(), entry);
+    return UINT32_MAX;
+  }
+
   Entry *Back() { return (m_entries.empty() ? nullptr : &m_entries.back()); }
 
   const Entry *Back() const {
     return (m_entries.empty() ? nullptr : &m_entries.back());
   }
+
+  using const_iterator = typename Collection::const_iterator;
+  const_iterator begin() const { return m_entries.begin(); }
+  const_iterator end() const { return m_entries.end(); }
 
 protected:
   Collection m_entries;

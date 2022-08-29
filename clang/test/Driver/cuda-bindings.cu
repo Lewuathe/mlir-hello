@@ -40,6 +40,7 @@
 // Test two gpu architectures with complete compilation.
 //
 // RUN: %clang -target powerpc64le-ibm-linux-gnu -ccc-print-bindings --cuda-gpu-arch=sm_30 --cuda-gpu-arch=sm_35 %s 2>&1 \
+// RUN: %clang -target powerpc64le-ibm-linux-gnu -ccc-print-bindings --offload-arch=sm_30,sm_35 %s 2>&1 \
 // RUN: | FileCheck -check-prefix=BIN2 %s
 // BIN2: # "nvptx64-nvidia-cuda" - "clang",{{.*}} output:
 // BIN2-NOT: cuda-bindings-device-cuda-nvptx64
@@ -134,3 +135,31 @@
 // RUN: | FileCheck -check-prefix=DASM2 %s
 // DASM2: # "nvptx64-nvidia-cuda" - "clang",{{.*}} output: "cuda-bindings-cuda-nvptx64-nvidia-cuda-sm_30.s"
 // DASM2: # "nvptx64-nvidia-cuda" - "clang",{{.*}} output: "cuda-bindings-cuda-nvptx64-nvidia-cuda-sm_35.s"
+
+//
+// Ensure we output the user's specified name in device-only mode.
+//
+// RUN: %clang -target powerpc64le-ibm-linux-gnu -### \
+// RUN:        --cuda-gpu-arch=sm_52 --cuda-device-only -c -o foo.o %s 2>&1 \
+// RUN: | FileCheck -check-prefix=D_ONLY %s
+// RUN: %clang -target powerpc64le-ibm-linux-gnu -### --offload-new-driver \
+// RUN:        --cuda-gpu-arch=sm_52 --cuda-device-only -c -o foo.o %s 2>&1 \
+// RUN: | FileCheck -check-prefix=D_ONLY %s
+// D_ONLY: "foo.o"
+
+//
+// Check to make sure we can generate multiple outputs for device-only
+// compilation and fail with '-o'.
+//
+// RUN: %clang -### -target powerpc64le-ibm-linux-gnu --offload-new-driver -ccc-print-bindings \
+// RUN:        --offload-arch=sm_70 --offload-arch=sm_52 --offload-device-only -c %s 2>&1 \
+// RUN: | FileCheck -check-prefix=MULTI-D-ONLY %s
+//      MULTI-D-ONLY: # "nvptx64-nvidia-cuda" - "clang", inputs: ["[[INPUT:.+]]"], output: "[[PTX_70:.+]]"
+// MULTI-D-ONLY-NEXT: # "nvptx64-nvidia-cuda" - "NVPTX::Assembler", inputs: ["[[PTX_70]]"], output: "[[CUBIN_70:.+]]"
+// MULTI-D-ONLY-NEXT: # "nvptx64-nvidia-cuda" - "clang", inputs: ["[[INPUT]]"], output: "[[PTX_52:.+]]"
+// MULTI-D-ONLY-NEXT: # "nvptx64-nvidia-cuda" - "NVPTX::Assembler", inputs: ["[[PTX_52]]"], output: "[[CUBIN_52:.+]]"
+//
+// RUN: %clang -### -target powerpc64le-ibm-linux-gnu --offload-new-driver -ccc-print-bindings \
+// RUN:        --offload-arch=sm_70 --offload-arch=sm_52 --offload-device-only -c -o %t %s 2>&1 \
+// RUN: | FileCheck -check-prefix=MULTI-D-ONLY-O %s
+// MULTI-D-ONLY-O: error: cannot specify -o when generating multiple output files

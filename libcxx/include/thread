@@ -53,11 +53,12 @@ public:
 };
 
 bool operator==(thread::id x, thread::id y) noexcept;
-bool operator!=(thread::id x, thread::id y) noexcept;
-bool operator< (thread::id x, thread::id y) noexcept;
-bool operator<=(thread::id x, thread::id y) noexcept;
-bool operator> (thread::id x, thread::id y) noexcept;
-bool operator>=(thread::id x, thread::id y) noexcept;
+bool operator!=(thread::id x, thread::id y) noexcept;             // removed in C++20
+bool operator< (thread::id x, thread::id y) noexcept;             // removed in C++20
+bool operator<=(thread::id x, thread::id y) noexcept;             // removed in C++20
+bool operator> (thread::id x, thread::id y) noexcept;             // removed in C++20
+bool operator>=(thread::id x, thread::id y) noexcept;             // removed in C++20
+strong_ordering operator<=>(thread::id x, thread::id y) noexcept; // C++20
 
 template<class charT, class traits>
 basic_ostream<charT, traits>&
@@ -97,6 +98,11 @@ void sleep_for(const chrono::duration<Rep, Period>& rel_time);
 #include <tuple>
 #include <type_traits>
 #include <version>
+
+#ifndef _LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+#  include <chrono>
+#  include <functional>
+#endif
 
 // standard-mandated includes
 #include <compare>
@@ -201,7 +207,7 @@ __thread_specific_ptr<_Tp>::set_pointer(pointer __p)
 
 template<>
 struct _LIBCPP_TEMPLATE_VIS hash<__thread_id>
-    : public unary_function<__thread_id, size_t>
+    : public __unary_function<__thread_id, size_t>
 {
     _LIBCPP_INLINE_VISIBILITY
     size_t operator()(__thread_id __v) const _NOEXCEPT
@@ -323,7 +329,7 @@ struct __thread_invoke_pair {
 };
 
 template <class _Fp>
-void* __thread_proxy_cxx03(void* __vp)
+_LIBCPP_HIDE_FROM_ABI void* __thread_proxy_cxx03(void* __vp)
 {
     unique_ptr<_Fp> __p(static_cast<_Fp*>(__vp));
     __thread_local_data().set_pointer(__p->__tsp_.release());
@@ -356,7 +362,7 @@ namespace this_thread
 _LIBCPP_FUNC_VIS void sleep_for(const chrono::nanoseconds& __ns);
 
 template <class _Rep, class _Period>
-void
+_LIBCPP_HIDE_FROM_ABI void
 sleep_for(const chrono::duration<_Rep, _Period>& __d)
 {
     if (__d > chrono::duration<_Rep, _Period>::zero())
@@ -380,7 +386,7 @@ sleep_for(const chrono::duration<_Rep, _Period>& __d)
 }
 
 template <class _Clock, class _Duration>
-void
+_LIBCPP_HIDE_FROM_ABI void
 sleep_until(const chrono::time_point<_Clock, _Duration>& __t)
 {
     mutex __mut;

@@ -37,8 +37,8 @@ set(ORC_TEST_ARCH ${ORC_SUPPORTED_ARCH})
 set(ORC_UNITTEST_LINK_FLAGS
   ${COMPILER_RT_UNITTEST_LINK_FLAGS}
   ${CMAKE_THREAD_LIBS_INIT}
-  ${SANITIZER_TEST_CXX_LIBRARIES}
-  )
+  ${COMPILER_RT_UNWINDER_LINK_LIBS}
+  ${COMPILER_RT_CXX_LINK_LIBS})
 
 if(APPLE)
   darwin_filter_host_archs(ORC_SUPPORTED_ARCH ORC_TEST_ARCH)
@@ -84,7 +84,6 @@ set(UNITTEST_SOURCES
   executor_address_test.cpp
   extensible_rtti_test.cpp
   orc_unit_test_main.cpp
-  stl_extras_test.cpp
   wrapper_function_utils_test.cpp
   simple_packed_serialization_test.cpp
   )

@@ -12,15 +12,16 @@ add_header_library(
     NearestIntegerOperations.h
     NormalFloat.h
     PlatformDefs.h
-    UInt.h
     builtin_wrappers.h
+    except_value_utils.h
   DEPENDS
-    libc.include.math
     libc.include.errno
     libc.include.fenv
+    libc.include.math
     libc.src.__support.common
-    libc.src.__support.CPP.type_traits
     libc.src.__support.CPP.bit
+    libc.src.__support.CPP.type_traits
+    libc.src.__support.uint128
     libc.src.errno.errno
 )
 
@@ -30,7 +31,7 @@ add_header_library(
     XFloat.h
   DEPENDS
     .fputil #FPBits and NormalFloat
-    libc.src.__support.CPP.uint
+    libc.src.__support.uint
 )
 
 add_header_library(
@@ -67,6 +68,16 @@ add_header_library(
     PolyEval.h
   DEPENDS
     .multiply_add
+)
+
+add_header_library(
+  nearest_integer
+  HDRS
+    nearest_integer.h
+  DEPENDS
+    libc.src.__support.common
+  FLAGS
+    ROUND_OPT
 )
 
 add_subdirectory(generic)

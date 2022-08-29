@@ -37,6 +37,7 @@
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/MultiplexExternalSemaSource.h"
 #include "clang/Sema/ObjCMethodList.h"
+#include "clang/Sema/RISCVIntrinsicManager.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/SemaConsumer.h"
@@ -137,9 +138,9 @@ public:
 
   void reset() { S = nullptr; }
 
-  virtual void FileChanged(SourceLocation Loc, FileChangeReason Reason,
-                           SrcMgr::CharacteristicKind FileType,
-                           FileID PrevFID) override {
+  void FileChanged(SourceLocation Loc, FileChangeReason Reason,
+                   SrcMgr::CharacteristicKind FileType,
+                   FileID PrevFID) override {
     if (!S)
       return;
     switch (Reason) {
@@ -249,21 +250,8 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
   SemaPPCallbackHandler = Callbacks.get();
   PP.addPPCallbacks(std::move(Callbacks));
   SemaPPCallbackHandler->set(*this);
-  if (getLangOpts().getFPEvalMethod() == LangOptions::FEM_UnsetOnCommandLine)
-    // Use setting from TargetInfo.
-    PP.setCurrentFPEvalMethod(SourceLocation(),
-                              ctxt.getTargetInfo().getFPEvalMethod());
-  else
-    // Set initial value of __FLT_EVAL_METHOD__ from the command line.
-    PP.setCurrentFPEvalMethod(SourceLocation(),
-                              getLangOpts().getFPEvalMethod());
+
   CurFPFeatures.setFPEvalMethod(PP.getCurrentFPEvalMethod());
-  // When `-ffast-math` option is enabled, it triggers several driver math
-  // options to be enabled. Among those, only one the following two modes
-  // affect the eval-method:  reciprocal or reassociate.
-  if (getLangOpts().AllowFPReassoc || getLangOpts().AllowRecip)
-    PP.setCurrentFPEvalMethod(SourceLocation(),
-                              LangOptions::FEM_Indeterminable);
 }
 
 // Anchor Sema's type info to this TU.
@@ -1228,9 +1216,7 @@ void Sema::ActOnEndOfTranslationUnit() {
     // module declaration by now.
     if (getLangOpts().getCompilingModule() ==
             LangOptions::CMK_ModuleInterface &&
-        (ModuleScopes.empty() ||
-         !ModuleScopes.back().Module->isModulePurview()) &&
-        !DiagnosedMissingModuleDeclaration) {
+        !isCurrentModulePurview() && !DiagnosedMissingModuleDeclaration) {
       // FIXME: Make a better guess as to where to put the module declaration.
       Diag(getSourceManager().getLocForStartOfFile(
                getSourceManager().getMainFileID()),
@@ -1263,6 +1249,33 @@ void Sema::ActOnEndOfTranslationUnit() {
     // Warnings emitted in ActOnEndOfTranslationUnit() should be emitted for
     // modules when they are built, not every time they are used.
     emitAndClearUnusedLocalTypedefWarnings();
+  }
+
+  // C++ standard modules. Diagnose cases where a function is declared inline
+  // in the module purview but has no definition before the end of the TU or
+  // the start of a Private Module Fragment (if one is present).
+  if (!PendingInlineFuncDecls.empty()) {
+    for (auto *D : PendingInlineFuncDecls) {
+      if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+        bool DefInPMF = false;
+        if (auto *FDD = FD->getDefinition()) {
+          assert(FDD->getOwningModule() &&
+                 FDD->getOwningModule()->isModulePurview());
+          DefInPMF = FDD->getOwningModule()->isPrivateModule();
+          if (!DefInPMF)
+            continue;
+        }
+        Diag(FD->getLocation(), diag::err_export_inline_not_defined)
+            << DefInPMF;
+        // If we have a PMF it should be at the end of the ModuleScopes.
+        if (DefInPMF &&
+            ModuleScopes.back().Module->Kind == Module::PrivateModuleFragment) {
+          Diag(ModuleScopes.back().BeginLoc,
+               diag::note_private_module_fragment);
+        }
+      }
+    }
+    PendingInlineFuncDecls.clear();
   }
 
   // C99 6.9.2p2:
@@ -2232,7 +2245,8 @@ operator()(sema::FunctionScopeInfo *Scope) const {
 }
 
 void Sema::PushCompoundScope(bool IsStmtExpr) {
-  getCurFunction()->CompoundScopes.push_back(CompoundScopeInfo(IsStmtExpr));
+  getCurFunction()->CompoundScopes.push_back(
+      CompoundScopeInfo(IsStmtExpr, getCurFPFeatures()));
 }
 
 void Sema::PopCompoundScope() {

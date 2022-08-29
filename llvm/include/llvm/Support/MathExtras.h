@@ -13,6 +13,7 @@
 #ifndef LLVM_SUPPORT_MATHEXTRAS_H
 #define LLVM_SUPPORT_MATHEXTRAS_H
 
+#include "llvm/ADT/bit.h"
 #include "llvm/Support/Compiler.h"
 #include <cassert>
 #include <climits>
@@ -21,10 +22,6 @@
 #include <cstring>
 #include <limits>
 #include <type_traits>
-
-#ifdef __ANDROID_NDK__
-#include <android/api-level.h>
-#endif
 
 #ifdef _MSC_VER
 // Declare these intrinsics manually rather including intrin.h. It's very
@@ -154,8 +151,7 @@ template <typename T> struct TrailingZerosCounter<T, 8> {
 ///   valid arguments.
 template <typename T>
 unsigned countTrailingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
-  static_assert(std::numeric_limits<T>::is_integer &&
-                    !std::numeric_limits<T>::is_signed,
+  static_assert(std::is_unsigned_v<T>,
                 "Only unsigned integral types are allowed.");
   return llvm::detail::TrailingZerosCounter<T, sizeof(T)>::count(Val, ZB);
 }
@@ -223,8 +219,7 @@ template <typename T> struct LeadingZerosCounter<T, 8> {
 ///   valid arguments.
 template <typename T>
 unsigned countLeadingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
-  static_assert(std::numeric_limits<T>::is_integer &&
-                    !std::numeric_limits<T>::is_signed,
+  static_assert(std::is_unsigned_v<T>,
                 "Only unsigned integral types are allowed.");
   return llvm::detail::LeadingZerosCounter<T, sizeof(T)>::count(Val, ZB);
 }
@@ -489,12 +484,12 @@ constexpr inline bool isShiftedMask_64(uint64_t Value) {
 /// Return true if the argument is a power of two > 0.
 /// Ex. isPowerOf2_32(0x00100000U) == true (32 bit edition.)
 constexpr inline bool isPowerOf2_32(uint32_t Value) {
-  return Value && !(Value & (Value - 1));
+  return llvm::has_single_bit(Value);
 }
 
 /// Return true if the argument is a power of two > 0 (64 bit edition.)
 constexpr inline bool isPowerOf2_64(uint64_t Value) {
-  return Value && !(Value & (Value - 1));
+  return llvm::has_single_bit(Value);
 }
 
 /// Count the number of ones from the most significant bit to the first
@@ -507,8 +502,7 @@ constexpr inline bool isPowerOf2_64(uint64_t Value) {
 /// ZB_Undefined are valid arguments.
 template <typename T>
 unsigned countLeadingOnes(T Value, ZeroBehavior ZB = ZB_Width) {
-  static_assert(std::numeric_limits<T>::is_integer &&
-                    !std::numeric_limits<T>::is_signed,
+  static_assert(std::is_unsigned_v<T>,
                 "Only unsigned integral types are allowed.");
   return countLeadingZeros<T>(~Value, ZB);
 }
@@ -523,52 +517,19 @@ unsigned countLeadingOnes(T Value, ZeroBehavior ZB = ZB_Width) {
 /// ZB_Undefined are valid arguments.
 template <typename T>
 unsigned countTrailingOnes(T Value, ZeroBehavior ZB = ZB_Width) {
-  static_assert(std::numeric_limits<T>::is_integer &&
-                    !std::numeric_limits<T>::is_signed,
+  static_assert(std::is_unsigned_v<T>,
                 "Only unsigned integral types are allowed.");
   return countTrailingZeros<T>(~Value, ZB);
 }
-
-namespace detail {
-template <typename T, std::size_t SizeOfT> struct PopulationCounter {
-  static unsigned count(T Value) {
-    // Generic version, forward to 32 bits.
-    static_assert(SizeOfT <= 4, "Not implemented!");
-#if defined(__GNUC__)
-    return __builtin_popcount(Value);
-#else
-    uint32_t v = Value;
-    v = v - ((v >> 1) & 0x55555555);
-    v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
-    return ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
-#endif
-  }
-};
-
-template <typename T> struct PopulationCounter<T, 8> {
-  static unsigned count(T Value) {
-#if defined(__GNUC__)
-    return __builtin_popcountll(Value);
-#else
-    uint64_t v = Value;
-    v = v - ((v >> 1) & 0x5555555555555555ULL);
-    v = (v & 0x3333333333333333ULL) + ((v >> 2) & 0x3333333333333333ULL);
-    v = (v + (v >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
-    return unsigned((uint64_t)(v * 0x0101010101010101ULL) >> 56);
-#endif
-  }
-};
-} // namespace detail
 
 /// Count the number of set bits in a value.
 /// Ex. countPopulation(0xF000F000) = 8
 /// Returns 0 if the word is zero.
 template <typename T>
 inline unsigned countPopulation(T Value) {
-  static_assert(std::numeric_limits<T>::is_integer &&
-                    !std::numeric_limits<T>::is_signed,
+  static_assert(std::is_unsigned_v<T>,
                 "Only unsigned integral types are allowed.");
-  return detail::PopulationCounter<T, sizeof(T)>::count(Value);
+  return (unsigned)llvm::popcount(Value);
 }
 
 /// Return true if the argument contains a non-empty sequence of ones with the
@@ -608,15 +569,6 @@ template <size_t kValue> constexpr inline size_t CTLog2() {
 
 template <> constexpr inline size_t CTLog2<1>() { return 0; }
 
-/// Return the log base 2 of the specified value.
-inline double Log2(double Value) {
-#if defined(__ANDROID_API__) && __ANDROID_API__ < 18
-  return __builtin_log(Value) / __builtin_log(2.0);
-#else
-  return log2(Value);
-#endif
-}
-
 /// Return the floor log base 2 of the specified value, -1 if the value is zero.
 /// (32 bit edition.)
 /// Ex. Log2_32(32) == 5, Log2_32(1) == 0, Log2_32(0) == -1, Log2_32(6) == 2
@@ -643,55 +595,32 @@ inline unsigned Log2_64_Ceil(uint64_t Value) {
   return 64 - countLeadingZeros(Value - 1);
 }
 
-/// Return the greatest common divisor of the values using Euclid's algorithm.
-template <typename T>
-inline T greatestCommonDivisor(T A, T B) {
-  while (B) {
-    T Tmp = B;
-    B = A % B;
-    A = Tmp;
-  }
-  return A;
-}
-
-inline uint64_t GreatestCommonDivisor64(uint64_t A, uint64_t B) {
-  return greatestCommonDivisor<uint64_t>(A, B);
-}
-
 /// This function takes a 64-bit integer and returns the bit equivalent double.
 inline double BitsToDouble(uint64_t Bits) {
-  double D;
   static_assert(sizeof(uint64_t) == sizeof(double), "Unexpected type sizes");
-  memcpy(&D, &Bits, sizeof(Bits));
-  return D;
+  return llvm::bit_cast<double>(Bits);
 }
 
 /// This function takes a 32-bit integer and returns the bit equivalent float.
 inline float BitsToFloat(uint32_t Bits) {
-  float F;
   static_assert(sizeof(uint32_t) == sizeof(float), "Unexpected type sizes");
-  memcpy(&F, &Bits, sizeof(Bits));
-  return F;
+  return llvm::bit_cast<float>(Bits);
 }
 
 /// This function takes a double and returns the bit equivalent 64-bit integer.
 /// Note that copying doubles around changes the bits of NaNs on some hosts,
 /// notably x86, so this routine cannot be used if these bits are needed.
 inline uint64_t DoubleToBits(double Double) {
-  uint64_t Bits;
   static_assert(sizeof(uint64_t) == sizeof(double), "Unexpected type sizes");
-  memcpy(&Bits, &Double, sizeof(Double));
-  return Bits;
+  return llvm::bit_cast<uint64_t>(Double);
 }
 
 /// This function takes a float and returns the bit equivalent 32-bit integer.
 /// Note that copying floats around changes the bits of NaNs on some hosts,
 /// notably x86, so this routine cannot be used if these bits are needed.
 inline uint32_t FloatToBits(float Float) {
-  uint32_t Bits;
   static_assert(sizeof(uint32_t) == sizeof(float), "Unexpected type sizes");
-  memcpy(&Bits, &Float, sizeof(Float));
-  return Bits;
+  return llvm::bit_cast<uint32_t>(Float);
 }
 
 /// A and B are either alignments or offsets. Return the minimum alignment that
@@ -745,6 +674,12 @@ inline uint64_t PowerOf2Ceil(uint64_t A) {
 inline uint64_t alignTo(uint64_t Value, uint64_t Align) {
   assert(Align != 0u && "Align can't be 0.");
   return (Value + Align - 1) / Align * Align;
+}
+
+inline uint64_t alignToPowerOf2(uint64_t Value, uint64_t Align) {
+  assert(Align != 0 && (Align & (Align - 1)) == 0 &&
+         "Align must be a power of 2");
+  return (Value + Align - 1) & -Align;
 }
 
 /// If non-zero \p Skew is specified, the return value will be a minimal integer

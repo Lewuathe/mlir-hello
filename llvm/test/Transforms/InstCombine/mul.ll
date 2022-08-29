@@ -611,6 +611,66 @@ define <2 x i64> @test20(<2 x i64> %A) {
   ret <2 x i64> %C
 }
 
+@g = internal global i32 0, align 4
+
+define i32 @PR20079(i32 %a) {
+; CHECK-LABEL: @PR20079(
+; CHECK-NEXT:    [[ADD:%.*]] = add i32 [[A:%.*]], -1
+; CHECK-NEXT:    [[MUL:%.*]] = mul nsw i32 [[ADD]], ptrtoint (i32* @g to i32)
+; CHECK-NEXT:    ret i32 [[MUL]]
+;
+  %add = add i32 %a, -1
+  %mul = mul nsw i32 %add, ptrtoint (i32* @g to i32)
+  ret i32 %mul
+}
+
+; Keep nuw flag in this change, https://alive2.llvm.org/ce/z/-Wowpk
+define i32 @add_mul_nuw(i32 %a) {
+; CHECK-LABEL: @add_mul_nuw(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul nuw i32 [[A:%.*]], 3
+; CHECK-NEXT:    [[MUL:%.*]] = add nuw i32 [[TMP1]], 9
+; CHECK-NEXT:    ret i32 [[MUL]]
+;
+  %add = add nuw i32 %a, 3
+  %mul = mul nuw i32 %add, 3
+  ret i32 %mul
+}
+
+; Don't propagate nsw flag in this change
+define i32 @add_mul_nsw(i32 %a) {
+; CHECK-LABEL: @add_mul_nsw(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul i32 [[A:%.*]], 3
+; CHECK-NEXT:    [[MUL:%.*]] = add i32 [[TMP1]], 9
+; CHECK-NEXT:    ret i32 [[MUL]]
+;
+  %add = add nsw i32 %a, 3
+  %mul = mul nsw i32 %add, 3
+  ret i32 %mul
+}
+
+; Only the add or only the mul has nuw, https://alive2.llvm.org/ce/z/vPwbEa
+define i32 @only_add_nuw(i32 %a) {
+; CHECK-LABEL: @only_add_nuw(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul i32 [[A:%.*]], 3
+; CHECK-NEXT:    [[MUL:%.*]] = add i32 [[TMP1]], 9
+; CHECK-NEXT:    ret i32 [[MUL]]
+;
+  %add = add nuw i32 %a, 3
+  %mul = mul i32 %add, 3
+  ret i32 %mul
+}
+
+define i32 @only_mul_nuw(i32 %a) {
+; CHECK-LABEL: @only_mul_nuw(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul i32 [[A:%.*]], 3
+; CHECK-NEXT:    [[MUL:%.*]] = add i32 [[TMP1]], 9
+; CHECK-NEXT:    ret i32 [[MUL]]
+;
+  %add = add i32 %a, 3
+  %mul = mul nuw i32 %add, 3
+  ret i32 %mul
+}
+
 define <2 x i1> @test21(<2 x i1> %A, <2 x i1> %B) {
 ; CHECK-LABEL: @test21(
 ; CHECK-NEXT:    [[C:%.*]] = and <2 x i1> [[A:%.*]], [[B:%.*]]

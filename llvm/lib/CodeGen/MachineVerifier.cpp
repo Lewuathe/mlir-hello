@@ -293,6 +293,7 @@ namespace {
       }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
+      AU.addUsedIfAvailable<LiveStacks>();
       AU.setPreservesAll();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
@@ -631,6 +632,13 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
     }
   }
 
+  if (MBB->isIRBlockAddressTaken()) {
+    if (!MBB->getAddressTakenIRBlock()->hasAddressTaken())
+      report("ir-block-address-taken is associated with basic block not used by "
+             "a blockaddress.",
+             MBB);
+  }
+
   // Count the number of landing pad successors.
   SmallPtrSet<const MachineBasicBlock*, 4> LandingPadSuccs;
   for (const auto *succ : MBB->successors()) {
@@ -867,6 +875,34 @@ void MachineVerifier::verifyInlineAsm(const MachineInstr *MI) {
     const MachineOperand &MO = MI->getOperand(OpNo);
     if (!MO.isReg() || !MO.isImplicit())
       report("Expected implicit register after groups", &MO, OpNo);
+  }
+
+  if (MI->getOpcode() == TargetOpcode::INLINEASM_BR) {
+    const MachineBasicBlock *MBB = MI->getParent();
+
+    for (unsigned i = InlineAsm::MIOp_FirstOperand, e = MI->getNumOperands();
+         i != e; ++i) {
+      const MachineOperand &MO = MI->getOperand(i);
+
+      if (!MO.isMBB())
+        continue;
+
+      // Check the successor & predecessor lists look ok, assume they are
+      // not. Find the indirect target without going through the successors.
+      const MachineBasicBlock *IndirectTargetMBB = MO.getMBB();
+      if (!IndirectTargetMBB) {
+        report("INLINEASM_BR indirect target does not exist", &MO, i);
+        break;
+      }
+
+      if (!MBB->isSuccessor(IndirectTargetMBB))
+        report("INLINEASM_BR indirect target missing from successor list", &MO,
+               i);
+
+      if (!IndirectTargetMBB->isPredecessor(MBB))
+        report("INLINEASM_BR indirect target predecessor list missing parent",
+               &MO, i);
+    }
   }
 }
 
@@ -2801,8 +2837,8 @@ void MachineVerifier::visitMachineFunctionAfter() {
   // tracking numbers.
   if (MF->getFunction().getSubprogram()) {
     DenseSet<unsigned> SeenNumbers;
-    for (auto &MBB : *MF) {
-      for (auto &MI : MBB) {
+    for (const auto &MBB : *MF) {
+      for (const auto &MI : MBB) {
         if (auto Num = MI.peekDebugInstrNum()) {
           auto Result = SeenNumbers.insert((unsigned)Num);
           if (!Result.second)

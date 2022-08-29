@@ -9,28 +9,16 @@
 #include "clang/Tooling/DependencyScanning/DependencyScanningTool.h"
 #include "clang/Frontend/Utils.h"
 
-namespace clang {
-namespace tooling {
-namespace dependencies {
+using namespace clang;
+using namespace tooling;
+using namespace dependencies;
 
-std::vector<std::string> FullDependencies::getCommandLine(
-    std::function<StringRef(ModuleID)> LookupPCMPath) const {
-  std::vector<std::string> Ret = getCommandLineWithoutModulePaths();
-
-  for (ModuleID MID : ClangModuleDeps)
-    Ret.push_back(("-fmodule-file=" + LookupPCMPath(MID)).str());
-
-  return Ret;
-}
-
-std::vector<std::string>
-FullDependencies::getCommandLineWithoutModulePaths() const {
+static std::vector<std::string>
+makeTUCommandLineWithoutPaths(ArrayRef<std::string> OriginalCommandLine) {
   std::vector<std::string> Args = OriginalCommandLine;
 
   Args.push_back("-fno-implicit-modules");
   Args.push_back("-fno-implicit-module-maps");
-  for (const PrebuiltModuleDep &PMD : PrebuiltModuleDeps)
-    Args.push_back("-fmodule-file=" + PMD.PCMFile);
 
   // These arguments are unused in explicit compiles.
   llvm::erase_if(Args, [](StringRef Arg) {
@@ -47,8 +35,9 @@ FullDependencies::getCommandLineWithoutModulePaths() const {
 }
 
 DependencyScanningTool::DependencyScanningTool(
-    DependencyScanningService &Service)
-    : Worker(Service) {}
+    DependencyScanningService &Service,
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS)
+    : Worker(Service, std::move(FS)) {}
 
 llvm::Expected<std::string> DependencyScanningTool::getDependencyFile(
     const std::vector<std::string> &CommandLine, StringRef CWD,
@@ -76,6 +65,11 @@ llvm::Expected<std::string> DependencyScanningTool::getDependencyFile(
     }
 
     void handleContextHash(std::string Hash) override {}
+
+    std::string lookupModuleOutput(const ModuleID &ID,
+                                   ModuleOutputKind Kind) override {
+      llvm::report_fatal_error("unexpected call to lookupModuleOutput");
+    }
 
     void printDependencies(std::string &S) {
       assert(Opts && "Handled dependency output options.");
@@ -118,74 +112,10 @@ llvm::Expected<FullDependenciesResult>
 DependencyScanningTool::getFullDependencies(
     const std::vector<std::string> &CommandLine, StringRef CWD,
     const llvm::StringSet<> &AlreadySeen,
+    LookupModuleOutputCallback LookupModuleOutput,
     llvm::Optional<StringRef> ModuleName) {
-  class FullDependencyPrinterConsumer : public DependencyConsumer {
-  public:
-    FullDependencyPrinterConsumer(const llvm::StringSet<> &AlreadySeen)
-        : AlreadySeen(AlreadySeen) {}
-
-    void
-    handleDependencyOutputOpts(const DependencyOutputOptions &Opts) override {}
-
-    void handleFileDependency(StringRef File) override {
-      Dependencies.push_back(std::string(File));
-    }
-
-    void handlePrebuiltModuleDependency(PrebuiltModuleDep PMD) override {
-      PrebuiltModuleDeps.emplace_back(std::move(PMD));
-    }
-
-    void handleModuleDependency(ModuleDeps MD) override {
-      ClangModuleDeps[MD.ID.ContextHash + MD.ID.ModuleName] = std::move(MD);
-    }
-
-    void handleContextHash(std::string Hash) override {
-      ContextHash = std::move(Hash);
-    }
-
-    FullDependenciesResult getFullDependencies(
-        const std::vector<std::string> &OriginalCommandLine) const {
-      FullDependencies FD;
-
-      FD.OriginalCommandLine =
-          ArrayRef<std::string>(OriginalCommandLine).slice(1);
-
-      FD.ID.ContextHash = std::move(ContextHash);
-
-      FD.FileDeps.assign(Dependencies.begin(), Dependencies.end());
-
-      for (auto &&M : ClangModuleDeps) {
-        auto &MD = M.second;
-        if (MD.ImportedByMainFile)
-          FD.ClangModuleDeps.push_back(MD.ID);
-      }
-
-      FD.PrebuiltModuleDeps = std::move(PrebuiltModuleDeps);
-
-      FullDependenciesResult FDR;
-
-      for (auto &&M : ClangModuleDeps) {
-        // TODO: Avoid handleModuleDependency even being called for modules
-        //   we've already seen.
-        if (AlreadySeen.count(M.first))
-          continue;
-        FDR.DiscoveredModules.push_back(std::move(M.second));
-      }
-
-      FDR.FullDeps = std::move(FD);
-      return FDR;
-    }
-
-  private:
-    std::vector<std::string> Dependencies;
-    std::vector<PrebuiltModuleDep> PrebuiltModuleDeps;
-    llvm::MapVector<std::string, ModuleDeps, llvm::StringMap<unsigned>> ClangModuleDeps;
-    std::string ContextHash;
-    std::vector<std::string> OutputPaths;
-    const llvm::StringSet<> &AlreadySeen;
-  };
-
-  FullDependencyPrinterConsumer Consumer(AlreadySeen);
+  FullDependencyConsumer Consumer(AlreadySeen, LookupModuleOutput,
+                                  Worker.shouldEagerLoadModules());
   llvm::Error Result =
       Worker.computeDependencies(CWD, CommandLine, Consumer, ModuleName);
   if (Result)
@@ -193,6 +123,47 @@ DependencyScanningTool::getFullDependencies(
   return Consumer.getFullDependencies(CommandLine);
 }
 
-} // end namespace dependencies
-} // end namespace tooling
-} // end namespace clang
+FullDependenciesResult FullDependencyConsumer::getFullDependencies(
+    const std::vector<std::string> &OriginalCommandLine) const {
+  FullDependencies FD;
+
+  FD.CommandLine = makeTUCommandLineWithoutPaths(
+      ArrayRef<std::string>(OriginalCommandLine).slice(1));
+
+  FD.ID.ContextHash = std::move(ContextHash);
+
+  FD.FileDeps.assign(Dependencies.begin(), Dependencies.end());
+
+  for (const PrebuiltModuleDep &PMD : PrebuiltModuleDeps)
+    FD.CommandLine.push_back("-fmodule-file=" + PMD.PCMFile);
+
+  for (auto &&M : ClangModuleDeps) {
+    auto &MD = M.second;
+    if (MD.ImportedByMainFile) {
+      FD.ClangModuleDeps.push_back(MD.ID);
+      auto PCMPath = LookupModuleOutput(MD.ID, ModuleOutputKind::ModuleFile);
+      if (EagerLoadModules) {
+        FD.CommandLine.push_back("-fmodule-file=" + PCMPath);
+      } else {
+        FD.CommandLine.push_back("-fmodule-map-file=" + MD.ClangModuleMapFile);
+        FD.CommandLine.push_back("-fmodule-file=" + MD.ID.ModuleName + "=" +
+                                 PCMPath);
+      }
+    }
+  }
+
+  FD.PrebuiltModuleDeps = std::move(PrebuiltModuleDeps);
+
+  FullDependenciesResult FDR;
+
+  for (auto &&M : ClangModuleDeps) {
+    // TODO: Avoid handleModuleDependency even being called for modules
+    //   we've already seen.
+    if (AlreadySeen.count(M.first))
+      continue;
+    FDR.DiscoveredModules.push_back(std::move(M.second));
+  }
+
+  FDR.FullDeps = std::move(FD);
+  return FDR;
+}
