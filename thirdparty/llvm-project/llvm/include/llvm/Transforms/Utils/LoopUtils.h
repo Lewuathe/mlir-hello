@@ -435,7 +435,13 @@ bool cannotBeMaxInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE,
 bool cannotBeMinInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE,
                        bool Signed);
 
-enum ReplaceExitVal { NeverRepl, OnlyCheapRepl, NoHardUse, AlwaysRepl };
+enum ReplaceExitVal {
+  NeverRepl,
+  OnlyCheapRepl,
+  NoHardUse,
+  UnusedIndVarInLoop,
+  AlwaysRepl
+};
 
 /// If the final value of any expressions that are recurrent in the loop can
 /// be computed, substitute the exit values from the loop into any instructions
@@ -502,11 +508,9 @@ addRuntimeChecks(Instruction *Loc, Loop *TheLoop,
                  const SmallVectorImpl<RuntimePointerCheck> &PointerChecks,
                  SCEVExpander &Expander);
 
-Value *
-addDiffRuntimeChecks(Instruction *Loc, Loop *TheLoop,
-                     ArrayRef<PointerDiffInfo> Checks, SCEVExpander &Expander,
-                     function_ref<Value *(IRBuilderBase &, unsigned)> GetVF,
-                     unsigned IC);
+Value *addDiffRuntimeChecks(
+    Instruction *Loc, ArrayRef<PointerDiffInfo> Checks, SCEVExpander &Expander,
+    function_ref<Value *(IRBuilderBase &, unsigned)> GetVF, unsigned IC);
 
 /// Struct to hold information about a partially invariant condition.
 struct IVConditionInfo {

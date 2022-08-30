@@ -575,37 +575,6 @@ void Writer::treatSpecialUndefineds() {
   }
 }
 
-// Add stubs and bindings where necessary (e.g. if the symbol is a
-// DylibSymbol.)
-static void prepareBranchTarget(Symbol *sym) {
-  if (auto *dysym = dyn_cast<DylibSymbol>(sym)) {
-    if (in.stubs->addEntry(dysym)) {
-      if (sym->isWeakDef()) {
-        in.binding->addEntry(dysym, in.lazyPointers->isec,
-                             sym->stubsIndex * target->wordSize);
-        in.weakBinding->addEntry(sym, in.lazyPointers->isec,
-                                 sym->stubsIndex * target->wordSize);
-      } else {
-        in.lazyBinding->addEntry(dysym);
-      }
-    }
-  } else if (auto *defined = dyn_cast<Defined>(sym)) {
-    if (defined->isExternalWeakDef()) {
-      if (in.stubs->addEntry(sym)) {
-        in.rebase->addEntry(in.lazyPointers->isec,
-                            sym->stubsIndex * target->wordSize);
-        in.weakBinding->addEntry(sym, in.lazyPointers->isec,
-                                 sym->stubsIndex * target->wordSize);
-      }
-    } else if (defined->interposable) {
-      if (in.stubs->addEntry(sym))
-        in.lazyBinding->addEntry(sym);
-    }
-  } else {
-    llvm_unreachable("invalid branch target symbol type");
-  }
-}
-
 // Can a symbol's address can only be resolved at runtime?
 static bool needsBinding(const Symbol *sym) {
   if (isa<DylibSymbol>(sym))
@@ -621,7 +590,8 @@ static void prepareSymbolRelocation(Symbol *sym, const InputSection *isec,
   const RelocAttrs &relocAttrs = target->getRelocAttrs(r.type);
 
   if (relocAttrs.hasAttr(RelocAttrBits::BRANCH)) {
-    prepareBranchTarget(sym);
+    if (needsBinding(sym))
+      in.stubs->addEntry(sym);
   } else if (relocAttrs.hasAttr(RelocAttrBits::GOT)) {
     if (relocAttrs.hasAttr(RelocAttrBits::POINTER) || needsBinding(sym))
       in.got->addEntry(sym);
@@ -695,6 +665,9 @@ void Writer::scanSymbols() {
         continue;
       dysym->getFile()->refState =
           std::max(dysym->getFile()->refState, dysym->getRefState());
+    } else if (isa<Undefined>(sym)) {
+      if (sym->getName().startswith(ObjCStubsSection::symbolPrefix))
+        in.objcStubs->addEntry(sym);
     }
   }
 
@@ -780,70 +753,80 @@ template <class LP> void Writer::createLoadCommands() {
   if (config->outputType == MH_EXECUTE)
     in.header->addLoadCommand(make<LCMain>());
 
+  // See ld64's OutputFile::buildDylibOrdinalMapping for the corresponding
+  // library ordinal computation code in ld64.
   int64_t dylibOrdinal = 1;
   DenseMap<StringRef, int64_t> ordinalForInstallName;
+
+  std::vector<DylibFile *> dylibFiles;
   for (InputFile *file : inputFiles) {
-    if (auto *dylibFile = dyn_cast<DylibFile>(file)) {
-      if (dylibFile->isBundleLoader) {
-        dylibFile->ordinal = BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE;
-        // Shortcut since bundle-loader does not re-export the symbols.
+    if (auto *dylibFile = dyn_cast<DylibFile>(file))
+      dylibFiles.push_back(dylibFile);
+  }
+  for (size_t i = 0; i < dylibFiles.size(); ++i)
+    dylibFiles.insert(dylibFiles.end(), dylibFiles[i]->extraDylibs.begin(),
+                      dylibFiles[i]->extraDylibs.end());
 
-        dylibFile->reexport = false;
-        continue;
-      }
+  for (DylibFile *dylibFile : dylibFiles) {
+    if (dylibFile->isBundleLoader) {
+      dylibFile->ordinal = BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE;
+      // Shortcut since bundle-loader does not re-export the symbols.
 
-      // Don't emit load commands for a dylib that is not referenced if:
-      // - it was added implicitly (via a reexport, an LC_LOAD_DYLINKER --
-      //   if it's on the linker command line, it's explicit)
-      // - or it's marked MH_DEAD_STRIPPABLE_DYLIB
-      // - or the flag -dead_strip_dylibs is used
-      // FIXME: `isReferenced()` is currently computed before dead code
-      // stripping, so references from dead code keep a dylib alive. This
-      // matches ld64, but it's something we should do better.
-      if (!dylibFile->isReferenced() && !dylibFile->forceNeeded &&
-          (!dylibFile->explicitlyLinked || dylibFile->deadStrippable ||
-           config->deadStripDylibs))
-        continue;
-
-      // Several DylibFiles can have the same installName. Only emit a single
-      // load command for that installName and give all these DylibFiles the
-      // same ordinal.
-      // This can happen in several cases:
-      // - a new framework could change its installName to an older
-      //   framework name via an $ld$ symbol depending on platform_version
-      // - symlinks (for example, libpthread.tbd is a symlink to libSystem.tbd;
-      //   Foo.framework/Foo.tbd is usually a symlink to
-      //   Foo.framework/Versions/Current/Foo.tbd, where
-      //   Foo.framework/Versions/Current is usually a symlink to
-      //   Foo.framework/Versions/A)
-      // - a framework can be linked both explicitly on the linker
-      //   command line and implicitly as a reexport from a different
-      //   framework. The re-export will usually point to the tbd file
-      //   in Foo.framework/Versions/A/Foo.tbd, while the explicit link will
-      //   usually find Foo.framework/Foo.tbd. These are usually symlinks,
-      //   but in a --reproduce archive they will be identical but distinct
-      //   files.
-      // In the first case, *semantically distinct* DylibFiles will have the
-      // same installName.
-      int64_t &ordinal = ordinalForInstallName[dylibFile->installName];
-      if (ordinal) {
-        dylibFile->ordinal = ordinal;
-        continue;
-      }
-
-      ordinal = dylibFile->ordinal = dylibOrdinal++;
-      LoadCommandType lcType =
-          dylibFile->forceWeakImport || dylibFile->refState == RefState::Weak
-              ? LC_LOAD_WEAK_DYLIB
-              : LC_LOAD_DYLIB;
-      in.header->addLoadCommand(make<LCDylib>(lcType, dylibFile->installName,
-                                              dylibFile->compatibilityVersion,
-                                              dylibFile->currentVersion));
-
-      if (dylibFile->reexport)
-        in.header->addLoadCommand(
-            make<LCDylib>(LC_REEXPORT_DYLIB, dylibFile->installName));
+      dylibFile->reexport = false;
+      continue;
     }
+
+    // Don't emit load commands for a dylib that is not referenced if:
+    // - it was added implicitly (via a reexport, an LC_LOAD_DYLINKER --
+    //   if it's on the linker command line, it's explicit)
+    // - or it's marked MH_DEAD_STRIPPABLE_DYLIB
+    // - or the flag -dead_strip_dylibs is used
+    // FIXME: `isReferenced()` is currently computed before dead code
+    // stripping, so references from dead code keep a dylib alive. This
+    // matches ld64, but it's something we should do better.
+    if (!dylibFile->isReferenced() && !dylibFile->forceNeeded &&
+        (!dylibFile->isExplicitlyLinked() || dylibFile->deadStrippable ||
+         config->deadStripDylibs))
+      continue;
+
+    // Several DylibFiles can have the same installName. Only emit a single
+    // load command for that installName and give all these DylibFiles the
+    // same ordinal.
+    // This can happen in several cases:
+    // - a new framework could change its installName to an older
+    //   framework name via an $ld$ symbol depending on platform_version
+    // - symlinks (for example, libpthread.tbd is a symlink to libSystem.tbd;
+    //   Foo.framework/Foo.tbd is usually a symlink to
+    //   Foo.framework/Versions/Current/Foo.tbd, where
+    //   Foo.framework/Versions/Current is usually a symlink to
+    //   Foo.framework/Versions/A)
+    // - a framework can be linked both explicitly on the linker
+    //   command line and implicitly as a reexport from a different
+    //   framework. The re-export will usually point to the tbd file
+    //   in Foo.framework/Versions/A/Foo.tbd, while the explicit link will
+    //   usually find Foo.framework/Foo.tbd. These are usually symlinks,
+    //   but in a --reproduce archive they will be identical but distinct
+    //   files.
+    // In the first case, *semantically distinct* DylibFiles will have the
+    // same installName.
+    int64_t &ordinal = ordinalForInstallName[dylibFile->installName];
+    if (ordinal) {
+      dylibFile->ordinal = ordinal;
+      continue;
+    }
+
+    ordinal = dylibFile->ordinal = dylibOrdinal++;
+    LoadCommandType lcType =
+        dylibFile->forceWeakImport || dylibFile->refState == RefState::Weak
+            ? LC_LOAD_WEAK_DYLIB
+            : LC_LOAD_DYLIB;
+    in.header->addLoadCommand(make<LCDylib>(lcType, dylibFile->installName,
+                                            dylibFile->compatibilityVersion,
+                                            dylibFile->currentVersion));
+
+    if (dylibFile->reexport)
+      in.header->addLoadCommand(
+          make<LCDylib>(LC_REEXPORT_DYLIB, dylibFile->installName));
   }
 
   if (functionStartsSection)
@@ -1126,8 +1109,10 @@ void Writer::writeUuid() {
 }
 
 void Writer::writeCodeSignature() {
-  if (codeSignatureSection)
+  if (codeSignatureSection) {
+    TimeTraceScope timeScope("Write code signature");
     codeSignatureSection->writeHashes(buffer->getBufferStart());
+  }
 }
 
 void Writer::writeOutputFile() {
@@ -1146,13 +1131,15 @@ void Writer::writeOutputFile() {
 
 template <class LP> void Writer::run() {
   treatSpecialUndefineds();
-  if (config->entry && !isa<Undefined>(config->entry))
-    prepareBranchTarget(config->entry);
+  if (config->entry && needsBinding(config->entry))
+    in.stubs->addEntry(config->entry);
 
   // Canonicalization of all pointers to InputSections should be handled by
   // these two scan* methods. I.e. from this point onward, for all live
   // InputSections, we should have `isec->canonical() == isec`.
   scanSymbols();
+  if (in.objcStubs->isNeeded())
+    in.objcStubs->setup();
   scanRelocations();
 
   // Do not proceed if there was an undefined symbol.
@@ -1162,6 +1149,10 @@ template <class LP> void Writer::run() {
 
   if (in.stubHelper->isNeeded())
     in.stubHelper->setup();
+
+  if (in.objCImageInfo->isNeeded())
+    in.objCImageInfo->finalizeContents();
+
   // At this point, we should know exactly which output sections are needed,
   // courtesy of scanSymbols() and scanRelocations().
   createOutputSections<LP>();
@@ -1192,9 +1183,12 @@ void macho::resetWriter() { LCDylib::resetInstanceCount(); }
 void macho::createSyntheticSections() {
   in.header = make<MachHeaderSection>();
   if (config->dedupLiterals)
-    in.cStringSection = make<DeduplicatedCStringSection>();
+    in.cStringSection =
+        make<DeduplicatedCStringSection>(section_names::cString);
   else
-    in.cStringSection = make<CStringSection>();
+    in.cStringSection = make<CStringSection>(section_names::cString);
+  in.objcMethnameSection =
+      make<DeduplicatedCStringSection>(section_names::objcMethname);
   in.wordLiteralSection =
       config->dedupLiterals ? make<WordLiteralSection>() : nullptr;
   in.rebase = make<RebaseSection>();
@@ -1207,7 +1201,9 @@ void macho::createSyntheticSections() {
   in.lazyPointers = make<LazyPointerSection>();
   in.stubs = make<StubsSection>();
   in.stubHelper = make<StubHelperSection>();
+  in.objcStubs = make<ObjCStubsSection>();
   in.unwindInfo = makeUnwindInfoSection();
+  in.objCImageInfo = make<ObjCImageInfoSection>();
 
   // This section contains space for just a single word, and will be used by
   // dyld to cache an address to the image loader it uses.

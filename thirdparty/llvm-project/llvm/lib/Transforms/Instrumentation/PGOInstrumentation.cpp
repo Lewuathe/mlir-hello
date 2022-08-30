@@ -91,6 +91,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/IR/ProfDataUtils.h"
 #include "llvm/IR/ProfileSummary.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
@@ -210,12 +211,11 @@ cl::opt<bool>
 // Command line option to enable/disable the warning about a hash mismatch in
 // the profile data for Comdat functions, which often turns out to be false
 // positive due to the pre-instrumentation inline.
-static cl::opt<bool>
-    NoPGOWarnMismatchComdat("no-pgo-warn-mismatch-comdat", cl::init(true),
-                            cl::Hidden,
-                            cl::desc("The option is used to turn on/off "
-                                     "warnings about hash mismatch for comdat "
-                                     "functions."));
+static cl::opt<bool> NoPGOWarnMismatchComdatWeak(
+    "no-pgo-warn-mismatch-comdat-weak", cl::init(true), cl::Hidden,
+    cl::desc("The option is used to turn on/off "
+             "warnings about hash mismatch for comdat "
+             "or weak functions."));
 
 // Command line option to enable/disable select instruction instrumentation.
 static cl::opt<bool>
@@ -286,6 +286,15 @@ static cl::opt<unsigned> PGOVerifyBFICutoff(
     "pgo-verify-bfi-cutoff", cl::init(5), cl::Hidden,
     cl::desc("Set the threshold for pgo-verify-bfi: skip the counts whose "
              "profile count value is below."));
+
+static cl::opt<std::string> PGOTraceFuncHash(
+    "pgo-trace-func-hash", cl::init("-"), cl::Hidden,
+    cl::value_desc("function name"),
+    cl::desc("Trace the hash of the function with this name."));
+
+static cl::opt<unsigned> PGOFunctionSizeThreshold(
+    "pgo-function-size-threshold", cl::Hidden,
+    cl::desc("Do not instrument functions smaller than this threshold"));
 
 namespace llvm {
 // Command line option to turn on CFG dot dump after profile annotation.
@@ -630,6 +639,10 @@ void FuncPGOInstrumentation<Edge, BBInfo>::computeCFGHash() {
                       << ", High32 CRC = " << JCH.getCRC());
   }
   LLVM_DEBUG(dbgs() << ", Hash = " << FunctionHash << "\n";);
+
+  if (PGOTraceFuncHash != "-" && F.getName().contains(PGOTraceFuncHash))
+    dbgs() << "Funcname=" << F.getName() << ", Hash=" << FunctionHash
+           << " in building " << F.getParent()->getSourceFileName() << "\n";
 }
 
 // Check if we can safely rename this Comdat function.
@@ -832,8 +845,6 @@ static void instrumentOneFunc(
   auto CFGHash = ConstantInt::get(Type::getInt64Ty(M->getContext()),
                                   FuncInfo.FunctionHash);
   if (PGOFunctionEntryCoverage) {
-    assert(!IsCS &&
-           "entry coverge does not support context-sensitive instrumentation");
     auto &EntryBB = F.getEntryBlock();
     IRBuilder<> Builder(&EntryBB, EntryBB.getFirstInsertionPt());
     // llvm.instrprof.cover(i8* <name>, i64 <hash>, i32 <num-counters>,
@@ -985,7 +996,7 @@ struct UseBBInfo : public BBInfo {
 // Sum up the count values for all the edges.
 static uint64_t sumEdgeCount(const ArrayRef<PGOUseEdge *> Edges) {
   uint64_t Total = 0;
-  for (auto &E : Edges) {
+  for (const auto &E : Edges) {
     if (E->Removed)
       continue;
     Total += E->CountValue;
@@ -1197,7 +1208,7 @@ static void annotateFunctionWithHashMismatch(Function &F,
   auto *Existing = F.getMetadata(LLVMContext::MD_annotation);
   if (Existing) {
     MDTuple *Tuple = cast<MDTuple>(Existing);
-    for (auto &N : Tuple->operands()) {
+    for (const auto &N : Tuple->operands()) {
       if (cast<MDString>(N.get())->getString() ==  MetadataName)
         return;
       Names.push_back(N.get());
@@ -1216,8 +1227,9 @@ static void annotateFunctionWithHashMismatch(Function &F,
 bool PGOUseFunc::readCounters(IndexedInstrProfReader *PGOReader, bool &AllZeros,
                               bool &AllMinusOnes) {
   auto &Ctx = M->getContext();
-  Expected<InstrProfRecord> Result =
-      PGOReader->getInstrProfRecord(FuncInfo.FuncName, FuncInfo.FunctionHash);
+  uint64_t MismatchedFuncSum = 0;
+  Expected<InstrProfRecord> Result = PGOReader->getInstrProfRecord(
+      FuncInfo.FuncName, FuncInfo.FunctionHash, &MismatchedFuncSum);
   if (Error E = Result.takeError()) {
     handleAllErrors(std::move(E), [&](const InstrProfError &IPE) {
       auto Err = IPE.get();
@@ -1233,10 +1245,11 @@ bool PGOUseFunc::readCounters(IndexedInstrProfReader *PGOReader, bool &AllZeros,
         IsCS ? NumOfCSPGOMismatch++ : NumOfPGOMismatch++;
         SkipWarning =
             NoPGOWarnMismatch ||
-            (NoPGOWarnMismatchComdat &&
-             (F.hasComdat() ||
+            (NoPGOWarnMismatchComdatWeak &&
+             (F.hasComdat() || F.getLinkage() == GlobalValue::WeakAnyLinkage ||
               F.getLinkage() == GlobalValue::AvailableExternallyLinkage));
-        LLVM_DEBUG(dbgs() << "hash mismatch (skip=" << SkipWarning << ")");
+        LLVM_DEBUG(dbgs() << "hash mismatch (hash= " << FuncInfo.FunctionHash
+                          << " skip=" << SkipWarning << ")");
         // Emit function metadata indicating PGO profile mismatch.
         annotateFunctionWithHashMismatch(F, M->getContext());
       }
@@ -1245,9 +1258,11 @@ bool PGOUseFunc::readCounters(IndexedInstrProfReader *PGOReader, bool &AllZeros,
       if (SkipWarning)
         return;
 
-      std::string Msg = IPE.message() + std::string(" ") + F.getName().str() +
-                        std::string(" Hash = ") +
-                        std::to_string(FuncInfo.FunctionHash);
+      std::string Msg =
+          IPE.message() + std::string(" ") + F.getName().str() +
+          std::string(" Hash = ") + std::to_string(FuncInfo.FunctionHash) +
+          std::string(" up to ") + std::to_string(MismatchedFuncSum) +
+          std::string(" count discarded");
 
       Ctx.diagnose(
           DiagnosticInfoPGOProfile(M->getName().data(), Msg, DS_Warning));
@@ -1563,6 +1578,10 @@ static bool InstrumentAllFunctions(
       continue;
     if (F.hasFnAttribute(llvm::Attribute::NoProfile))
       continue;
+    if (F.hasFnAttribute(llvm::Attribute::SkipProfile))
+      continue;
+    if (F.getInstructionCount() < PGOFunctionSizeThreshold)
+      continue;
     auto &TLI = LookupTLI(F);
     auto *BPI = LookupBPI(F);
     auto *BFI = LookupBFI(F);
@@ -1619,7 +1638,7 @@ static void fixFuncEntryCount(PGOUseFunc &Func, LoopInfo &LI,
       continue;
     auto BFICount = NBFI.getBlockProfileCount(&BBI);
     CountValue = Func.getBBInfo(&BBI).CountValue;
-    BFICountValue = BFICount.getValue();
+    BFICountValue = *BFICount;
     SumCount.add(APFloat(CountValue * 1.0), APFloat::rmNearestTiesToEven);
     SumBFICount.add(APFloat(BFICountValue * 1.0), APFloat::rmNearestTiesToEven);
   }
@@ -1672,7 +1691,7 @@ static void verifyFuncBFI(PGOUseFunc &Func, LoopInfo &LI,
       NonZeroBBNum++;
     auto BFICount = NBFI.getBlockProfileCount(&BBI);
     if (BFICount)
-      BFICountValue = BFICount.getValue();
+      BFICountValue = *BFICount;
 
     if (HotBBOnly) {
       bool rawIsHot = CountValue >= HotCountThreshold;
@@ -2057,7 +2076,7 @@ template <> struct DOTGraphTraits<PGOUseFunc *> : DefaultDOTGraphTraits {
       // Display scaled counts for SELECT instruction:
       OS << "SELECT : { T = ";
       uint64_t TC, FC;
-      bool HasProf = I.extractProfMetadata(TC, FC);
+      bool HasProf = extractBranchWeights(I, TC, FC);
       if (!HasProf)
         OS << "Unknown, F = Unknown }\\l";
       else

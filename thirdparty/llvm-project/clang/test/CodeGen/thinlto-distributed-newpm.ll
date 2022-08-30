@@ -34,7 +34,6 @@
 ; CHECK-O: Running pass: CalledValuePropagationPass
 ; CHECK-O: Running pass: GlobalOptPass
 ; CHECK-O: Running pass: PromotePass
-; CHECK-O: Running pass: DeadArgumentEliminationPass
 ; CHECK-O: Running pass: InstCombinePass on main
 ; CHECK-O: Running pass: SimplifyCFGPass on main
 ; CHECK-O: Running pass: InlinerPass on (main)
@@ -74,6 +73,7 @@
 ; CHECK-O: Running pass: LCSSAPass on main
 ; CHECK-O: Running pass: SimplifyCFGPass on main
 ; CHECK-O: Running pass: InstCombinePass on main
+; CHECK-O: Running pass: DeadArgumentEliminationPass
 ; CHECK-O: Running pass: GlobalOptPass
 ; CHECK-O: Running pass: GlobalDCEPass
 ; CHECK-O: Running pass: EliminateAvailableExternallyPass
@@ -105,9 +105,9 @@
 ; CHECK-O: Running pass: InstSimplifyPass on main
 ; CHECK-O: Running pass: DivRemPairsPass on main
 ; CHECK-O: Running pass: SimplifyCFGPass on main
-; CHECK-O: Running pass: CGProfilePass
 ; CHECK-O: Running pass: GlobalDCEPass
 ; CHECK-O: Running pass: ConstantMergePass
+; CHECK-O: Running pass: CGProfilePass
 
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-grtev4-linux-gnu"

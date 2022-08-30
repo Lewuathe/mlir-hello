@@ -777,12 +777,12 @@ mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
     }
 
     SampleProfileMap &Profiles = Reader->getProfiles();
-    if (ProfileIsProbeBased.hasValue() &&
+    if (ProfileIsProbeBased &&
         ProfileIsProbeBased != FunctionSamples::ProfileIsProbeBased)
       exitWithError(
           "cannot merge probe-based profile with non-probe-based profile");
     ProfileIsProbeBased = FunctionSamples::ProfileIsProbeBased;
-    if (ProfileIsCS.hasValue() && ProfileIsCS != FunctionSamples::ProfileIsCS)
+    if (ProfileIsCS && ProfileIsCS != FunctionSamples::ProfileIsCS)
       exitWithError("cannot merge CS profile with non-CS profile");
     ProfileIsCS = FunctionSamples::ProfileIsCS;
     for (SampleProfileMap::iterator I = Profiles.begin(), E = Profiles.end();
@@ -2200,8 +2200,7 @@ static int showInstrProfile(const std::string &Filename, bool ShowCounts,
     Builder.addRecord(Func);
 
     if (ShowCovered) {
-      if (std::any_of(Func.Counts.begin(), Func.Counts.end(),
-                      [](uint64_t C) { return C; }))
+      if (llvm::any_of(Func.Counts, [](uint64_t C) { return C; }))
         OS << Func.Name << "\n";
       continue;
     }
@@ -2471,9 +2470,10 @@ static int showHotFunctionList(const sampleprof::SampleProfileMap &Profiles,
         (ProfileTotalSample > 0)
             ? (Func.getTotalSamples() * 100.0) / ProfileTotalSample
             : 0;
-    PrintValues.emplace_back(HotFuncInfo(
-        Func.getContext().toString(), Func.getTotalSamples(),
-        TotalSamplePercent, FuncPair.second.second, Func.getEntrySamples()));
+    PrintValues.emplace_back(
+        HotFuncInfo(Func.getContext().toString(), Func.getTotalSamples(),
+                    TotalSamplePercent, FuncPair.second.second,
+                    Func.getHeadSamplesEstimate()));
   }
   dumpHotFunctionList(ColumnTitle, ColumnOffset, PrintValues, HotFuncCount,
                       Profiles.size(), HotFuncSample, ProfileTotalSample,
@@ -2488,7 +2488,7 @@ static int showSampleProfile(const std::string &Filename, bool ShowCounts,
                              const std::string &ShowFunction,
                              bool ShowProfileSymbolList,
                              bool ShowSectionInfoOnly, bool ShowHotFuncList,
-                             raw_fd_ostream &OS) {
+                             bool JsonFormat, raw_fd_ostream &OS) {
   using namespace sampleprof;
   LLVMContext Context;
   auto ReaderOrErr =
@@ -2505,11 +2505,20 @@ static int showSampleProfile(const std::string &Filename, bool ShowCounts,
   if (std::error_code EC = Reader->read())
     exitWithErrorCode(EC, Filename);
 
-  if (ShowAllFunctions || ShowFunction.empty())
-    Reader->dump(OS);
-  else
+  if (ShowAllFunctions || ShowFunction.empty()) {
+    if (JsonFormat)
+      Reader->dumpJson(OS);
+    else
+      Reader->dump(OS);
+  } else {
+    if (JsonFormat)
+      exitWithError(
+          "the JSON format is supported only when all functions are to "
+          "be printed");
+
     // TODO: parse context string to support filtering by contexts.
     Reader->dumpFunctionProfile(StringRef(ShowFunction), OS);
+  }
 
   if (ShowProfileSymbolList) {
     std::unique_ptr<sampleprof::ProfileSymbolList> ReaderList =
@@ -2582,6 +2591,9 @@ static int show_main(int argc, const char *argv[]) {
   cl::opt<bool> TextFormat(
       "text", cl::init(false),
       cl::desc("Show instr profile data in text dump format"));
+  cl::opt<bool> JsonFormat(
+      "json", cl::init(false),
+      cl::desc("Show sample profile data in the JSON format"));
   cl::opt<bool> ShowIndirectCallTargets(
       "ic-targets", cl::init(false),
       cl::desc("Show indirect call site target values for shown functions"));
@@ -2679,10 +2691,10 @@ static int show_main(int argc, const char *argv[]) {
         ShowAllFunctions, ShowCS, ValueCutoff, OnlyListBelow, ShowFunction,
         TextFormat, ShowBinaryIds, ShowCovered, OS);
   if (ProfileKind == sample)
-    return showSampleProfile(Filename, ShowCounts, TopNFunctions,
-                             ShowAllFunctions, ShowDetailedSummary,
-                             ShowFunction, ShowProfileSymbolList,
-                             ShowSectionInfoOnly, ShowHotFuncList, OS);
+    return showSampleProfile(
+        Filename, ShowCounts, TopNFunctions, ShowAllFunctions,
+        ShowDetailedSummary, ShowFunction, ShowProfileSymbolList,
+        ShowSectionInfoOnly, ShowHotFuncList, JsonFormat, OS);
   return showMemProfProfile(Filename, ProfiledBinary, OS);
 }
 

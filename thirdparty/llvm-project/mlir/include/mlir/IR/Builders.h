@@ -137,6 +137,15 @@ public:
   DenseIntElementsAttr getI64TensorAttr(ArrayRef<int64_t> values);
   DenseIntElementsAttr getIndexTensorAttr(ArrayRef<int64_t> values);
 
+  /// Tensor-typed DenseArrayAttr getters.
+  DenseBoolArrayAttr getDenseBoolArrayAttr(ArrayRef<bool> values);
+  DenseI8ArrayAttr getDenseI8ArrayAttr(ArrayRef<int8_t> values);
+  DenseI16ArrayAttr getDenseI16ArrayAttr(ArrayRef<int16_t> values);
+  DenseI32ArrayAttr getDenseI32ArrayAttr(ArrayRef<int32_t> values);
+  DenseI64ArrayAttr getDenseI64ArrayAttr(ArrayRef<int64_t> values);
+  DenseF32ArrayAttr getDenseF32ArrayAttr(ArrayRef<float> values);
+  DenseF64ArrayAttr getDenseF64ArrayAttr(ArrayRef<double> values);
+
   ArrayAttr getAffineMapArrayAttr(ArrayRef<AffineMap> values);
   ArrayAttr getBoolArrayAttr(ArrayRef<bool> values);
   ArrayAttr getI32ArrayAttr(ArrayRef<int32_t> values);

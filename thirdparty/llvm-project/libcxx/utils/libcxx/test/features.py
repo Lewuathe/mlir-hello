@@ -24,6 +24,11 @@ def _hasSuitableClangTidy(cfg):
   except ConfigurationRuntimeError:
     return False
 
+def _hasSuitableClangQuery(cfg):
+  try:
+    return int(re.search('[0-9]+', commandOutput(cfg, ['clang-query --version'])).group()) >= 13
+  except ConfigurationRuntimeError:
+    return False
 
 DEFAULT_FEATURES = [
   Feature(name='fcoroutines-ts',
@@ -137,6 +142,8 @@ DEFAULT_FEATURES = [
           when=lambda cfg: runScriptExitCode(cfg, ['%{exec} bash -c \'bash --version\'']) != 0),
   Feature(name='has-clang-tidy',
           when=_hasSuitableClangTidy),
+  Feature(name='has-clang-query',
+          when=_hasSuitableClangQuery),
 
   Feature(name='apple-clang',                                                                                                      when=_isAppleClang),
   Feature(name=lambda cfg: 'apple-clang-{__clang_major__}'.format(**compilerMacros(cfg)),                                          when=_isAppleClang),
@@ -188,8 +195,6 @@ macros = {
   '_LIBCPP_HAS_NO_RANDOM_DEVICE': 'no-random-device',
   '_LIBCPP_HAS_NO_LOCALIZATION': 'no-localization',
   '_LIBCPP_HAS_NO_WIDE_CHARACTERS': 'no-wide-characters',
-  '_LIBCPP_HAS_NO_INCOMPLETE_FORMAT': 'libcpp-has-no-incomplete-format',
-  '_LIBCPP_HAS_NO_INCOMPLETE_RANGES': 'libcpp-has-no-incomplete-ranges',
   '_LIBCPP_HAS_NO_UNICODE': 'libcpp-has-no-unicode',
   '_LIBCPP_ENABLE_DEBUG_MODE': 'libcpp-has-debug-mode',
 }
@@ -260,9 +265,11 @@ DEFAULT_FEATURES += [
 # The build host could differ from the target platform for cross-compilation.
 DEFAULT_FEATURES += [
   Feature(name='buildhost={}'.format(sys.platform.lower().strip())),
-  # sys.platform can be represented by "sub-system" on Windows host, such as 'win32', 'cygwin', 'mingw' & etc.
-  # Here is a consolidated feature for the build host plaform name on Windows.
-  Feature(name='buildhost=windows', when=lambda cfg: platform.system().lower().startswith('windows'))
+  # sys.platform can often be represented by a "sub-system", such as 'win32', 'cygwin', 'mingw', freebsd13 & etc.
+  # We define a consolidated feature on a few platforms.
+  Feature(name='buildhost=windows', when=lambda cfg: platform.system().lower().startswith('windows')),
+  Feature(name='buildhost=freebsd', when=lambda cfg: platform.system().lower().startswith('freebsd')),
+  Feature(name='buildhost=aix', when=lambda cfg: platform.system().lower().startswith('aix'))
 ]
 
 # Detect whether GDB is on the system, has Python scripting and supports

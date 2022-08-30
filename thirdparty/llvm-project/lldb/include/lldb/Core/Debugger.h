@@ -82,6 +82,7 @@ public:
     eBroadcastBitProgress = (1 << 0),
     eBroadcastBitWarning = (1 << 1),
     eBroadcastBitError = (1 << 2),
+    eBroadcastSymbolChange = (1 << 3),
   };
 
   static ConstString GetStaticBroadcasterClass();
@@ -245,6 +246,7 @@ public:
   bool EnableLog(llvm::StringRef channel,
                  llvm::ArrayRef<const char *> categories,
                  llvm::StringRef log_file, uint32_t log_options,
+                 size_t buffer_size, LogHandlerKind log_handler_kind,
                  llvm::raw_ostream &error_stream);
 
   void SetLoggingCallback(lldb::LogOutputCallback log_callback, void *baton);
@@ -428,6 +430,8 @@ public:
   ReportError(std::string messsage,
               llvm::Optional<lldb::user_id_t> debugger_id = llvm::None,
               std::once_flag *once = nullptr);
+
+  static void ReportSymbolChange(const ModuleSpec &module_spec);
 
 protected:
   friend class CommandInterpreter;

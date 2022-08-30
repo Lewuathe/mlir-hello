@@ -13,6 +13,7 @@
 #include "DXILBitcodeWriter.h"
 #include "DXILValueEnumerator.h"
 #include "PointerTypeAnalysis.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Bitcode/BitcodeCommon.h"
 #include "llvm/Bitcode/BitcodeReader.h"
@@ -595,6 +596,10 @@ unsigned DXILBitcodeWriter::getEncodedRMWOperation(AtomicRMWInst::BinOp Op) {
     return bitc::RMW_FADD;
   case AtomicRMWInst::FSub:
     return bitc::RMW_FSUB;
+  case AtomicRMWInst::FMax:
+    return bitc::RMW_FMAX;
+  case AtomicRMWInst::FMin:
+    return bitc::RMW_FMIN;
   }
 }
 
@@ -1063,7 +1068,7 @@ void DXILBitcodeWriter::writeTypeTable() {
       Code = bitc::TYPE_CODE_INTEGER;
       TypeVals.push_back(cast<IntegerType>(T)->getBitWidth());
       break;
-    case Type::DXILPointerTyID: {
+    case Type::TypedPointerTyID: {
       TypedPointerType *PTy = cast<TypedPointerType>(T);
       // POINTER: [pointee type, address space]
       Code = bitc::TYPE_CODE_POINTER;
@@ -1251,7 +1256,7 @@ void DXILBitcodeWriter::writeModuleInfo() {
                                                            //| constant
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // Initializer.
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 5)); // Linkage.
-    if (MaxAlignment == 0)                                 // Alignment.
+    if (!MaxAlignment)                                     // Alignment.
       Abbv->Add(BitCodeAbbrevOp(0));
     else {
       unsigned MaxEncAlignment = getEncodedAlign(MaxAlignment);
@@ -1357,7 +1362,12 @@ void DXILBitcodeWriter::writeValueAsMetadata(
     const ValueAsMetadata *MD, SmallVectorImpl<uint64_t> &Record) {
   // Mimic an MDNode with a value as one operand.
   Value *V = MD->getValue();
-  Record.push_back(getTypeID(V->getType()));
+  Type *Ty = V->getType();
+  if (Function *F = dyn_cast<Function>(V))
+    Ty = TypedPointerType::get(F->getFunctionType(), F->getAddressSpace());
+  else if (GlobalVariable *GV = dyn_cast<GlobalVariable>(V))
+    Ty = TypedPointerType::get(GV->getValueType(), GV->getAddressSpace());
+  Record.push_back(getTypeID(Ty));
   Record.push_back(VE.getValueID(V));
   Stream.EmitRecord(bitc::METADATA_VALUE, Record, 0);
   Record.clear();
@@ -2060,7 +2070,7 @@ void DXILBitcodeWriter::writeConstants(unsigned FirstVal, unsigned LastVal,
     } else if (const ConstantDataSequential *CDS =
                    dyn_cast<ConstantDataSequential>(C)) {
       Code = bitc::CST_CODE_DATA;
-      Type *EltTy = CDS->getType()->getArrayElementType();
+      Type *EltTy = CDS->getElementType();
       if (isa<IntegerType>(EltTy)) {
         for (unsigned i = 0, e = CDS->getNumElements(); i != e; ++i)
           Record.push_back(CDS->getElementAsInteger(i));
@@ -2308,7 +2318,8 @@ void DXILBitcodeWriter::writeInstruction(const Instruction &I, unsigned InstID,
     Code = bitc::FUNC_CODE_INST_SHUFFLEVEC;
     pushValueAndType(I.getOperand(0), InstID, Vals);
     pushValue(I.getOperand(1), InstID, Vals);
-    pushValue(I.getOperand(2), InstID, Vals);
+    pushValue(cast<ShuffleVectorInst>(&I)->getShuffleMaskForBitcode(), InstID,
+              Vals);
     break;
   case Instruction::ICmp:
   case Instruction::FCmp: {
@@ -2439,15 +2450,11 @@ void DXILBitcodeWriter::writeInstruction(const Instruction &I, unsigned InstID,
     Vals.push_back(getTypeID(AI.getAllocatedType()));
     Vals.push_back(getTypeID(I.getOperand(0)->getType()));
     Vals.push_back(VE.getValueID(I.getOperand(0))); // size.
-    using APV = AllocaPackedValues;
-    unsigned Record = 0;
-    unsigned EncodedAlign = getEncodedAlign(AI.getAlign());
-    Bitfield::set<APV::AlignLower>(
-        Record, EncodedAlign & ((1 << APV::AlignLower::Bits) - 1));
-    Bitfield::set<APV::AlignUpper>(Record,
-                                   EncodedAlign >> APV::AlignLower::Bits);
-    Bitfield::set<APV::UsedWithInAlloca>(Record, AI.isUsedWithInAlloca());
-    Vals.push_back(Record);
+    unsigned AlignRecord = Log2_32(AI.getAlign().value()) + 1;
+    assert(AlignRecord < 1 << 5 && "alignment greater than 1 << 64");
+    AlignRecord |= AI.isUsedWithInAlloca() << 5;
+    AlignRecord |= 1 << 6;
+    Vals.push_back(AlignRecord);
     break;
   }
 
@@ -2571,10 +2578,9 @@ void DXILBitcodeWriter::writeFunctionLevelValueSymbolTable(
     SortedTable.push_back(VI.second->getValueName());
   }
   // The keys are unique, so there shouldn't be stability issues.
-  std::sort(SortedTable.begin(), SortedTable.end(),
-            [](const ValueName *A, const ValueName *B) {
-              return A->first() < B->first();
-            });
+  llvm::sort(SortedTable, [](const ValueName *A, const ValueName *B) {
+    return A->first() < B->first();
+  });
 
   for (const ValueName *SI : SortedTable) {
     auto &Name = *SI;
