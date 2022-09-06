@@ -17,9 +17,8 @@ Please make sure to build LLVM project first according to [the instruction](http
 
 ```sh
 mkdir build && cd build
-LLVM_DIR=/path/to/llvm-project/build/lib/cmake/llvm \
-  MLIR_DIR=/path/to/llvm-project/build/lib/cmake/mlir \
-  cmake -G Ninja ..
+cmake -G Ninja .. -DLLVM_DIR=/path/to/llvm-project/build/lib/cmake/llvm \
+  -DMLIR_DIR=/path/to/llvm-project/build/lib/cmake/mlir
 
 cmake --build . --target hello-opt
 ```
