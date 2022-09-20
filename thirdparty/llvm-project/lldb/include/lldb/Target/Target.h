@@ -141,6 +141,8 @@ public:
 
   PathMappingList &GetSourcePathMap() const;
 
+  bool GetAutoSourceMapRelative() const;
+
   FileSpecList GetExecutableSearchPaths();
 
   void AppendExecutableSearchPaths(const FileSpec &);
@@ -780,6 +782,9 @@ public:
 
   bool RemoveBreakpointByID(lldb::break_id_t break_id);
 
+  /// Resets the hit count of all breakpoints.
+  void ResetBreakpointHitCounts();
+
   // The flag 'end_to_end', default to true, signifies that the operation is
   // performed end to end, for both the debugger and the debuggee.
 
@@ -1009,9 +1014,14 @@ public:
   ///     currently selected platform isn't compatible (in case it might be
   ///     manually set following this function call).
   ///
+  /// \param[in] merged
+  ///     If true, arch_spec is merged with the current
+  ///     architecture. Otherwise it's replaced.
+  ///
   /// \return
   ///     \b true if the architecture was successfully set, \b false otherwise.
-  bool SetArchitecture(const ArchSpec &arch_spec, bool set_platform = false);
+  bool SetArchitecture(const ArchSpec &arch_spec, bool set_platform = false,
+                       bool merge = true);
 
   bool MergeArchitecture(const ArchSpec &arch_spec);
 

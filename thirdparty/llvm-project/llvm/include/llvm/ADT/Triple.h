@@ -142,6 +142,7 @@ public:
     ARMSubArch_v4t,
 
     AArch64SubArch_arm64e,
+    AArch64SubArch_arm64ec,
 
     KalimbaSubArch_v3,
     KalimbaSubArch_v4,
@@ -583,6 +584,12 @@ public:
            (isOSWindows() && getEnvironment() == Triple::UnknownEnvironment);
   }
 
+  // Checks if we're using the Windows Arm64EC ABI.
+  bool isWindowsArm64EC() const {
+    return getArch() == Triple::aarch64 &&
+           getSubArch() == Triple::AArch64SubArch_arm64ec;
+  }
+
   bool isWindowsCoreCLREnvironment() const {
     return isOSWindows() && getEnvironment() == Triple::CoreCLR;
   }
@@ -678,6 +685,11 @@ public:
   /// Tests whether the OS uses the XCOFF binary format.
   bool isOSBinFormatXCOFF() const {
     return getObjectFormat() == Triple::XCOFF;
+  }
+
+  /// Tests whether the OS uses the DXContainer binary format.
+  bool isOSBinFormatDXContainer() const {
+    return getObjectFormat() == Triple::DXContainer;
   }
 
   /// Tests whether the target is the PS4 platform.
@@ -918,7 +930,8 @@ public:
 
   /// Tests whether the target supports comdat
   bool supportsCOMDAT() const {
-    return !(isOSBinFormatMachO() || isOSBinFormatXCOFF());
+    return !(isOSBinFormatMachO() || isOSBinFormatXCOFF() ||
+             isOSBinFormatDXContainer());
   }
 
   /// Tests whether the target uses emulated TLS as default.

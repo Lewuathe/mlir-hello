@@ -204,15 +204,20 @@ set(files
   __charconv/to_chars_result.h
   __chrono/calendar.h
   __chrono/convert_to_timespec.h
+  __chrono/convert_to_tm.h
   __chrono/day.h
   __chrono/duration.h
   __chrono/file_clock.h
+  __chrono/formatter.h
   __chrono/hh_mm_ss.h
   __chrono/high_resolution_clock.h
   __chrono/literals.h
   __chrono/month.h
   __chrono/month_weekday.h
   __chrono/monthday.h
+  __chrono/ostream.h
+  __chrono/parser_std_format_spec.h
+  __chrono/statically_widen.h
   __chrono/steady_clock.h
   __chrono/system_clock.h
   __chrono/time_point.h
@@ -332,10 +337,13 @@ set(files
   __functional/unary_negate.h
   __functional/unwrap_ref.h
   __functional/weak_result_type.h
+  __fwd/array.h
+  __fwd/get.h
   __fwd/hash.h
   __fwd/pair.h
   __fwd/span.h
   __fwd/string_view.h
+  __fwd/tuple.h
   __hash_table
   __ios/fpos.h
   __iterator/access.h
@@ -379,6 +387,7 @@ set(files
   __locale
   __mbstate_t.h
   __memory/addressof.h
+  __memory/align.h
   __memory/allocate_at_least.h
   __memory/allocation_guard.h
   __memory/allocator.h
@@ -386,15 +395,18 @@ set(files
   __memory/allocator_traits.h
   __memory/assume_aligned.h
   __memory/auto_ptr.h
+  __memory/builtin_new_allocator.h
   __memory/compressed_pair.h
   __memory/concepts.h
   __memory/construct_at.h
+  __memory/destruct_n.h
   __memory/pointer_traits.h
   __memory/ranges_construct_at.h
   __memory/ranges_uninitialized_algorithms.h
   __memory/raw_storage_iterator.h
   __memory/shared_ptr.h
   __memory/swap_allocator.h
+  __memory/temp_value.h
   __memory/temporary_buffer.h
   __memory/uninitialized_algorithms.h
   __memory/unique_ptr.h
@@ -509,7 +521,14 @@ set(files
   __thread/timed_backoff_policy.h
   __threading_support
   __tree
-  __tuple
+  __tuple/apply_cv.h
+  __tuple/make_tuple_types.h
+  __tuple/sfinae_helpers.h
+  __tuple/tuple_element.h
+  __tuple/tuple_indices.h
+  __tuple/tuple_like.h
+  __tuple/tuple_size.h
+  __tuple/tuple_types.h
   __type_traits/add_const.h
   __type_traits/add_cv.h
   __type_traits/add_lvalue_reference.h
@@ -537,6 +556,7 @@ set(files
   __type_traits/integral_constant.h
   __type_traits/is_abstract.h
   __type_traits/is_aggregate.h
+  __type_traits/is_allocator.h
   __type_traits/is_arithmetic.h
   __type_traits/is_array.h
   __type_traits/is_assignable.h
@@ -619,6 +639,7 @@ set(files
   __type_traits/maybe_const.h
   __type_traits/nat.h
   __type_traits/negation.h
+  __type_traits/noexcept_move_assign_container.h
   __type_traits/promote.h
   __type_traits/rank.h
   __type_traits/remove_all_extents.h
@@ -643,6 +664,7 @@ set(files
   __utility/declval.h
   __utility/exchange.h
   __utility/forward.h
+  __utility/forward_like.h
   __utility/in_place.h
   __utility/integer_sequence.h
   __utility/move.h

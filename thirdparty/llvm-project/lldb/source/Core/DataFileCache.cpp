@@ -15,7 +15,6 @@
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "llvm/Support/CachePruning.h"
-#include "llvm/Support/MemoryBuffer.h"
 
 using namespace lldb_private;
 
@@ -238,7 +237,7 @@ bool CacheSignature::Decode(const lldb_private::DataExtractor &data,
       const uint8_t length = data.GetU8(offset_ptr);
       const uint8_t *bytes = (const uint8_t *)data.GetData(offset_ptr, length);
       if (bytes != nullptr && length > 0)
-        m_uuid = UUID::fromData(llvm::ArrayRef<uint8_t>(bytes, length));
+        m_uuid = UUID(llvm::ArrayRef<uint8_t>(bytes, length));
     } break;
     case eSignatureModTime: {
       uint32_t mod_time = data.GetU32(offset_ptr);

@@ -12,9 +12,26 @@
 #include "lldb/Core/EmulateInstruction.h"
 #include "lldb/Interpreter/OptionValue.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/RegisterValue.h"
 #include "lldb/Utility/Status.h"
 
 namespace lldb_private {
+
+constexpr uint32_t DecodeRD(uint32_t inst) { return (inst & 0xF80) >> 7; }
+constexpr uint32_t DecodeRS1(uint32_t inst) { return (inst & 0xF8000) >> 15; }
+constexpr uint32_t DecodeRS2(uint32_t inst) { return (inst & 0x1F00000) >> 20; }
+
+class EmulateInstructionRISCV;
+
+struct InstrPattern {
+  const char *name;
+  /// Bit mask to check the type of a instruction (B-Type, I-Type, J-Type, etc.)
+  uint32_t type_mask;
+  /// Characteristic value after bitwise-and with type_mask.
+  uint32_t eigen;
+  bool (*exec)(EmulateInstructionRISCV &emulator, uint32_t inst,
+               bool ignore_cond);
+};
 
 class EmulateInstructionRISCV : public EmulateInstruction {
 public:
@@ -62,9 +79,31 @@ public:
   bool GetRegisterInfo(lldb::RegisterKind reg_kind, uint32_t reg_num,
                        RegisterInfo &reg_info) override;
 
-  lldb::addr_t ReadPC(bool *success);
+  lldb::addr_t ReadPC(bool &success);
   bool WritePC(lldb::addr_t pc);
+
+  const InstrPattern *Decode(uint32_t inst);
   bool DecodeAndExecute(uint32_t inst, bool ignore_cond);
+
+  template <typename T>
+  static std::enable_if_t<std::is_integral_v<T>, T>
+  ReadMem(EmulateInstructionRISCV &emulator, uint64_t addr, bool *success) {
+
+    EmulateInstructionRISCV::Context ctx;
+    ctx.type = EmulateInstruction::eContextRegisterLoad;
+    ctx.SetNoArgs();
+    return T(emulator.ReadMemoryUnsigned(ctx, addr, sizeof(T), T(), success));
+  }
+
+  template <typename T>
+  static bool WriteMem(EmulateInstructionRISCV &emulator, uint64_t addr,
+                       RegisterValue value) {
+    EmulateInstructionRISCV::Context ctx;
+    ctx.type = EmulateInstruction::eContextRegisterStore;
+    ctx.SetNoArgs();
+    return emulator.WriteMemoryUnsigned(ctx, addr, value.GetAsUInt64(),
+                                        sizeof(T));
+  }
 };
 
 } // namespace lldb_private

@@ -6,11 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "PassDetail.h"
+#include "mlir/Dialect/Linalg/Passes.h"
+
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -18,6 +19,11 @@
 #include <iterator>
 #include <memory>
 #include <utility>
+
+namespace mlir {
+#define GEN_PASS_DEF_LINALGDETENSORIZE
+#include "mlir/Dialect/Linalg/Passes.h.inc"
+} // namespace mlir
 
 using namespace mlir;
 using namespace mlir::linalg;
@@ -158,7 +164,8 @@ public:
 };
 
 /// @see LinalgDetensorize in Linalg/Passes.td for more details.
-struct LinalgDetensorize : public LinalgDetensorizeBase<LinalgDetensorize> {
+struct LinalgDetensorize
+    : public impl::LinalgDetensorizeBase<LinalgDetensorize> {
   LinalgDetensorize() = default;
 
   class CostModel {
@@ -390,7 +397,7 @@ struct LinalgDetensorize : public LinalgDetensorizeBase<LinalgDetensorize> {
         // Note: No need to check whether the result type of this op is
         // detensorable since if it wasn't we wouldn't reach that point in the
         // work list.
-        if (dyn_cast<tensor::FromElementsOp>(currentItemDefiningOp))
+        if (isa<tensor::FromElementsOp>(currentItemDefiningOp))
           continue;
 
         // 2.4 - The current item is the result of a scalar op, add all its

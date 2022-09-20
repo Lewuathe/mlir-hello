@@ -39,12 +39,36 @@ Implemented Papers
 ------------------
 - P2499R0 - ``string_view`` range constructor should be ``explicit``
 - P2417R2 - A more constexpr bitset
+- P2445R1 - ``std::forward_like``
+- P2273R3 - Making ``std::unique_ptr`` constexpr
 
 Improvements and New Features
 -----------------------------
+- Declarations of ``std::c8rtomb()`` and ``std::mbrtoc8()`` from P0482R6 are
+  now provided when implementations in the global namespace are provided by
+  the C library.
 
 Deprecations and Removals
 -------------------------
+- Several incidental transitive includes have been removed from libc++. Those
+  includes are removed based on the language version used. Incidental transitive
+  inclusions of the following headers have been removed:
+
+  - C++20: ``chrono``
+  - C++2b: ``algorithm``, ``array``, ``atomic``, ``bit``, ``chrono``,
+    ``climits``, ``cmath``, ``compare``, ``concepts``, ``cstdarg`, ``cstddef``,
+    ``cstdint``, ``cstdlib``, ``cstring``, ``ctime``, ``exception``,
+    ``functional``, ``initializer_list``, ``iosfwd``, ``iterator``, ``limits``,
+    ``memory``, ``new``, ``numeric``, ``optional``, ``ratio``, ``stdexcept``,
+    ``string``, ``tuple``, ``type_traits``, ``typeinfo``, ``unordered_map``,
+    ``utility``, ``variant``, ``vector``.
+
+  Users can also remove all incidental transitive includes by defining
+  ``_LIBCPP_REMOVE_TRANSITIVE_INCLUDES`` regardless of the language version
+  in use. Note that in the future, libc++ reserves the right to remove
+  incidental transitive includes more aggressively, in particular regardless
+  of the language version in use.
+
 
 Upcoming Deprecations and Removals
 ----------------------------------
@@ -57,10 +81,18 @@ API Changes
 
 - ``_LIBCPP_ENABLE_NODISCARD`` and ``_LIBCPP_DISABLE_NODISCARD_AFTER_CXX17`` are no longer respected.
   Any standards-required ``[[nodiscard]]`` applications in C++20 are now always enabled. Any extended applications
-  can now be enabled by defining ``_LIBCPP_ENABLE_NODISCARD_EXT``.
+  are now enabled by default and can be disabled by defining ``_LIBCPP_DISABLE_NODISCARD_EXT``.
 
 ABI Affecting Changes
 ---------------------
+- In freestanding mode, ``atomic<small enum class>`` does not contain a lock byte anymore if the platform
+  can implement lockfree atomics for that size. More specifically, in LLVM <= 11.0.1, an ``atomic<small enum class>``
+  would not contain a lock byte. This was broken in LLVM >= 12.0.0, where it started including a lock byte despite
+  the platform supporting lockfree atomics for that size. Starting in LLVM 15.0.1, the ABI for these types has been
+  restored to what it used to be (no lock byte), which is the most efficient implementation.
+
+  This ABI break only affects users that compile with ``-ffreestanding``, and only for ``atomic<T>`` where ``T``
+  is a non-builtin type that could be lockfree on the platform. See https://llvm.org/D133377 for more details.
 
 Build System Changes
 --------------------

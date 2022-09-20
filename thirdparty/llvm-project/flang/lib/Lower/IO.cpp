@@ -1315,11 +1315,11 @@ constexpr bool isDataTransferInternal<Fortran::parser::PrintStmt>(
 /// (normally 1), then a descriptor is required by the runtime IO API. This
 /// condition holds even in F77 sources.
 static llvm::Optional<fir::ExtendedValue> getVariableBufferRequiredDescriptor(
-    Fortran::lower::AbstractConverter &converter,
+    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::parser::Variable &var,
     Fortran::lower::StatementContext &stmtCtx) {
   fir::ExtendedValue varBox =
-      converter.genExprAddr(var.typedExpr->v.value(), stmtCtx);
+      converter.genExprBox(loc, var.typedExpr->v.value(), stmtCtx);
   fir::KindTy defCharKind = converter.getKindMap().defaultCharacterKind();
   mlir::Value varAddr = fir::getBase(varBox);
   if (fir::factory::CharacterExprHelper::getCharacterOrSequenceKind(
@@ -1333,21 +1333,21 @@ static llvm::Optional<fir::ExtendedValue> getVariableBufferRequiredDescriptor(
 template <typename A>
 static llvm::Optional<fir::ExtendedValue>
 maybeGetInternalIODescriptor(Fortran::lower::AbstractConverter &converter,
-                             const A &stmt,
+                             mlir::Location loc, const A &stmt,
                              Fortran::lower::StatementContext &stmtCtx) {
   if (stmt.iounit.has_value())
     if (auto *var = std::get_if<Fortran::parser::Variable>(&stmt.iounit->u))
-      return getVariableBufferRequiredDescriptor(converter, *var, stmtCtx);
+      return getVariableBufferRequiredDescriptor(converter, loc, *var, stmtCtx);
   if (auto *unit = getIOControl<Fortran::parser::IoUnit>(stmt))
     if (auto *var = std::get_if<Fortran::parser::Variable>(&unit->u))
-      return getVariableBufferRequiredDescriptor(converter, *var, stmtCtx);
+      return getVariableBufferRequiredDescriptor(converter, loc, *var, stmtCtx);
   return llvm::None;
 }
 template <>
 inline llvm::Optional<fir::ExtendedValue>
 maybeGetInternalIODescriptor<Fortran::parser::PrintStmt>(
-    Fortran::lower::AbstractConverter &, const Fortran::parser::PrintStmt &,
-    Fortran::lower::StatementContext &) {
+    Fortran::lower::AbstractConverter &, mlir::Location loc,
+    const Fortran::parser::PrintStmt &, Fortran::lower::StatementContext &) {
   return llvm::None;
 }
 
@@ -1417,8 +1417,7 @@ lowerReferenceAsStringSelect(Fortran::lower::AbstractConverter &converter,
     mlir::Value stringRef;
     mlir::Value stringLen;
     if (eval->isA<Fortran::parser::FormatStmt>()) {
-      assert(text.find('(') != llvm::StringRef::npos &&
-             "FORMAT is unexpectedly ill-formed");
+      assert(text.contains('(') && "FORMAT is unexpectedly ill-formed");
       // This is a format statement, so extract the spec from the text.
       std::tuple<mlir::Value, mlir::Value, mlir::Value> stringLit =
           lowerSourceTextAsStringLit(converter, loc, text, strTy, lenTy);
@@ -1934,7 +1933,7 @@ genDataTransferStmt(Fortran::lower::AbstractConverter &converter,
   const bool isList = isFormatted ? isDataTransferList(stmt) : false;
   const bool isInternal = isDataTransferInternal(stmt);
   llvm::Optional<fir::ExtendedValue> descRef =
-      isInternal ? maybeGetInternalIODescriptor(converter, stmt, stmtCtx)
+      isInternal ? maybeGetInternalIODescriptor(converter, loc, stmt, stmtCtx)
                  : llvm::None;
   const bool isInternalWithDesc = descRef.has_value();
   const bool isAsync = isDataTransferAsynchronous(loc, stmt);

@@ -6,8 +6,9 @@ load("//mlir:tblgen.bzl", "gentbl_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
-    licenses = ["notice"],
 )
+
+licenses(["notice"])
 
 cc_test(
     name = "ir_tests",
@@ -234,10 +235,6 @@ gentbl_cc_library(
             ["-gen-pass-decls"],
             "TableGen/PassGenTest.h.inc",
         ),
-        (
-            ["-gen-pass-defs"],
-            "TableGen/PassGenTest.cpp.inc",
-        ),
     ],
     tblgen = "//mlir:mlir-tblgen",
     td_file = "TableGen/passes.td",
@@ -296,7 +293,6 @@ cc_test(
         "Analysis/*.h",
         "Analysis/*/*.cpp",
         "Analysis/*/*.h",
-        "Dialect/Affine/Analysis/AffineStructuresParser.*",
     ]),
     deps = [
         "//llvm:TestingSupport",

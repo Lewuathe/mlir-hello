@@ -58,7 +58,7 @@ static LogicalResult inlinePayload(OpBuilder &b, LinalgOp linalgOp,
 
   Operation *terminator = body->getTerminator();
   Location loc = terminator->getLoc();
-  for (auto operand : llvm::enumerate(terminator->getOperands())) {
+  for (const auto &operand : llvm::enumerate(terminator->getOperands())) {
     Value toStore = map.lookupOrDefault(operand.value());
     OpOperand *storeInto = linalgOp.getOutputOperand(operand.index());
     auto indices = getIndicesForAccess(
@@ -118,10 +118,9 @@ struct LinalgOpTilingInterface
 
   // Instantiate the tiled implementation of the operation.
   SmallVector<Operation *>
-  getTiledImplementation(Operation *op, OpBuilder &b, ValueRange dest,
+  getTiledImplementation(Operation *op, OpBuilder &b,
                          ArrayRef<OpFoldResult> offsets,
-                         ArrayRef<OpFoldResult> sizes,
-                         bool tileDestOperands) const {
+                         ArrayRef<OpFoldResult> sizes) const {
     // Leave the `sizeBounds` value empty. That is only needed when the `sizes`
     // specified could lead to out of bounds accesses.
     Location loc = op->getLoc();
@@ -172,10 +171,8 @@ struct LinalgOpTilingInterface
 
   FailureOr<Value> generateResultTileValue(Operation *op, OpBuilder &b,
                                            unsigned resultNumber,
-                                           ValueRange dest,
                                            ArrayRef<OpFoldResult> offsets,
-                                           ArrayRef<OpFoldResult> sizes,
-                                           bool tileDestOperands) const {
+                                           ArrayRef<OpFoldResult> sizes) const {
     auto linalgOp = cast<LinalgOp>(op);
 
     // Check that the indexing map used for the output is a projected
@@ -210,7 +207,7 @@ struct LinalgOpTilingInterface
     }
 
     SmallVector<Operation *> tiledOp = tilingInterfaceOp.getTiledImplementation(
-        b, dest, iterationTileOffsets, iterationTileSizes, tileDestOperands);
+        b, iterationTileOffsets, iterationTileSizes);
     if (tiledOp.size() != 1)
       return op->emitOpError("failed to generate tiled implementation");
 

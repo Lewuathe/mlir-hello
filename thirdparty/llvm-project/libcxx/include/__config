@@ -24,6 +24,9 @@
 
 #ifdef __cplusplus
 
+// _LIBCPP_VERSION represents the version of libc++, which matches the version of LLVM.
+// Given a LLVM release LLVM XX.Y.ZZ (e.g. LLVM 16.0.1 == 16.0.01), _LIBCPP_VERSION is
+// defined to XXYZZ.
 #  define _LIBCPP_VERSION 16000
 
 #  define _LIBCPP_CONCAT_IMPL(_X, _Y) _X##_Y
@@ -47,7 +50,8 @@
 #    elif __cplusplus <= 202002L
 #      define _LIBCPP_STD_VER 20
 #    else
-#      define _LIBCPP_STD_VER 22 // current year, or date of c++2b ratification
+// Expected release year of the next C++ standard
+#      define _LIBCPP_STD_VER 23
 #    endif
 #  endif // _LIBCPP_STD_VER
 
@@ -858,13 +862,13 @@ _LIBCPP_BEGIN_NAMESPACE_STD _LIBCPP_END_NAMESPACE_STD
 
 // _LIBCPP_NODISCARD_EXT may be used to apply [[nodiscard]] to entities not
 // specified as such as an extension.
-#  if defined(_LIBCPP_ENABLE_NODISCARD_EXT)
+#  if !defined(_LIBCPP_DISABLE_NODISCARD_EXT)
 #    define _LIBCPP_NODISCARD_EXT _LIBCPP_NODISCARD
 #  else
 #    define _LIBCPP_NODISCARD_EXT
 #  endif
 
-#  if _LIBCPP_STD_VER > 17 || defined(_LIBCPP_ENABLE_NODISCARD_EXT)
+#  if _LIBCPP_STD_VER > 17 || !defined(_LIBCPP_DISABLE_NODISCARD_EXT)
 #    define _LIBCPP_NODISCARD_AFTER_CXX17 _LIBCPP_NODISCARD
 #  else
 #    define _LIBCPP_NODISCARD_AFTER_CXX17
@@ -1205,6 +1209,22 @@ _LIBCPP_BEGIN_NAMESPACE_STD _LIBCPP_END_NAMESPACE_STD
 #    define _LIBCPP_PACKED __attribute__((__packed__))
 #  else
 #    define _LIBCPP_PACKED
+#  endif
+
+// c8rtomb() and mbrtoc8() were added in C++20 and C23. Support for these
+// functions is gradually being added to existing C libraries. The conditions
+// below check for known C library versions and conditions under which these
+// functions are declared by the C library.
+#  define _LIBCPP_HAS_NO_C8RTOMB_MBRTOC8
+// GNU libc 2.36 and newer declare c8rtomb() and mbrtoc8() in C++ modes if
+// __cpp_char8_t is defined or if C2X extensions are enabled. Unfortunately,
+// determining the latter depends on internal GNU libc details. If the
+// __cpp_char8_t feature test macro is not defined, then a char8_t typedef
+// will be declared as well.
+#  if defined(_LIBCPP_GLIBC_PREREQ) && defined(__GLIBC_USE)
+#    if _LIBCPP_GLIBC_PREREQ(2, 36) && (defined(__cpp_char8_t) || __GLIBC_USE(ISOC2X))
+#      undef _LIBCPP_HAS_NO_C8RTOMB_MBRTOC8
+#    endif
 #  endif
 
 #endif // __cplusplus

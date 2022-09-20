@@ -1,17 +1,17 @@
 // RUN: mlir-opt %s --sparse-compiler | \
-// RUN: TENSOR0="%mlir_integration_test_dir/data/wide.mtx" \
+// RUN: TENSOR0="%mlir_src_dir/test/Integration/data/wide.mtx" \
 // RUN: mlir-cpu-runner \
 // RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
+// RUN:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 //
 // Do the same run, but now with SIMDization as well. This should not change the outcome.
 //
-// RUN: mlir-opt %s --sparse-compiler="vectorization-strategy=2 vl=2" | \
-// RUN: TENSOR0="%mlir_integration_test_dir/data/wide.mtx" \
+// RUN: mlir-opt %s --sparse-compiler="vectorization-strategy=any-storage-inner-loop vl=2" | \
+// RUN: TENSOR0="%mlir_src_dir/test/Integration/data/wide.mtx" \
 // RUN: mlir-cpu-runner \
 // RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
+// RUN:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
 !Filename = !llvm.ptr<i8>
@@ -84,7 +84,7 @@ module {
     ^bb0(%i : index, %j : index):
       tensor.yield %i0 : f64
     } : tensor<?x?xf64>
-  
+
     // Call kernel.
     %0 = call @kernel_spmm(%a, %b, %x)
       : (tensor<?x?xf64, #SparseMatrix>, tensor<?x?xf64>, tensor<?x?xf64>) -> tensor<?x?xf64>
@@ -98,6 +98,10 @@ module {
 
     // Release the resources.
     bufferization.dealloc_tensor %a : tensor<?x?xf64, #SparseMatrix>
+
+    // TODO(springerm): auto release!
+    bufferization.dealloc_tensor %b : tensor<?x?xf64>
+    bufferization.dealloc_tensor %x : tensor<?x?xf64>
 
     return
   }

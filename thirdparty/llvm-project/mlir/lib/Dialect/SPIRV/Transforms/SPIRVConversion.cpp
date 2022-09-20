@@ -118,18 +118,18 @@ Type SPIRVTypeConverter::getIndexType() const {
   return IntegerType::get(getContext(), options.use64bitIndex ? 64 : 32);
 }
 
-const SPIRVTypeConverter::Options &SPIRVTypeConverter::getOptions() const {
-  return options;
-}
-
 MLIRContext *SPIRVTypeConverter::getContext() const {
   return targetEnv.getAttr().getContext();
 }
 
+bool SPIRVTypeConverter::allows(spirv::Capability capability) {
+  return targetEnv.allows(capability);
+}
+
 // TODO: This is a utility function that should probably be exposed by the
 // SPIR-V dialect. Keeping it local till the use case arises.
-static Optional<int64_t>
-getTypeNumBytes(const SPIRVTypeConverter::Options &options, Type type) {
+static Optional<int64_t> getTypeNumBytes(const SPIRVConversionOptions &options,
+                                         Type type) {
   if (type.isa<spirv::ScalarType>()) {
     auto bitWidth = type.getIntOrFloatBitWidth();
     // According to the SPIR-V spec:
@@ -203,7 +203,7 @@ getTypeNumBytes(const SPIRVTypeConverter::Options &options, Type type) {
 
 /// Converts a scalar `type` to a suitable type under the given `targetEnv`.
 static Type convertScalarType(const spirv::TargetEnv &targetEnv,
-                              const SPIRVTypeConverter::Options &options,
+                              const SPIRVConversionOptions &options,
                               spirv::ScalarType type,
                               Optional<spirv::StorageClass> storageClass = {}) {
   // Get extension and capability requirements for the given type.
@@ -236,10 +236,10 @@ static Type convertScalarType(const spirv::TargetEnv &targetEnv,
 
 /// Converts a vector `type` to a suitable type under the given `targetEnv`.
 static Type convertVectorType(const spirv::TargetEnv &targetEnv,
-                              const SPIRVTypeConverter::Options &options,
+                              const SPIRVConversionOptions &options,
                               VectorType type,
                               Optional<spirv::StorageClass> storageClass = {}) {
-  if (type.getRank() == 1 && type.getNumElements() == 1)
+  if (type.getRank() <= 1 && type.getNumElements() == 1)
     return type.getElementType();
 
   if (!spirv::CompositeType::isValid(type)) {
@@ -275,7 +275,7 @@ static Type convertVectorType(const spirv::TargetEnv &targetEnv,
 /// constant values and use OpCompositeExtract and OpCompositeInsert to
 /// manipulate, like what we do for vectors.
 static Type convertTensorType(const spirv::TargetEnv &targetEnv,
-                              const SPIRVTypeConverter::Options &options,
+                              const SPIRVConversionOptions &options,
                               TensorType type) {
   // TODO: Handle dynamic shapes.
   if (!type.hasStaticShape()) {
@@ -314,7 +314,7 @@ static Type convertTensorType(const spirv::TargetEnv &targetEnv,
 }
 
 static Type convertBoolMemrefType(const spirv::TargetEnv &targetEnv,
-                                  const SPIRVTypeConverter::Options &options,
+                                  const SPIRVConversionOptions &options,
                                   MemRefType type,
                                   spirv::StorageClass storageClass) {
   unsigned numBoolBits = options.boolNumBits;
@@ -338,6 +338,12 @@ static Type convertBoolMemrefType(const spirv::TargetEnv &targetEnv,
     return nullptr;
   }
 
+  // For OpenCL Kernel we can just emit a pointer pointing to the element.
+  if (targetEnv.allows(spirv::Capability::Kernel))
+    return spirv::PointerType::get(arrayElemType, storageClass);
+
+  // For Vulkan we need extra wrapping struct and array to satisfy interface
+  // needs.
   if (!type.hasStaticShape()) {
     int64_t stride = needsExplicitLayout(storageClass) ? *arrayElemSize : 0;
     auto arrayType = spirv::RuntimeArrayType::get(arrayElemType, stride);
@@ -353,7 +359,7 @@ static Type convertBoolMemrefType(const spirv::TargetEnv &targetEnv,
 }
 
 static Type convertMemrefType(const spirv::TargetEnv &targetEnv,
-                              const SPIRVTypeConverter::Options &options,
+                              const SPIRVConversionOptions &options,
                               MemRefType type) {
   auto attr = type.getMemorySpace().dyn_cast_or_null<spirv::StorageClassAttr>();
   if (!attr) {
@@ -397,6 +403,12 @@ static Type convertMemrefType(const spirv::TargetEnv &targetEnv,
     return nullptr;
   }
 
+  // For OpenCL Kernel we can just emit a pointer pointing to the element.
+  if (targetEnv.allows(spirv::Capability::Kernel))
+    return spirv::PointerType::get(arrayElemType, storageClass);
+
+  // For Vulkan we need extra wrapping struct and array to satisfy interface
+  // needs.
   if (!type.hasStaticShape()) {
     int64_t stride = needsExplicitLayout(storageClass) ? *arrayElemSize : 0;
     auto arrayType = spirv::RuntimeArrayType::get(arrayElemType, stride);
@@ -418,7 +430,7 @@ static Type convertMemrefType(const spirv::TargetEnv &targetEnv,
 }
 
 SPIRVTypeConverter::SPIRVTypeConverter(spirv::TargetEnvAttr targetAttr,
-                                       Options options)
+                                       const SPIRVConversionOptions &options)
     : targetEnv(targetAttr), options(options) {
   // Add conversions. The order matters here: later ones will be tried earlier.
 
@@ -716,9 +728,10 @@ Value mlir::spirv::linearizeIndex(ValueRange indices, ArrayRef<int64_t> strides,
   return linearizedIndex;
 }
 
-spirv::AccessChainOp mlir::spirv::getElementPtr(
-    SPIRVTypeConverter &typeConverter, MemRefType baseType, Value basePtr,
-    ValueRange indices, Location loc, OpBuilder &builder) {
+Value mlir::spirv::getVulkanElementPtr(SPIRVTypeConverter &typeConverter,
+                                       MemRefType baseType, Value basePtr,
+                                       ValueRange indices, Location loc,
+                                       OpBuilder &builder) {
   // Get base and offset of the MemRefType and verify they are static.
 
   int64_t offset;
@@ -744,6 +757,50 @@ spirv::AccessChainOp mlir::spirv::getElementPtr(
         linearizeIndex(indices, strides, offset, indexType, loc, builder));
   }
   return builder.create<spirv::AccessChainOp>(loc, basePtr, linearizedIndices);
+}
+
+Value mlir::spirv::getOpenCLElementPtr(SPIRVTypeConverter &typeConverter,
+                                       MemRefType baseType, Value basePtr,
+                                       ValueRange indices, Location loc,
+                                       OpBuilder &builder) {
+  // Get base and offset of the MemRefType and verify they are static.
+
+  int64_t offset;
+  SmallVector<int64_t, 4> strides;
+  if (failed(getStridesAndOffset(baseType, strides, offset)) ||
+      llvm::is_contained(strides, MemRefType::getDynamicStrideOrOffset()) ||
+      offset == MemRefType::getDynamicStrideOrOffset()) {
+    return nullptr;
+  }
+
+  auto indexType = typeConverter.getIndexType();
+
+  SmallVector<Value, 2> linearizedIndices;
+  auto zero = spirv::ConstantOp::getZero(indexType, loc, builder);
+
+  Value linearIndex;
+  if (baseType.getRank() == 0) {
+    linearIndex = zero;
+  } else {
+    linearIndex =
+        linearizeIndex(indices, strides, offset, indexType, loc, builder);
+  }
+  return builder.create<spirv::PtrAccessChainOp>(loc, basePtr, linearIndex,
+                                                 linearizedIndices);
+}
+
+Value mlir::spirv::getElementPtr(SPIRVTypeConverter &typeConverter,
+                                 MemRefType baseType, Value basePtr,
+                                 ValueRange indices, Location loc,
+                                 OpBuilder &builder) {
+
+  if (typeConverter.allows(spirv::Capability::Kernel)) {
+    return getOpenCLElementPtr(typeConverter, baseType, basePtr, indices, loc,
+                               builder);
+  }
+
+  return getVulkanElementPtr(typeConverter, baseType, basePtr, indices, loc,
+                             builder);
 }
 
 //===----------------------------------------------------------------------===//

@@ -227,6 +227,10 @@ what to add to your calendar invite.
      - 1st and 3rd Wednesday of the month
      - `gcal <https://calendar.google.com/calendar/u/0?cid=cW1lZGg0ZXNpMnIyZDN2aTVydGVrdWF1YzRAZ3JvdXAuY2FsZW5kYXIuZ29vZ2xlLmNvbQ>`__
      - `Minutes/docs <https://docs.google.com/document/d/1x5-RbOC6-jnI_NcJ9Dp4pSmGhhNe7lUevuWUIB46TeM/edit?usp=sharing>`__
+   * - LLVM SPIR-V Backend Working Group
+     - Every week on Thursday
+     -
+     - `Meeting details/agenda <https://docs.google.com/document/d/1UjX-LAwPjJ75Nmb8a5jz-Qrm-pPtKtQw0k1S1Lop9jU/edit?usp=sharing>`__
 
 .. _office-hours:
 
@@ -341,19 +345,16 @@ IRC
 ---
 
 Users and developers of the LLVM project (including subprojects such as Clang)
-can be found in #llvm on `irc.oftc.net <irc://irc.oftc.net/llvm>`_.
+can be found in #llvm on `irc.oftc.net <irc://irc.oftc.net/llvm>`_. The channel
+is actively moderated.
 
-This channel has several bots.
-
-* Buildbot reporters
-
-  * llvmbb - Bot for the main LLVM buildbot master.
-    http://lab.llvm.org/buildbot/#/console
-
-* robot - Bugzilla linker. %bug <number>
-
-* clang-bot - A `geordi <http://www.eelis.net/geordi/>`_ instance running
-  near-trunk clang instead of gcc.
+The #llvm-build channel has a bot for
+`LLVM buildbot <http://lab.llvm.org/buildbot/#/console>`_ status changes. The
+bot will post a message with a link to a build bot and a blamelist when a build
+goes from passing to failing and again (without the blamelist) when the build
+goes from failing back to passing. It is a good channel for actively monitoring
+build statuses, but it is a noisy channel due to the automated messages. The
+channel is not actively moderated.
 
 In addition to the traditional IRC there is a
 `Discord <https://discord.com/channels/636084430946959380/636725486533345280>`_

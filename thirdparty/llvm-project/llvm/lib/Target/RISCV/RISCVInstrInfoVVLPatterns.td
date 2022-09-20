@@ -146,6 +146,14 @@ def riscv_fp_to_uint_vl : SDNode<"RISCVISD::FP_TO_UINT_VL", SDT_RISCVFP2IOp_VL>;
 def riscv_sint_to_fp_vl : SDNode<"RISCVISD::SINT_TO_FP_VL", SDT_RISCVI2FPOp_VL>;
 def riscv_uint_to_fp_vl : SDNode<"RISCVISD::UINT_TO_FP_VL", SDT_RISCVI2FPOp_VL>;
 
+def SDT_RISCVVecCvtX2FOp_VL : SDTypeProfile<1, 4, [
+  SDTCisInt<0>, SDTCisFP<1>, SDTCisSameNumEltsAs<0, 1>,
+  SDTCVecEltisVT<2, i1>, SDTCisSameNumEltsAs<1, 2>, SDTCisVT<3, XLenVT>,
+  SDTCisVT<4, XLenVT>
+]>;
+
+def riscv_vfcvt_x_f_vl : SDNode<"RISCVISD::VFCVT_X_F_VL", SDT_RISCVVecCvtX2FOp_VL>;
+
 def riscv_setcc_vl : SDNode<"RISCVISD::SETCC_VL",
                             SDTypeProfile<1, 6, [SDTCVecEltisVT<0, i1>,
                                                  SDTCisVec<1>,
@@ -247,6 +255,16 @@ def riscv_vwadd_vl :  SDNode<"RISCVISD::VWADD_VL",  SDT_RISCVVWBinOp_VL, [SDNPCo
 def riscv_vwaddu_vl : SDNode<"RISCVISD::VWADDU_VL", SDT_RISCVVWBinOp_VL, [SDNPCommutative]>;
 def riscv_vwsub_vl :  SDNode<"RISCVISD::VWSUB_VL",  SDT_RISCVVWBinOp_VL, [SDNPCommutative]>;
 def riscv_vwsubu_vl : SDNode<"RISCVISD::VWSUBU_VL", SDT_RISCVVWBinOp_VL, [SDNPCommutative]>;
+
+def SDT_RISCVVNBinOp_VL : SDTypeProfile<1, 5, [SDTCisVec<0>,
+                                               SDTCisSameNumEltsAs<0, 1>,
+                                               SDTCisOpSmallerThanOp<0, 1>,
+                                               SDTCisSameAs<0, 2>,
+                                               SDTCisSameAs<0, 3>,
+                                               SDTCisSameNumEltsAs<0, 4>,
+                                               SDTCVecEltisVT<4, i1>,
+                                               SDTCisVT<5, XLenVT>]>;
+def riscv_vnsrl_vl : SDNode<"RISCVISD::VNSRL_VL", SDT_RISCVVNBinOp_VL>;
 
 def SDT_RISCVVWBinOpW_VL : SDTypeProfile<1, 5, [SDTCisVec<0>,
                                                 SDTCisSameAs<0, 1>,
@@ -438,6 +456,24 @@ multiclass VPatBinaryWVL_VV_VX_WV_WX<SDNode vop, SDNode vop_w,
   }
 }
 
+multiclass VPatBinaryNVL_WV_WX_WI<SDNode vop, string instruction_name> {
+  foreach VtiToWti = AllWidenableIntVectors in {
+    defvar vti = VtiToWti.Vti;
+    defvar wti = VtiToWti.Wti;
+    defm : VPatBinaryVL_V<vop, instruction_name, "WV",
+                           vti.Vector, wti.Vector, vti.Vector, vti.Mask,
+                           vti.Log2SEW, vti.LMul, vti.RegClass, wti.RegClass, vti.RegClass>;
+    defm : VPatBinaryVL_XI<vop, instruction_name, "WX",
+                           vti.Vector, wti.Vector, vti.Vector, vti.Mask,
+                           vti.Log2SEW, vti.LMul, vti.RegClass, wti.RegClass, SplatPat, GPR>;
+    defm : VPatBinaryVL_XI<vop, instruction_name, "WI",
+                           vti.Vector, wti.Vector, vti.Vector, vti.Mask,
+                           vti.Log2SEW, vti.LMul, vti.RegClass, wti.RegClass,
+                           !cast<ComplexPattern>(SplatPat#_#uimm5),
+                           uimm5>;
+  }
+}
+
 multiclass VPatBinaryVL_VF<SDNode vop,
                            string instruction_name,
                            ValueType result_type,
@@ -619,8 +655,8 @@ multiclass VPatFPSetCCVL_VV_VF_FV<CondCode cc,
   }
 }
 
-multiclass VPatExtendSDNode_V_VL<SDNode vop, string inst_name, string suffix,
-                                 list <VTypeInfoToFraction> fraction_list> {
+multiclass VPatExtendVL_V<SDNode vop, string inst_name, string suffix,
+                          list <VTypeInfoToFraction> fraction_list> {
   foreach vtiTofti = fraction_list in {
     defvar vti = vtiTofti.Vti;
     defvar fti = vtiTofti.Fti;
@@ -633,7 +669,7 @@ multiclass VPatExtendSDNode_V_VL<SDNode vop, string inst_name, string suffix,
   }
 }
 
-multiclass VPatConvertFP2ISDNode_V_VL<SDNode vop, string instruction_name> {
+multiclass VPatConvertFP2IVL_V<SDNode vop, string instruction_name> {
   foreach fvti = AllFloatVectors in {
     defvar ivti = GetIntVTypeInfo<fvti>.Vti;
     def : Pat<(ivti.Vector (vop (fvti.Vector fvti.RegClass:$rs1),
@@ -645,7 +681,20 @@ multiclass VPatConvertFP2ISDNode_V_VL<SDNode vop, string instruction_name> {
   }
 }
 
-multiclass VPatConvertI2FPSDNode_V_VL<SDNode vop, string instruction_name> {
+multiclass VPatConvertFP2I_RM_VL_V<SDNode vop, string instruction_name> {
+  foreach fvti = AllFloatVectors in {
+    defvar ivti = GetIntVTypeInfo<fvti>.Vti;
+    def : Pat<(ivti.Vector (vop (fvti.Vector fvti.RegClass:$rs1),
+                                (fvti.Mask V0), (XLenVT timm:$frm),
+                                VLOpFrag)),
+              (!cast<Instruction>(instruction_name#"_"#ivti.LMul.MX#"_MASK")
+                  (ivti.Vector (IMPLICIT_DEF)), fvti.RegClass:$rs1,
+                  (fvti.Mask V0), timm:$frm, GPR:$vl, ivti.Log2SEW,
+                  TAIL_AGNOSTIC)>;
+  }
+}
+
+multiclass VPatConvertI2FPVL_V<SDNode vop, string instruction_name> {
   foreach fvti = AllFloatVectors in {
     defvar ivti = GetIntVTypeInfo<fvti>.Vti;
     def : Pat<(fvti.Vector (vop (ivti.Vector ivti.RegClass:$rs1),
@@ -657,7 +706,7 @@ multiclass VPatConvertI2FPSDNode_V_VL<SDNode vop, string instruction_name> {
   }
 }
 
-multiclass VPatWConvertFP2ISDNode_V_VL<SDNode vop, string instruction_name> {
+multiclass VPatWConvertFP2IVL_V<SDNode vop, string instruction_name> {
   foreach fvtiToFWti = AllWidenableFloatVectors in {
     defvar fvti = fvtiToFWti.Vti;
     defvar iwti = GetIntVTypeInfo<fvtiToFWti.Wti>.Vti;
@@ -670,7 +719,7 @@ multiclass VPatWConvertFP2ISDNode_V_VL<SDNode vop, string instruction_name> {
   }
 }
 
-multiclass VPatWConvertI2FPSDNode_V_VL<SDNode vop, string instruction_name> {
+multiclass VPatWConvertI2FPVL_V<SDNode vop, string instruction_name> {
   foreach vtiToWti = AllWidenableIntToFloatVectors in {
     defvar ivti = vtiToWti.Vti;
     defvar fwti = vtiToWti.Wti;
@@ -683,7 +732,7 @@ multiclass VPatWConvertI2FPSDNode_V_VL<SDNode vop, string instruction_name> {
   }
 }
 
-multiclass VPatNConvertFP2ISDNode_V_VL<SDNode vop, string instruction_name> {
+multiclass VPatNConvertFP2IVL_V<SDNode vop, string instruction_name> {
   foreach vtiToWti = AllWidenableIntToFloatVectors in {
     defvar vti = vtiToWti.Vti;
     defvar fwti = vtiToWti.Wti;
@@ -696,7 +745,7 @@ multiclass VPatNConvertFP2ISDNode_V_VL<SDNode vop, string instruction_name> {
   }
 }
 
-multiclass VPatNConvertI2FPSDNode_V_VL<SDNode vop, string instruction_name> {
+multiclass VPatNConvertI2FPVL_V<SDNode vop, string instruction_name> {
   foreach fvtiToFWti = AllWidenableFloatVectors in {
     defvar fvti = fvtiToFWti.Vti;
     defvar iwti = GetIntVTypeInfo<fvtiToFWti.Wti>.Vti;
@@ -731,7 +780,7 @@ multiclass VPatReductionVL<SDNode vop, string instruction_name, bit is_float> {
   }
 }
 
-multiclass VPatBinarySDNodeExt_V_WV_WX<SDNode op, PatFrags extop, string instruction_name> {
+multiclass VPatBinaryExtVL_WV_WX<SDNode op, PatFrags extop, string instruction_name> {
   foreach vtiToWti = AllWidenableIntVectors in {
     defvar vti = vtiToWti.Vti;
     defvar wti = vtiToWti.Wti;
@@ -756,9 +805,9 @@ multiclass VPatBinarySDNodeExt_V_WV_WX<SDNode op, PatFrags extop, string instruc
   }
 }
 
-multiclass VPatBinarySDNode_V_WV_WX_WI<SDNode op, string instruction_name> {
-  defm : VPatBinarySDNodeExt_V_WV_WX<op, sext_oneuse, instruction_name>;
-  defm : VPatBinarySDNodeExt_V_WV_WX<op, zext_oneuse, instruction_name>;
+multiclass VPatBinaryVL_WV_WX_WI<SDNode op, string instruction_name> {
+  defm : VPatBinaryExtVL_WV_WX<op, sext_oneuse, instruction_name>;
+  defm : VPatBinaryExtVL_WV_WX<op, zext_oneuse, instruction_name>;
   foreach vtiToWti = AllWidenableIntVectors in {
     defvar vti = vtiToWti.Vti;
     defvar wti = vtiToWti.Wti;
@@ -1046,18 +1095,18 @@ defm : VPatBinaryWVL_VV_VX_WV_WX<riscv_vwsub_vl,  riscv_vwsub_w_vl,  "PseudoVWSU
 defm : VPatBinaryWVL_VV_VX_WV_WX<riscv_vwsubu_vl, riscv_vwsubu_w_vl, "PseudoVWSUBU">;
 
 // 12.3. Vector Integer Extension
-defm : VPatExtendSDNode_V_VL<riscv_zext_vl, "PseudoVZEXT", "VF2",
-                             AllFractionableVF2IntVectors>;
-defm : VPatExtendSDNode_V_VL<riscv_sext_vl, "PseudoVSEXT", "VF2",
-                             AllFractionableVF2IntVectors>;
-defm : VPatExtendSDNode_V_VL<riscv_zext_vl, "PseudoVZEXT", "VF4",
-                             AllFractionableVF4IntVectors>;
-defm : VPatExtendSDNode_V_VL<riscv_sext_vl, "PseudoVSEXT", "VF4",
-                             AllFractionableVF4IntVectors>;
-defm : VPatExtendSDNode_V_VL<riscv_zext_vl, "PseudoVZEXT", "VF8",
-                             AllFractionableVF8IntVectors>;
-defm : VPatExtendSDNode_V_VL<riscv_sext_vl, "PseudoVSEXT", "VF8",
-                             AllFractionableVF8IntVectors>;
+defm : VPatExtendVL_V<riscv_zext_vl, "PseudoVZEXT", "VF2",
+                      AllFractionableVF2IntVectors>;
+defm : VPatExtendVL_V<riscv_sext_vl, "PseudoVSEXT", "VF2",
+                      AllFractionableVF2IntVectors>;
+defm : VPatExtendVL_V<riscv_zext_vl, "PseudoVZEXT", "VF4",
+                      AllFractionableVF4IntVectors>;
+defm : VPatExtendVL_V<riscv_sext_vl, "PseudoVSEXT", "VF4",
+                      AllFractionableVF4IntVectors>;
+defm : VPatExtendVL_V<riscv_zext_vl, "PseudoVZEXT", "VF8",
+                      AllFractionableVF8IntVectors>;
+defm : VPatExtendVL_V<riscv_sext_vl, "PseudoVSEXT", "VF8",
+                      AllFractionableVF8IntVectors>;
 
 // 12.5. Vector Bitwise Logical Instructions
 defm : VPatBinaryVL_VV_VX_VI<riscv_and_vl, "PseudoVAND">;
@@ -1079,8 +1128,8 @@ foreach vti = AllIntegerVectors in {
 }
 
 // 12.7. Vector Narrowing Integer Right Shift Instructions
-defm : VPatBinarySDNode_V_WV_WX_WI<srl, "PseudoVNSRL">;
-defm : VPatBinarySDNode_V_WV_WX_WI<sra, "PseudoVNSRA">;
+defm : VPatBinaryVL_WV_WX_WI<srl, "PseudoVNSRL">;
+defm : VPatBinaryVL_WV_WX_WI<sra, "PseudoVNSRA">;
 
 defm : VPatNarrowShiftSplat_WX_WI<riscv_sra_vl, "PseudoVNSRA">;
 defm : VPatNarrowShiftSplat_WX_WI<riscv_srl_vl, "PseudoVNSRL">;
@@ -1088,6 +1137,8 @@ defm : VPatNarrowShiftSplatExt_WX<riscv_sra_vl, riscv_sext_vl_oneuse, "PseudoVNS
 defm : VPatNarrowShiftSplatExt_WX<riscv_sra_vl, riscv_zext_vl_oneuse, "PseudoVNSRA">;
 defm : VPatNarrowShiftSplatExt_WX<riscv_srl_vl, riscv_sext_vl_oneuse, "PseudoVNSRL">;
 defm : VPatNarrowShiftSplatExt_WX<riscv_srl_vl, riscv_zext_vl_oneuse, "PseudoVNSRL">;
+
+defm : VPatBinaryNVL_WV_WX_WI<riscv_vnsrl_vl, "PseudoVNSRL">;
 
 foreach vtiTowti = AllWidenableIntVectors in {
   defvar vti = vtiTowti.Vti;
@@ -1348,10 +1399,12 @@ foreach vti = AllFloatVectors in {
                  vti.RegClass:$rs2, GPR:$vl, vti.Log2SEW)>;
 
   // 14.12. Vector Floating-Point Sign-Injection Instructions
-  def : Pat<(riscv_fabs_vl (vti.Vector vti.RegClass:$rs), (vti.Mask true_mask),
+  def : Pat<(riscv_fabs_vl (vti.Vector vti.RegClass:$rs), (vti.Mask V0),
                            VLOpFrag),
-            (!cast<Instruction>("PseudoVFSGNJX_VV_"# vti.LMul.MX)
-                 vti.RegClass:$rs, vti.RegClass:$rs, GPR:$vl, vti.Log2SEW)>;
+            (!cast<Instruction>("PseudoVFSGNJX_VV_"# vti.LMul.MX #"_MASK")
+                 (vti.Vector (IMPLICIT_DEF)), vti.RegClass:$rs,
+                 vti.RegClass:$rs, (vti.Mask V0), GPR:$vl, vti.Log2SEW,
+                 TAIL_AGNOSTIC)>;
   // Handle fneg with VFSGNJN using the same input for both operands.
   def : Pat<(riscv_fneg_vl (vti.Vector vti.RegClass:$rs), (vti.Mask V0),
                            VLOpFrag),
@@ -1469,16 +1522,17 @@ foreach fvti = AllFloatVectors in {
              GPR:$vl, fvti.Log2SEW)>;
 
   // 14.17. Vector Single-Width Floating-Point/Integer Type-Convert Instructions
-  defm : VPatConvertFP2ISDNode_V_VL<riscv_fp_to_sint_vl, "PseudoVFCVT_RTZ_X_F_V">;
-  defm : VPatConvertFP2ISDNode_V_VL<riscv_fp_to_uint_vl, "PseudoVFCVT_RTZ_XU_F_V">;
-  defm : VPatConvertI2FPSDNode_V_VL<riscv_sint_to_fp_vl, "PseudoVFCVT_F_X_V">;
-  defm : VPatConvertI2FPSDNode_V_VL<riscv_uint_to_fp_vl, "PseudoVFCVT_F_XU_V">;
+  defm : VPatConvertFP2I_RM_VL_V<riscv_vfcvt_x_f_vl,  "PseudoVFCVT_RM_X_F_V">;
+  defm : VPatConvertFP2IVL_V<riscv_fp_to_sint_vl, "PseudoVFCVT_RTZ_X_F_V">;
+  defm : VPatConvertFP2IVL_V<riscv_fp_to_uint_vl, "PseudoVFCVT_RTZ_XU_F_V">;
+  defm : VPatConvertI2FPVL_V<riscv_sint_to_fp_vl, "PseudoVFCVT_F_X_V">;
+  defm : VPatConvertI2FPVL_V<riscv_uint_to_fp_vl, "PseudoVFCVT_F_XU_V">;
 
   // 14.18. Widening Floating-Point/Integer Type-Convert Instructions
-  defm : VPatWConvertFP2ISDNode_V_VL<riscv_fp_to_sint_vl, "PseudoVFWCVT_RTZ_X_F_V">;
-  defm : VPatWConvertFP2ISDNode_V_VL<riscv_fp_to_uint_vl, "PseudoVFWCVT_RTZ_XU_F_V">;
-  defm : VPatWConvertI2FPSDNode_V_VL<riscv_sint_to_fp_vl, "PseudoVFWCVT_F_X_V">;
-  defm : VPatWConvertI2FPSDNode_V_VL<riscv_uint_to_fp_vl, "PseudoVFWCVT_F_XU_V">;
+  defm : VPatWConvertFP2IVL_V<riscv_fp_to_sint_vl, "PseudoVFWCVT_RTZ_X_F_V">;
+  defm : VPatWConvertFP2IVL_V<riscv_fp_to_uint_vl, "PseudoVFWCVT_RTZ_XU_F_V">;
+  defm : VPatWConvertI2FPVL_V<riscv_sint_to_fp_vl, "PseudoVFWCVT_F_X_V">;
+  defm : VPatWConvertI2FPVL_V<riscv_uint_to_fp_vl, "PseudoVFWCVT_F_XU_V">;
   foreach fvtiToFWti = AllWidenableFloatVectors in {
     defvar fvti = fvtiToFWti.Vti;
     defvar fwti = fvtiToFWti.Wti;
@@ -1491,10 +1545,10 @@ foreach fvti = AllFloatVectors in {
   }
 
   // 14.19 Narrowing Floating-Point/Integer Type-Convert Instructions
-  defm : VPatNConvertFP2ISDNode_V_VL<riscv_fp_to_sint_vl, "PseudoVFNCVT_RTZ_X_F_W">;
-  defm : VPatNConvertFP2ISDNode_V_VL<riscv_fp_to_uint_vl, "PseudoVFNCVT_RTZ_XU_F_W">;
-  defm : VPatNConvertI2FPSDNode_V_VL<riscv_sint_to_fp_vl, "PseudoVFNCVT_F_X_W">;
-  defm : VPatNConvertI2FPSDNode_V_VL<riscv_uint_to_fp_vl, "PseudoVFNCVT_F_XU_W">;
+  defm : VPatNConvertFP2IVL_V<riscv_fp_to_sint_vl, "PseudoVFNCVT_RTZ_X_F_W">;
+  defm : VPatNConvertFP2IVL_V<riscv_fp_to_uint_vl, "PseudoVFNCVT_RTZ_XU_F_W">;
+  defm : VPatNConvertI2FPVL_V<riscv_sint_to_fp_vl, "PseudoVFNCVT_F_X_W">;
+  defm : VPatNConvertI2FPVL_V<riscv_uint_to_fp_vl, "PseudoVFNCVT_F_XU_W">;
   foreach fvtiToFWti = AllWidenableFloatVectors in {
     defvar fvti = fvtiToFWti.Vti;
     defvar fwti = fvtiToFWti.Wti;

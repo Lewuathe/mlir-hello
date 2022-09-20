@@ -10,6 +10,7 @@
 #include "BitcodeWriter.h"
 #include "clang/AST/Comment.h"
 #include "clang/Index/USRGeneration.h"
+#include "clang/Lex/Lexer.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/SHA1.h"
@@ -181,6 +182,13 @@ std::string ClangDocCommentVisitor::getCommandName(unsigned CommandID) const {
 
 // Serializing functions.
 
+std::string getSourceCode(const Decl *D, const SourceRange &R) {
+  return Lexer::getSourceText(CharSourceRange::getTokenRange(R),
+                              D->getASTContext().getSourceManager(),
+                              D->getASTContext().getLangOpts())
+      .str();
+}
+
 template <typename T> static std::string serialize(T &I) {
   SmallString<2048> Buffer;
   llvm::BitstreamWriter Stream(Buffer);
@@ -304,27 +312,41 @@ static void parseFields(RecordInfo &I, const RecordDecl *D, bool PublicOnly,
 }
 
 static void parseEnumerators(EnumInfo &I, const EnumDecl *D) {
-  for (const EnumConstantDecl *E : D->enumerators())
-    I.Members.emplace_back(E->getNameAsString());
+  for (const EnumConstantDecl *E : D->enumerators()) {
+    std::string ValueExpr;
+    if (const Expr *InitExpr = E->getInitExpr())
+      ValueExpr = getSourceCode(D, InitExpr->getSourceRange());
+
+    SmallString<16> ValueStr;
+    E->getInitVal().toString(ValueStr);
+    I.Members.emplace_back(E->getNameAsString(), ValueStr, ValueExpr);
+  }
 }
 
 static void parseParameters(FunctionInfo &I, const FunctionDecl *D) {
   for (const ParmVarDecl *P : D->parameters()) {
+    FieldTypeInfo *FieldInfo = nullptr;
     if (const auto *T = getDeclForType(P->getOriginalType())) {
       if (const auto *N = dyn_cast<EnumDecl>(T)) {
-        I.Params.emplace_back(getUSRForDecl(N), N->getNameAsString(),
-                              InfoType::IT_enum, getInfoRelativePath(N),
-                              P->getNameAsString());
-        continue;
+        FieldInfo = &I.Params.emplace_back(
+            getUSRForDecl(N), N->getNameAsString(), InfoType::IT_enum,
+            getInfoRelativePath(N), P->getNameAsString());
       } else if (const auto *N = dyn_cast<RecordDecl>(T)) {
-        I.Params.emplace_back(getUSRForDecl(N), N->getNameAsString(),
-                              InfoType::IT_record, getInfoRelativePath(N),
-                              P->getNameAsString());
-        continue;
+        FieldInfo = &I.Params.emplace_back(
+            getUSRForDecl(N), N->getNameAsString(), InfoType::IT_record,
+            getInfoRelativePath(N), P->getNameAsString());
       }
+      // Otherwise fall through to the default case below.
     }
-    I.Params.emplace_back(P->getOriginalType().getAsString(),
-                          P->getNameAsString());
+
+    if (!FieldInfo) {
+      FieldInfo = &I.Params.emplace_back(P->getOriginalType().getAsString(),
+                                         P->getNameAsString());
+    }
+
+    if (const Expr *DefaultArg = P->getDefaultArg()) {
+      FieldInfo->DefaultValue = getSourceCode(D, DefaultArg->getSourceRange());
+    }
   }
 }
 
@@ -646,6 +668,8 @@ emitInfo(const EnumDecl *D, const FullComment *FC, int LineNumber,
     return {};
 
   Enum.Scoped = D->isScoped();
+  if (D->isFixed())
+    Enum.BaseType = TypeInfo(D->getIntegerType().getAsString());
   parseEnumerators(Enum, D);
 
   // Put in global namespace

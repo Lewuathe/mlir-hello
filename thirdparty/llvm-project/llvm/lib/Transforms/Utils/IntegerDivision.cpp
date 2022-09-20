@@ -46,6 +46,8 @@ static Value *generateSignedRemainderCode(Value *Dividend, Value *Divisor,
   // ;   %urem         = urem i32 %dividend, %divisor
   // ;   %xored        = xor i32 %urem, %dividend_sgn
   // ;   %srem         = sub i32 %xored, %dividend_sgn
+  Dividend            = Builder.CreateFreeze(Dividend);
+  Divisor             = Builder.CreateFreeze(Divisor);
   Value *DividendSign = Builder.CreateAShr(Dividend, Shift);
   Value *DivisorSign  = Builder.CreateAShr(Divisor, Shift);
   Value *DvdXor       = Builder.CreateXor(Dividend, DividendSign);
@@ -77,6 +79,8 @@ static Value *generatedUnsignedRemainderCode(Value *Dividend, Value *Divisor,
   // ;   %quotient  = udiv i32 %dividend, %divisor
   // ;   %product   = mul i32 %divisor, %quotient
   // ;   %remainder = sub i32 %dividend, %product
+  Dividend         = Builder.CreateFreeze(Dividend);
+  Divisor          = Builder.CreateFreeze(Divisor);
   Value *Quotient  = Builder.CreateUDiv(Dividend, Divisor);
   Value *Product   = Builder.CreateMul(Divisor, Quotient);
   Value *Remainder = Builder.CreateSub(Dividend, Product);
@@ -112,6 +116,8 @@ static Value *generateSignedDivisionCode(Value *Dividend, Value *Divisor,
   // ;   %q_mag  = udiv i32 %u_dvnd, %u_dvsr
   // ;   %tmp4   = xor i32 %q_mag, %q_sgn
   // ;   %q      = sub i32 %tmp4, %q_sgn
+  Dividend      = Builder.CreateFreeze(Dividend);
+  Divisor       = Builder.CreateFreeze(Divisor);
   Value *Tmp    = Builder.CreateAShr(Dividend, Shift);
   Value *Tmp1   = Builder.CreateAShr(Divisor, Shift);
   Value *Tmp2   = Builder.CreateXor(Tmp, Dividend);
@@ -214,12 +220,14 @@ static Value *generateUnsignedDivisionCode(Value *Dividend, Value *Divisor,
   // ;   %tmp1        = tail call i32 @llvm.ctlz.i32(i32 %dividend, i1 true)
   // ;   %sr          = sub nsw i32 %tmp0, %tmp1
   // ;   %ret0_4      = icmp ugt i32 %sr, 31
-  // ;   %ret0        = or i1 %ret0_3, %ret0_4
+  // ;   %ret0        = select i1 %ret0_3, i1 true, i1 %ret0_4
   // ;   %retDividend = icmp eq i32 %sr, 31
   // ;   %retVal      = select i1 %ret0, i32 0, i32 %dividend
-  // ;   %earlyRet    = or i1 %ret0, %retDividend
+  // ;   %earlyRet    = select i1 %ret0, i1 true, %retDividend
   // ;   br i1 %earlyRet, label %end, label %bb1
   Builder.SetInsertPoint(SpecialCases);
+  Divisor            = Builder.CreateFreeze(Divisor);
+  Dividend           = Builder.CreateFreeze(Dividend);
   Value *Ret0_1      = Builder.CreateICmpEQ(Divisor, Zero);
   Value *Ret0_2      = Builder.CreateICmpEQ(Dividend, Zero);
   Value *Ret0_3      = Builder.CreateOr(Ret0_1, Ret0_2);
@@ -227,10 +235,10 @@ static Value *generateUnsignedDivisionCode(Value *Dividend, Value *Divisor,
   Value *Tmp1 = Builder.CreateCall(CTLZ, {Dividend, True});
   Value *SR          = Builder.CreateSub(Tmp0, Tmp1);
   Value *Ret0_4      = Builder.CreateICmpUGT(SR, MSB);
-  Value *Ret0        = Builder.CreateOr(Ret0_3, Ret0_4);
+  Value *Ret0        = Builder.CreateLogicalOr(Ret0_3, Ret0_4);
   Value *RetDividend = Builder.CreateICmpEQ(SR, MSB);
   Value *RetVal      = Builder.CreateSelect(Ret0, Zero, Dividend);
-  Value *EarlyRet    = Builder.CreateOr(Ret0, RetDividend);
+  Value *EarlyRet    = Builder.CreateLogicalOr(Ret0, RetDividend);
   Builder.CreateCondBr(EarlyRet, End, BB1);
 
   // ; bb1:                                             ; preds = %special-cases

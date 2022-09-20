@@ -264,38 +264,38 @@ InstructionCost RISCVTTIImpl::getGatherScatterOpCost(
 // instruction counts with the following adjustments made:
 // * One vsetvli is considered free.
 static const CostTblEntry VectorIntrinsicCostTable[]{
-    {Intrinsic::floor, MVT::v2f32, 15},
-    {Intrinsic::floor, MVT::v4f32, 15},
-    {Intrinsic::floor, MVT::v8f32, 15},
-    {Intrinsic::floor, MVT::v16f32, 15},
-    {Intrinsic::floor, MVT::nxv2f32, 15},
-    {Intrinsic::floor, MVT::nxv4f32, 15},
-    {Intrinsic::floor, MVT::nxv8f32, 15},
-    {Intrinsic::floor, MVT::nxv16f32, 15},
-    {Intrinsic::floor, MVT::v2f64, 15},
-    {Intrinsic::floor, MVT::v4f64, 15},
-    {Intrinsic::floor, MVT::v8f64, 15},
-    {Intrinsic::floor, MVT::v16f64, 15},
-    {Intrinsic::floor, MVT::nxv1f64, 15},
-    {Intrinsic::floor, MVT::nxv2f64, 15},
-    {Intrinsic::floor, MVT::nxv4f64, 15},
-    {Intrinsic::floor, MVT::nxv8f64, 15},
-    {Intrinsic::ceil, MVT::v2f32, 15},
-    {Intrinsic::ceil, MVT::v4f32, 15},
-    {Intrinsic::ceil, MVT::v8f32, 15},
-    {Intrinsic::ceil, MVT::v16f32, 15},
-    {Intrinsic::ceil, MVT::nxv2f32, 15},
-    {Intrinsic::ceil, MVT::nxv4f32, 15},
-    {Intrinsic::ceil, MVT::nxv8f32, 15},
-    {Intrinsic::ceil, MVT::nxv16f32, 15},
-    {Intrinsic::ceil, MVT::v2f64, 15},
-    {Intrinsic::ceil, MVT::v4f64, 15},
-    {Intrinsic::ceil, MVT::v8f64, 15},
-    {Intrinsic::ceil, MVT::v16f64, 15},
-    {Intrinsic::ceil, MVT::nxv1f64, 15},
-    {Intrinsic::ceil, MVT::nxv2f64, 15},
-    {Intrinsic::ceil, MVT::nxv4f64, 15},
-    {Intrinsic::ceil, MVT::nxv8f64, 15},
+    {Intrinsic::floor, MVT::v2f32, 9},
+    {Intrinsic::floor, MVT::v4f32, 9},
+    {Intrinsic::floor, MVT::v8f32, 9},
+    {Intrinsic::floor, MVT::v16f32, 9},
+    {Intrinsic::floor, MVT::nxv2f32, 9},
+    {Intrinsic::floor, MVT::nxv4f32, 9},
+    {Intrinsic::floor, MVT::nxv8f32, 9},
+    {Intrinsic::floor, MVT::nxv16f32, 9},
+    {Intrinsic::floor, MVT::v2f64, 9},
+    {Intrinsic::floor, MVT::v4f64, 9},
+    {Intrinsic::floor, MVT::v8f64, 9},
+    {Intrinsic::floor, MVT::v16f64, 9},
+    {Intrinsic::floor, MVT::nxv1f64, 9},
+    {Intrinsic::floor, MVT::nxv2f64, 9},
+    {Intrinsic::floor, MVT::nxv4f64, 9},
+    {Intrinsic::floor, MVT::nxv8f64, 9},
+    {Intrinsic::ceil, MVT::v2f32, 9},
+    {Intrinsic::ceil, MVT::v4f32, 9},
+    {Intrinsic::ceil, MVT::v8f32, 9},
+    {Intrinsic::ceil, MVT::v16f32, 9},
+    {Intrinsic::ceil, MVT::nxv2f32, 9},
+    {Intrinsic::ceil, MVT::nxv4f32, 9},
+    {Intrinsic::ceil, MVT::nxv8f32, 9},
+    {Intrinsic::ceil, MVT::nxv16f32, 9},
+    {Intrinsic::ceil, MVT::v2f64, 9},
+    {Intrinsic::ceil, MVT::v4f64, 9},
+    {Intrinsic::ceil, MVT::v8f64, 9},
+    {Intrinsic::ceil, MVT::v16f64, 9},
+    {Intrinsic::ceil, MVT::nxv1f64, 9},
+    {Intrinsic::ceil, MVT::nxv2f64, 9},
+    {Intrinsic::ceil, MVT::nxv4f64, 9},
+    {Intrinsic::ceil, MVT::nxv8f64, 9},
     {Intrinsic::trunc, MVT::v2f32, 7},
     {Intrinsic::trunc, MVT::v4f32, 7},
     {Intrinsic::trunc, MVT::v8f32, 7},
@@ -312,22 +312,22 @@ static const CostTblEntry VectorIntrinsicCostTable[]{
     {Intrinsic::trunc, MVT::nxv2f64, 7},
     {Intrinsic::trunc, MVT::nxv4f64, 7},
     {Intrinsic::trunc, MVT::nxv8f64, 7},
-    {Intrinsic::round, MVT::v2f32, 10},
-    {Intrinsic::round, MVT::v4f32, 10},
-    {Intrinsic::round, MVT::v8f32, 10},
-    {Intrinsic::round, MVT::v16f32, 10},
-    {Intrinsic::round, MVT::nxv2f32, 10},
-    {Intrinsic::round, MVT::nxv4f32, 10},
-    {Intrinsic::round, MVT::nxv8f32, 10},
-    {Intrinsic::round, MVT::nxv16f32, 10},
-    {Intrinsic::round, MVT::v2f64, 10},
-    {Intrinsic::round, MVT::v4f64, 10},
-    {Intrinsic::round, MVT::v8f64, 10},
-    {Intrinsic::round, MVT::v16f64, 10},
-    {Intrinsic::round, MVT::nxv1f64, 10},
-    {Intrinsic::round, MVT::nxv2f64, 10},
-    {Intrinsic::round, MVT::nxv4f64, 10},
-    {Intrinsic::round, MVT::nxv8f64, 10},
+    {Intrinsic::round, MVT::v2f32, 9},
+    {Intrinsic::round, MVT::v4f32, 9},
+    {Intrinsic::round, MVT::v8f32, 9},
+    {Intrinsic::round, MVT::v16f32, 9},
+    {Intrinsic::round, MVT::nxv2f32, 9},
+    {Intrinsic::round, MVT::nxv4f32, 9},
+    {Intrinsic::round, MVT::nxv8f32, 9},
+    {Intrinsic::round, MVT::nxv16f32, 9},
+    {Intrinsic::round, MVT::v2f64, 9},
+    {Intrinsic::round, MVT::v4f64, 9},
+    {Intrinsic::round, MVT::v8f64, 9},
+    {Intrinsic::round, MVT::v16f64, 9},
+    {Intrinsic::round, MVT::nxv1f64, 9},
+    {Intrinsic::round, MVT::nxv2f64, 9},
+    {Intrinsic::round, MVT::nxv4f64, 9},
+    {Intrinsic::round, MVT::nxv8f64, 9},
     {Intrinsic::fabs, MVT::v2f32, 1},
     {Intrinsic::fabs, MVT::v4f32, 1},
     {Intrinsic::fabs, MVT::v8f32, 1},
@@ -445,130 +445,6 @@ static const CostTblEntry VectorIntrinsicCostTable[]{
     {Intrinsic::ctpop, MVT::nxv2i64, 21},
     {Intrinsic::ctpop, MVT::nxv4i64, 21},
     {Intrinsic::ctpop, MVT::nxv8i64, 21},
-    {Intrinsic::sadd_sat, MVT::v2i8, 1},
-    {Intrinsic::sadd_sat, MVT::v4i8, 1},
-    {Intrinsic::sadd_sat, MVT::v8i8, 1},
-    {Intrinsic::sadd_sat, MVT::v16i8, 1},
-    {Intrinsic::sadd_sat, MVT::nxv2i8, 1},
-    {Intrinsic::sadd_sat, MVT::nxv4i8, 1},
-    {Intrinsic::sadd_sat, MVT::nxv8i8, 1},
-    {Intrinsic::sadd_sat, MVT::nxv16i8, 1},
-    {Intrinsic::sadd_sat, MVT::v2i16, 1},
-    {Intrinsic::sadd_sat, MVT::v4i16, 1},
-    {Intrinsic::sadd_sat, MVT::v8i16, 1},
-    {Intrinsic::sadd_sat, MVT::v16i16, 1},
-    {Intrinsic::sadd_sat, MVT::nxv2i16, 1},
-    {Intrinsic::sadd_sat, MVT::nxv4i16, 1},
-    {Intrinsic::sadd_sat, MVT::nxv8i16, 1},
-    {Intrinsic::sadd_sat, MVT::nxv16i16, 1},
-    {Intrinsic::sadd_sat, MVT::v2i32, 1},
-    {Intrinsic::sadd_sat, MVT::v4i32, 1},
-    {Intrinsic::sadd_sat, MVT::v8i32, 1},
-    {Intrinsic::sadd_sat, MVT::v16i32, 1},
-    {Intrinsic::sadd_sat, MVT::nxv2i32, 1},
-    {Intrinsic::sadd_sat, MVT::nxv4i32, 1},
-    {Intrinsic::sadd_sat, MVT::nxv8i32, 1},
-    {Intrinsic::sadd_sat, MVT::nxv16i32, 1},
-    {Intrinsic::sadd_sat, MVT::v2i64, 1},
-    {Intrinsic::sadd_sat, MVT::v4i64, 1},
-    {Intrinsic::sadd_sat, MVT::v8i64, 1},
-    {Intrinsic::sadd_sat, MVT::v16i64, 1},
-    {Intrinsic::sadd_sat, MVT::nxv2i64, 1},
-    {Intrinsic::sadd_sat, MVT::nxv4i64, 1},
-    {Intrinsic::sadd_sat, MVT::nxv8i64, 1},
-    {Intrinsic::uadd_sat, MVT::v2i8, 1},
-    {Intrinsic::uadd_sat, MVT::v4i8, 1},
-    {Intrinsic::uadd_sat, MVT::v8i8, 1},
-    {Intrinsic::uadd_sat, MVT::v16i8, 1},
-    {Intrinsic::uadd_sat, MVT::nxv2i8, 1},
-    {Intrinsic::uadd_sat, MVT::nxv4i8, 1},
-    {Intrinsic::uadd_sat, MVT::nxv8i8, 1},
-    {Intrinsic::uadd_sat, MVT::nxv16i8, 1},
-    {Intrinsic::uadd_sat, MVT::v2i16, 1},
-    {Intrinsic::uadd_sat, MVT::v4i16, 1},
-    {Intrinsic::uadd_sat, MVT::v8i16, 1},
-    {Intrinsic::uadd_sat, MVT::v16i16, 1},
-    {Intrinsic::uadd_sat, MVT::nxv2i16, 1},
-    {Intrinsic::uadd_sat, MVT::nxv4i16, 1},
-    {Intrinsic::uadd_sat, MVT::nxv8i16, 1},
-    {Intrinsic::uadd_sat, MVT::nxv16i16, 1},
-    {Intrinsic::uadd_sat, MVT::v2i32, 1},
-    {Intrinsic::uadd_sat, MVT::v4i32, 1},
-    {Intrinsic::uadd_sat, MVT::v8i32, 1},
-    {Intrinsic::uadd_sat, MVT::v16i32, 1},
-    {Intrinsic::uadd_sat, MVT::nxv2i32, 1},
-    {Intrinsic::uadd_sat, MVT::nxv4i32, 1},
-    {Intrinsic::uadd_sat, MVT::nxv8i32, 1},
-    {Intrinsic::uadd_sat, MVT::nxv16i32, 1},
-    {Intrinsic::uadd_sat, MVT::v2i64, 1},
-    {Intrinsic::uadd_sat, MVT::v4i64, 1},
-    {Intrinsic::uadd_sat, MVT::v8i64, 1},
-    {Intrinsic::uadd_sat, MVT::v16i64, 1},
-    {Intrinsic::uadd_sat, MVT::nxv2i64, 1},
-    {Intrinsic::uadd_sat, MVT::nxv4i64, 1},
-    {Intrinsic::uadd_sat, MVT::nxv8i64, 1},
-    {Intrinsic::usub_sat, MVT::v2i8, 1},
-    {Intrinsic::usub_sat, MVT::v4i8, 1},
-    {Intrinsic::usub_sat, MVT::v8i8, 1},
-    {Intrinsic::usub_sat, MVT::v16i8, 1},
-    {Intrinsic::usub_sat, MVT::nxv2i8, 1},
-    {Intrinsic::usub_sat, MVT::nxv4i8, 1},
-    {Intrinsic::usub_sat, MVT::nxv8i8, 1},
-    {Intrinsic::usub_sat, MVT::nxv16i8, 1},
-    {Intrinsic::usub_sat, MVT::v2i16, 1},
-    {Intrinsic::usub_sat, MVT::v4i16, 1},
-    {Intrinsic::usub_sat, MVT::v8i16, 1},
-    {Intrinsic::usub_sat, MVT::v16i16, 1},
-    {Intrinsic::usub_sat, MVT::nxv2i16, 1},
-    {Intrinsic::usub_sat, MVT::nxv4i16, 1},
-    {Intrinsic::usub_sat, MVT::nxv8i16, 1},
-    {Intrinsic::usub_sat, MVT::nxv16i16, 1},
-    {Intrinsic::usub_sat, MVT::v2i32, 1},
-    {Intrinsic::usub_sat, MVT::v4i32, 1},
-    {Intrinsic::usub_sat, MVT::v8i32, 1},
-    {Intrinsic::usub_sat, MVT::v16i32, 1},
-    {Intrinsic::usub_sat, MVT::nxv2i32, 1},
-    {Intrinsic::usub_sat, MVT::nxv4i32, 1},
-    {Intrinsic::usub_sat, MVT::nxv8i32, 1},
-    {Intrinsic::usub_sat, MVT::nxv16i32, 1},
-    {Intrinsic::usub_sat, MVT::v2i64, 1},
-    {Intrinsic::usub_sat, MVT::v4i64, 1},
-    {Intrinsic::usub_sat, MVT::v8i64, 1},
-    {Intrinsic::usub_sat, MVT::v16i64, 1},
-    {Intrinsic::usub_sat, MVT::nxv2i64, 1},
-    {Intrinsic::usub_sat, MVT::nxv4i64, 1},
-    {Intrinsic::usub_sat, MVT::nxv8i64, 1},
-    {Intrinsic::ssub_sat, MVT::v2i8, 1},
-    {Intrinsic::ssub_sat, MVT::v4i8, 1},
-    {Intrinsic::ssub_sat, MVT::v8i8, 1},
-    {Intrinsic::ssub_sat, MVT::v16i8, 1},
-    {Intrinsic::ssub_sat, MVT::nxv2i8, 1},
-    {Intrinsic::ssub_sat, MVT::nxv4i8, 1},
-    {Intrinsic::ssub_sat, MVT::nxv8i8, 1},
-    {Intrinsic::ssub_sat, MVT::nxv16i8, 1},
-    {Intrinsic::ssub_sat, MVT::v2i16, 1},
-    {Intrinsic::ssub_sat, MVT::v4i16, 1},
-    {Intrinsic::ssub_sat, MVT::v8i16, 1},
-    {Intrinsic::ssub_sat, MVT::v16i16, 1},
-    {Intrinsic::ssub_sat, MVT::nxv2i16, 1},
-    {Intrinsic::ssub_sat, MVT::nxv4i16, 1},
-    {Intrinsic::ssub_sat, MVT::nxv8i16, 1},
-    {Intrinsic::ssub_sat, MVT::nxv16i16, 1},
-    {Intrinsic::ssub_sat, MVT::v2i32, 1},
-    {Intrinsic::ssub_sat, MVT::v4i32, 1},
-    {Intrinsic::ssub_sat, MVT::v8i32, 1},
-    {Intrinsic::ssub_sat, MVT::v16i32, 1},
-    {Intrinsic::ssub_sat, MVT::nxv2i32, 1},
-    {Intrinsic::ssub_sat, MVT::nxv4i32, 1},
-    {Intrinsic::ssub_sat, MVT::nxv8i32, 1},
-    {Intrinsic::ssub_sat, MVT::nxv16i32, 1},
-    {Intrinsic::ssub_sat, MVT::v2i64, 1},
-    {Intrinsic::ssub_sat, MVT::v4i64, 1},
-    {Intrinsic::ssub_sat, MVT::v8i64, 1},
-    {Intrinsic::ssub_sat, MVT::v16i64, 1},
-    {Intrinsic::ssub_sat, MVT::nxv2i64, 1},
-    {Intrinsic::ssub_sat, MVT::nxv4i64, 1},
-    {Intrinsic::ssub_sat, MVT::nxv8i64, 1},
 };
 
 InstructionCost
@@ -583,6 +459,15 @@ RISCVTTIImpl::getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
     auto LT = getTypeLegalizationCost(RetTy);
     if ((ST->hasVInstructions() && LT.second.isVector()) ||
         (LT.second.isScalarInteger() && ST->hasStdExtZbb()))
+      return LT.first;
+    break;
+  }
+  case Intrinsic::sadd_sat:
+  case Intrinsic::ssub_sat:
+  case Intrinsic::uadd_sat:
+  case Intrinsic::usub_sat: {
+    auto LT = getTypeLegalizationCost(RetTy);
+    if (ST->hasVInstructions() && LT.second.isVector())
       return LT.first;
     break;
   }
@@ -795,6 +680,182 @@ InstructionCost RISCVTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
     Cost += getVectorImmCost(cast<VectorType>(Src), OpInfo, CostKind);
   return Cost + BaseT::getMemoryOpCost(Opcode, Src, Alignment, AddressSpace,
                                        CostKind, OpInfo, I);
+}
+
+InstructionCost RISCVTTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
+                                                 Type *CondTy,
+                                                 CmpInst::Predicate VecPred,
+                                                 TTI::TargetCostKind CostKind,
+                                                 const Instruction *I) {
+  if (CostKind != TTI::TCK_RecipThroughput)
+    return BaseT::getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind,
+                                     I);
+
+  if (isa<FixedVectorType>(ValTy) && !ST->useRVVForFixedLengthVectors())
+    return BaseT::getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind,
+                                     I);
+
+  // Skip if scalar size of ValTy is bigger than ELEN.
+  if (ValTy->isVectorTy() && ValTy->getScalarSizeInBits() > ST->getELEN())
+    return BaseT::getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind,
+                                     I);
+
+  if (Opcode == Instruction::Select && ValTy->isVectorTy()) {
+    std::pair<InstructionCost, MVT> LT = getTypeLegalizationCost(ValTy);
+    if (CondTy->isVectorTy()) {
+      if (ValTy->getScalarSizeInBits() == 1) {
+        // vmandn.mm v8, v8, v9
+        // vmand.mm v9, v0, v9
+        // vmor.mm v0, v9, v8
+        return LT.first * 3;
+      }
+      // vselect and max/min are supported natively.
+      return LT.first * 1;
+    }
+
+    if (ValTy->getScalarSizeInBits() == 1) {
+      //  vmv.v.x v9, a0
+      //  vmsne.vi v9, v9, 0
+      //  vmandn.mm v8, v8, v9
+      //  vmand.mm v9, v0, v9
+      //  vmor.mm v0, v9, v8
+      return LT.first * 5;
+    }
+
+    // vmv.v.x v10, a0
+    // vmsne.vi v0, v10, 0
+    // vmerge.vvm v8, v9, v8, v0
+    return LT.first * 3;
+  }
+
+  if ((Opcode == Instruction::ICmp || Opcode == Instruction::FCmp) &&
+      ValTy->isVectorTy()) {
+    std::pair<InstructionCost, MVT> LT = getTypeLegalizationCost(ValTy);
+
+    // Support natively.
+    if (CmpInst::isIntPredicate(VecPred))
+      return LT.first * 1;
+
+    // If we do not support the input floating point vector type, use the base
+    // one which will calculate as:
+    // ScalarizeCost + Num * Cost for fixed vector,
+    // InvalidCost for scalable vector.
+    if ((ValTy->getScalarSizeInBits() == 16 && !ST->hasVInstructionsF16()) ||
+        (ValTy->getScalarSizeInBits() == 32 && !ST->hasVInstructionsF32()) ||
+        (ValTy->getScalarSizeInBits() == 64 && !ST->hasVInstructionsF64()))
+      return BaseT::getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind,
+                                       I);
+    switch (VecPred) {
+      // Support natively.
+    case CmpInst::FCMP_OEQ:
+    case CmpInst::FCMP_OGT:
+    case CmpInst::FCMP_OGE:
+    case CmpInst::FCMP_OLT:
+    case CmpInst::FCMP_OLE:
+    case CmpInst::FCMP_UNE:
+      return LT.first * 1;
+    // TODO: Other comparisons?
+    default:
+      break;
+    }
+  }
+
+  // TODO: Add cost for scalar type.
+
+  return BaseT::getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind, I);
+}
+
+InstructionCost RISCVTTIImpl::getVectorInstrCost(unsigned Opcode, Type *Val,
+                                                 unsigned Index) {
+  assert(Val->isVectorTy() && "This must be a vector type");
+
+  if (Opcode != Instruction::ExtractElement &&
+      Opcode != Instruction::InsertElement)
+    return BaseT::getVectorInstrCost(Opcode, Val, Index);
+
+  // Legalize the type.
+  std::pair<InstructionCost, MVT> LT = getTypeLegalizationCost(Val);
+
+  // This type is legalized to a scalar type.
+  if (!LT.second.isVector())
+    return 0;
+
+  // For unsupported scalable vector.
+  if (LT.second.isScalableVector() && !LT.first.isValid())
+    return LT.first;
+
+  if (!isTypeLegal(Val))
+    return BaseT::getVectorInstrCost(Opcode, Val, Index);
+
+  // In RVV, we could use vslidedown + vmv.x.s to extract element from vector
+  // and vslideup + vmv.s.x to insert element to vector.
+  unsigned BaseCost = 1;
+  // When insertelement we should add the index with 1 as the input of vslideup.
+  unsigned SlideCost = Opcode == Instruction::InsertElement ? 2 : 1;
+
+  if (Index != -1U) {
+    // The type may be split. For fixed-width vectors we can normalize the
+    // index to the new type.
+    if (LT.second.isFixedLengthVector()) {
+      unsigned Width = LT.second.getVectorNumElements();
+      Index = Index % Width;
+    }
+
+    // We could extract/insert the first element without vslidedown/vslideup.
+    if (Index == 0)
+      SlideCost = 0;
+    else if (Opcode == Instruction::InsertElement)
+      SlideCost = 1; // With a constant index, we do not need to use addi.
+  }
+
+  // Mask vector extract/insert element is different from normal case.
+  if (Val->getScalarSizeInBits() == 1) {
+    // For extractelement, we need the following instructions:
+    // vmv.v.i v8, 0
+    // vmerge.vim v8, v8, 1, v0
+    // vsetivli zero, 1, e8, m2, ta, mu (not count)
+    // vslidedown.vx v8, v8, a0
+    // vmv.x.s a0, v8
+
+    // For insertelement, we need the following instructions:
+    // vsetvli a2, zero, e8, m1, ta, mu (not count)
+    // vmv.s.x v8, a0
+    // vmv.v.i v9, 0
+    // vmerge.vim v9, v9, 1, v0
+    // addi a0, a1, 1
+    // vsetvli zero, a0, e8, m1, tu, mu (not count)
+    // vslideup.vx v9, v8, a1
+    // vsetvli a0, zero, e8, m1, ta, mu (not count)
+    // vand.vi v8, v9, 1
+    // vmsne.vi v0, v8, 0
+
+    // TODO: should we count these special vsetvlis?
+    BaseCost = Opcode == Instruction::InsertElement ? 5 : 3;
+  }
+  // Extract i64 in the target that has XLEN=32 need more instruction.
+  if (Val->getScalarType()->isIntegerTy() &&
+      ST->getXLen() < Val->getScalarSizeInBits()) {
+    // For extractelement, we need the following instructions:
+    // vsetivli zero, 1, e64, m1, ta, mu (not count)
+    // vslidedown.vx v8, v8, a0
+    // vmv.x.s a0, v8
+    // li a1, 32
+    // vsrl.vx v8, v8, a1
+    // vmv.x.s a1, v8
+
+    // For insertelement, we need the following instructions:
+    // vsetivli zero, 2, e32, m4, ta, mu (not count)
+    // vmv.v.i v12, 0
+    // vslide1up.vx v16, v12, a1
+    // vslide1up.vx v12, v16, a0
+    // addi a0, a2, 1
+    // vsetvli zero, a0, e64, m4, tu, mu (not count)
+    // vslideup.vx v8, v12, a2
+
+    // TODO: should we count these special vsetvlis?
+    BaseCost = Opcode == Instruction::InsertElement ? 3 : 4;
+  }
+  return BaseCost + SlideCost;
 }
 
 void RISCVTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,

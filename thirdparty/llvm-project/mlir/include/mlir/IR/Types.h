@@ -15,6 +15,8 @@
 #include "llvm/Support/PointerLikeTypeTraits.h"
 
 namespace mlir {
+class AsmState;
+
 /// Instances of the Type class are uniqued, have an immutable identifier and an
 /// optional mutable component.  They wrap a pointer to the storage object owned
 /// by MLIRContext.  Therefore, instances of Type are passed around by value.
@@ -162,6 +164,7 @@ public:
 
   /// Print the current type.
   void print(raw_ostream &os) const;
+  void print(raw_ostream &os, AsmState &state) const;
   void dump() const;
 
   friend ::llvm::hash_code hash_value(Type arg);
@@ -325,10 +328,10 @@ public:
 /// We provide a cast between To and From if From is mlir::Type or derives from
 /// it
 template <typename To, typename From>
-struct CastInfo<To, From,
-                typename std::enable_if<
-                    std::is_same_v<mlir::Type, std::remove_const_t<From>> ||
-                    std::is_base_of_v<mlir::Type, From>>::type>
+struct CastInfo<
+    To, From,
+    std::enable_if_t<std::is_same_v<mlir::Type, std::remove_const_t<From>> ||
+                     std::is_base_of_v<mlir::Type, From>>>
     : NullableValueCastFailed<To>,
       DefaultDoCastIfPossible<To, From, CastInfo<To, From>> {
   /// Arguments are taken as mlir::Type here and not as From.

@@ -872,6 +872,28 @@ Value *InstCombinerImpl::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
   SimplifyQuery Q = SQ.getWithInstruction(&I);
 
   Value *Cond, *True = nullptr, *False = nullptr;
+
+  // Special-case for add/negate combination. Replace the zero in the negation
+  // with the trailing add operand:
+  // (Cond ? TVal : -N) + Z --> Cond ? True : (Z - N)
+  // (Cond ? -N : FVal) + Z --> Cond ? (Z - N) : False
+  auto foldAddNegate = [&](Value *TVal, Value *FVal, Value *Z) -> Value * {
+    // We need an 'add' and exactly 1 arm of the select to have been simplified.
+    if (Opcode != Instruction::Add || (!True && !False) || (True && False))
+      return nullptr;
+
+    Value *N;
+    if (True && match(FVal, m_Neg(m_Value(N)))) {
+      Value *Sub = Builder.CreateSub(Z, N);
+      return Builder.CreateSelect(Cond, True, Sub, I.getName());
+    }
+    if (False && match(TVal, m_Neg(m_Value(N)))) {
+      Value *Sub = Builder.CreateSub(Z, N);
+      return Builder.CreateSelect(Cond, Sub, False, I.getName());
+    }
+    return nullptr;
+  };
+
   if (LHSIsSelect && RHSIsSelect && A == D) {
     // (A ? B : C) op (A ? E : F) -> A ? (B op E) : (C op F)
     Cond = A;
@@ -889,11 +911,15 @@ Value *InstCombinerImpl::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
     Cond = A;
     True = simplifyBinOp(Opcode, B, RHS, FMF, Q);
     False = simplifyBinOp(Opcode, C, RHS, FMF, Q);
+    if (Value *NewSel = foldAddNegate(B, C, RHS))
+      return NewSel;
   } else if (RHSIsSelect && RHS->hasOneUse()) {
     // X op (D ? E : F) -> D ? (X op E) : (X op F)
     Cond = D;
     True = simplifyBinOp(Opcode, LHS, E, FMF, Q);
     False = simplifyBinOp(Opcode, LHS, F, FMF, Q);
+    if (Value *NewSel = foldAddNegate(E, F, LHS))
+      return NewSel;
   }
 
   if (!True || !False)
@@ -1280,6 +1306,11 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
         InV = PN->getIncomingValue(i);
       NewPN->addIncoming(InV, PN->getIncomingBlock(i));
     }
+  } else if (auto *EV = dyn_cast<ExtractValueInst>(&I)) {
+    for (unsigned i = 0; i != NumPHIValues; ++i)
+      NewPN->addIncoming(Builder.CreateExtractValue(PN->getIncomingValue(i),
+                                                    EV->getIndices(), "phi.ev"),
+                         PN->getIncomingBlock(i));
   } else {
     CastInst *CI = cast<CastInst>(&I);
     Type *RetTy = CI->getType();
@@ -3249,13 +3280,21 @@ InstCombinerImpl::foldExtractOfOverflowIntrinsic(ExtractValueInst &EV) {
   if (!WO)
     return nullptr;
 
-  // extractvalue (any_mul_with_overflow X, -1), 0 --> -X
   Intrinsic::ID OvID = WO->getIntrinsicID();
-  if (*EV.idx_begin() == 0 &&
-      (OvID == Intrinsic::smul_with_overflow ||
-       OvID == Intrinsic::umul_with_overflow) &&
-      match(WO->getArgOperand(1), m_AllOnes())) {
-    return BinaryOperator::CreateNeg(WO->getArgOperand(0));
+  const APInt *C = nullptr;
+  if (match(WO->getRHS(), m_APIntAllowUndef(C))) {
+    if (*EV.idx_begin() == 0 && (OvID == Intrinsic::smul_with_overflow ||
+                                 OvID == Intrinsic::umul_with_overflow)) {
+      // extractvalue (any_mul_with_overflow X, -1), 0 --> -X
+      if (C->isAllOnes())
+        return BinaryOperator::CreateNeg(WO->getLHS());
+      // extractvalue (any_mul_with_overflow X, 2^n), 0 --> X << n
+      if (C->isPowerOf2()) {
+        return BinaryOperator::CreateShl(
+            WO->getLHS(),
+            ConstantInt::get(WO->getLHS()->getType(), C->logBase2()));
+      }
+    }
   }
 
   // We're extracting from an overflow intrinsic. See if we're the only user.
@@ -3284,8 +3323,7 @@ InstCombinerImpl::foldExtractOfOverflowIntrinsic(ExtractValueInst &EV) {
   // If only the overflow result is used, and the right hand side is a
   // constant (or constant splat), we can remove the intrinsic by directly
   // checking for overflow.
-  const APInt *C;
-  if (match(WO->getRHS(), m_APInt(C))) {
+  if (C) {
     // Compute the no-wrap range for LHS given RHS=C, then construct an
     // equivalent icmp, potentially using an offset.
     ConstantRange NWR = ConstantRange::makeExactNoWrapRegion(
@@ -3398,6 +3436,10 @@ Instruction *InstCombinerImpl::visitExtractValueInst(ExtractValueInst &EV) {
       return replaceInstUsesWith(EV, NL);
     }
   }
+
+  if (auto *PN = dyn_cast<PHINode>(Agg))
+    if (Instruction *Res = foldOpIntoPhi(EV, PN))
+      return Res;
 
   // We could simplify extracts from other values. Note that nested extracts may
   // already be simplified implicitly by the above: extract (extract (insert) )
@@ -3893,26 +3935,19 @@ bool InstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
   // *all* uses if the operand is an invoke/callbr and the use is in a phi on
   // the normal/default destination. This is why the domination check in the
   // replacement below is still necessary.
-  BasicBlock::iterator MoveBefore;
+  Instruction *MoveBefore;
   if (isa<Argument>(Op)) {
-    MoveBefore = FI.getFunction()->getEntryBlock().begin();
-    while (isa<AllocaInst>(*MoveBefore))
-      ++MoveBefore;
-  } else if (auto *PN = dyn_cast<PHINode>(Op)) {
-    MoveBefore = PN->getParent()->getFirstInsertionPt();
-  } else if (auto *II = dyn_cast<InvokeInst>(Op)) {
-    MoveBefore = II->getNormalDest()->getFirstInsertionPt();
-  } else if (auto *CB = dyn_cast<CallBrInst>(Op)) {
-    MoveBefore = CB->getDefaultDest()->getFirstInsertionPt();
+    MoveBefore =
+        &*FI.getFunction()->getEntryBlock().getFirstNonPHIOrDbgOrAlloca();
   } else {
-    auto *I = cast<Instruction>(Op);
-    assert(!I->isTerminator() && "Cannot be a terminator");
-    MoveBefore = std::next(I->getIterator());
+    MoveBefore = cast<Instruction>(Op)->getInsertionPointAfterDef();
+    if (!MoveBefore)
+      return false;
   }
 
   bool Changed = false;
-  if (FI.getIterator() != MoveBefore) {
-    FI.moveBefore(*MoveBefore->getParent(), MoveBefore);
+  if (&FI != MoveBefore) {
+    FI.moveBefore(MoveBefore);
     Changed = true;
   }
 

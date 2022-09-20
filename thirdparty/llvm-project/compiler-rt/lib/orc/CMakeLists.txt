@@ -13,6 +13,7 @@ set(ORC_COMMON_SOURCES
 set(ALL_ORC_SOURCES
   ${ORC_COMMON_SOURCES}
   coff_platform.cpp
+  coff_platform.per_jd.cpp
   elfnix_platform.cpp
   macho_ehframe_registration.cpp
   macho_platform.cpp
@@ -40,7 +41,7 @@ set(ORC_COMMON_IMPL_HEADERS
   wrapper_function_utils.h
   )
 
-# Implementation headers for all ORC architectures.  
+# Implementation headers for all ORC architectures.
 set(ALL_ORC_IMPL_HEADERS
   ${ORC_COMMON_IMPL_HEADERS}
   macho_platform.h
@@ -87,7 +88,7 @@ if (APPLE)
     macho_tlv.x86-64.S
     macho_tlv.arm64.S
     )
-  
+
   set(ORC_IMPL_HEADERS
     ${ORC_COMMON_IMPL_HEADERS}
     macho_platform.h
@@ -107,7 +108,7 @@ if (APPLE)
     CFLAGS ${ORC_CFLAGS}
     DEPS ${ORC_DEPS})
 
-  add_compiler_rt_runtime(clang_rt.orc
+  add_compiler_rt_runtime(orc_rt
     STATIC
     OS ${ORC_SUPPORTED_OS}
     ARCHS ${ORC_SUPPORTED_ARCH}
@@ -128,7 +129,12 @@ else() # not Apple
     set(ORC_SOURCES
       ${ORC_COMMON_SOURCES}
       coff_platform.cpp
+      coff_platform.per_jd.cpp
       )
+
+    if (MSVC)
+      set(ORC_CFLAGS "${ORC_CFLAGS} /MD")
+    endif()
   else()
     set(ORC_BUILD_TYPE STATIC)
 
@@ -136,13 +142,13 @@ else() # not Apple
       ${ORC_COMMON_IMPL_HEADERS}
       elfnix_platform.h
       )
-    
+
     set(ORC_SOURCES
       ${ORC_COMMON_SOURCES}
       elfnix_platform.cpp
       )
 
-    add_asm_sources(ORC_ASM_SOURCES 
+    add_asm_sources(ORC_ASM_SOURCES
       elfnix_tls.x86-64.S
       elfnix_tls.aarch64.S
       )
@@ -161,7 +167,7 @@ else() # not Apple
       DEPS ${ORC_DEPS})
 
     # Common ORC archive for instrumented binaries.
-    add_compiler_rt_runtime(clang_rt.orc
+    add_compiler_rt_runtime(orc_rt
       ${ORC_BUILD_TYPE}
       ARCHS ${arch}
       CFLAGS ${ORC_CFLAGS}
@@ -172,6 +178,4 @@ else() # not Apple
   endforeach()
 endif() # not Apple
 
-if(COMPILER_RT_INCLUDE_TESTS)
-  add_subdirectory(unittests)
-endif()
+add_subdirectory(tests)
