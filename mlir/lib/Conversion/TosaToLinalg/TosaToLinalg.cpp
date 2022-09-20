@@ -365,16 +365,16 @@ createLinalgBodyCalculationForElementwiseOp(Operation *op, ValueRange args,
   // tosa::ClampOp
   if (isa<tosa::ClampOp>(op) && elementTy.isa<FloatType>()) {
     bool losesInfo = false;
-    APFloat min_apf = op->getAttr("min_fp").cast<FloatAttr>().getValue();
-    APFloat max_apf = op->getAttr("max_fp").cast<FloatAttr>().getValue();
-    min_apf.convert(elementTy.cast<FloatType>().getFloatSemantics(),
-                    APFloat::rmNearestTiesToEven, &losesInfo);
-    max_apf.convert(elementTy.cast<FloatType>().getFloatSemantics(),
-                    APFloat::rmNearestTiesToEven, &losesInfo);
+    APFloat minApf = op->getAttr("min_fp").cast<FloatAttr>().getValue();
+    APFloat maxApf = op->getAttr("max_fp").cast<FloatAttr>().getValue();
+    minApf.convert(elementTy.cast<FloatType>().getFloatSemantics(),
+                   APFloat::rmNearestTiesToEven, &losesInfo);
+    maxApf.convert(elementTy.cast<FloatType>().getFloatSemantics(),
+                   APFloat::rmNearestTiesToEven, &losesInfo);
     auto min = rewriter.create<arith::ConstantOp>(
-        loc, elementTy, rewriter.getFloatAttr(elementTy, min_apf));
+        loc, elementTy, rewriter.getFloatAttr(elementTy, minApf));
     auto max = rewriter.create<arith::ConstantOp>(
-        loc, elementTy, rewriter.getFloatAttr(elementTy, max_apf));
+        loc, elementTy, rewriter.getFloatAttr(elementTy, maxApf));
     return clampFloatHelper(loc, args[0], min, max, rewriter);
   }
 
@@ -1126,11 +1126,12 @@ public:
       return rewriter.notifyMatchFailure(
           op, "tosa.rescale requires scale32 for double_round to be true");
 
-    auto dynamicDimsOr =
-        checkHasDynamicBatchDims(rewriter, op, {input, op.getOutput()});
-    if (!dynamicDimsOr.has_value())
-      return failure();
-    SmallVector<Value> dynamicDims = dynamicDimsOr.value();
+    SmallVector<Value> dynDims;
+    for (int i = 0; i < outputTy.getRank(); i++) {
+      if (outputTy.isDynamicDim(i)) {
+        dynDims.push_back(rewriter.create<tensor::DimOp>(loc, input, i));
+      }
+    }
 
     // The shift and multiplier values.
     SmallVector<int32_t> multiplierValues;
@@ -1206,7 +1207,8 @@ public:
 
     // Construct the indexing maps needed for linalg.generic ops.
     Value initTensor = rewriter.create<linalg::InitTensorOp>(
-        loc, dynamicDims, outputTy.getShape(), outputTy.getElementType());
+        loc, ArrayRef<Value>({dynDims}), outputTy.getShape(),
+        outputTy.getElementType());
 
     auto linalgOp = rewriter.create<linalg::GenericOp>(
         loc, outputTy, genericInputs, ValueRange{initTensor}, indexingMaps,

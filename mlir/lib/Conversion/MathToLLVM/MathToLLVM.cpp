@@ -7,13 +7,19 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
-#include "../PassDetail.h"
+
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Conversion/LLVMCommon/VectorPattern.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/TypeUtilities.h"
+#include "mlir/Pass/Pass.h"
+
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTMATHTOLLVM
+#include "mlir/Conversion/Passes.h.inc"
+} // namespace mlir
 
 using namespace mlir;
 
@@ -41,6 +47,8 @@ using RoundOpLowering =
     VectorConvertToLLVMPattern<math::RoundOp, LLVM::RoundOp>;
 using SinOpLowering = VectorConvertToLLVMPattern<math::SinOp, LLVM::SinOp>;
 using SqrtOpLowering = VectorConvertToLLVMPattern<math::SqrtOp, LLVM::SqrtOp>;
+using FTruncOpLowering =
+    VectorConvertToLLVMPattern<math::TruncOp, LLVM::FTruncOp>;
 
 // A `CtLz/CtTz/absi(a)` is converted into `CtLz/CtTz/absi(a, false)`.
 template <typename MathOp, typename LLVMOp>
@@ -250,7 +258,7 @@ struct RsqrtOpLowering : public ConvertOpToLLVMPattern<math::RsqrtOp> {
 };
 
 struct ConvertMathToLLVMPass
-    : public ConvertMathToLLVMBase<ConvertMathToLLVMPass> {
+    : public impl::ConvertMathToLLVMBase<ConvertMathToLLVMPass> {
   ConvertMathToLLVMPass() = default;
 
   void runOnOperation() override {
@@ -291,7 +299,8 @@ void mlir::populateMathToLLVMConversionPatterns(LLVMTypeConverter &converter,
     RoundOpLowering,
     RsqrtOpLowering,
     SinOpLowering,
-    SqrtOpLowering
+    SqrtOpLowering,
+    FTruncOpLowering
   >(converter);
   // clang-format on
 }

@@ -1483,6 +1483,13 @@ bool IsBuiltinDerivedType(const DerivedTypeSpec *derived, const char *name) {
   }
 }
 
+bool IsBuiltinCPtr(const Symbol &symbol) {
+  if (const DeclTypeSpec *declType = symbol.GetType())
+    if (const DerivedTypeSpec *derived = declType->AsDerived())
+      return IsIsoCType(derived);
+  return false;
+}
+
 bool IsIsoCType(const DerivedTypeSpec *derived) {
   return IsBuiltinDerivedType(derived, "c_ptr") ||
       IsBuiltinDerivedType(derived, "c_funptr");
@@ -1502,21 +1509,20 @@ bool IsEventTypeOrLockType(const DerivedTypeSpec *derivedTypeSpec) {
 }
 
 int CountLenParameters(const DerivedTypeSpec &type) {
-  return std::count_if(type.parameters().begin(), type.parameters().end(),
-      [](const auto &pair) { return pair.second.isLen(); });
+  return llvm::count_if(
+      type.parameters(), [](const auto &pair) { return pair.second.isLen(); });
 }
 
 int CountNonConstantLenParameters(const DerivedTypeSpec &type) {
-  return std::count_if(
-      type.parameters().begin(), type.parameters().end(), [](const auto &pair) {
-        if (!pair.second.isLen()) {
-          return false;
-        } else if (const auto &expr{pair.second.GetExplicit()}) {
-          return !IsConstantExpr(*expr);
-        } else {
-          return true;
-        }
-      });
+  return llvm::count_if(type.parameters(), [](const auto &pair) {
+    if (!pair.second.isLen()) {
+      return false;
+    } else if (const auto &expr{pair.second.GetExplicit()}) {
+      return !IsConstantExpr(*expr);
+    } else {
+      return true;
+    }
+  });
 }
 
 // Are the type parameters of type1 compile-time compatible with the

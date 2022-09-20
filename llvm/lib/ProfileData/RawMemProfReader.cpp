@@ -17,6 +17,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
@@ -371,14 +372,12 @@ Error RawMemProfReader::mapRawProfileToRecords() {
   }
 
   // Fill in the related callsites per function.
-  for (auto I = PerFunctionCallSites.begin(), E = PerFunctionCallSites.end();
-       I != E; I++) {
-    const GlobalValue::GUID Id = I->first;
+  for (const auto &[Id, Locs] : PerFunctionCallSites) {
     // Some functions may have only callsite data and no allocation data. Here
     // we insert a new entry for callsite data if we need to.
     auto Result = FunctionProfileData.insert({Id, IndexedMemProfRecord()});
     IndexedMemProfRecord &Record = Result.first->second;
-    for (LocationPtr Loc : I->second) {
+    for (LocationPtr Loc : Locs) {
       Record.CallSites.push_back(*Loc);
     }
   }

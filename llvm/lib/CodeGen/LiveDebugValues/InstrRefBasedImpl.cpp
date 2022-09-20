@@ -805,9 +805,6 @@ public:
       assert(LostMLocIt != ActiveMLocs.end() &&
              "Variable was using this MLoc, but ActiveMLocs[MLoc] has no "
              "entries?");
-      assert(LostMLocIt->second.contains(LocVarIt.second) &&
-             "Variable was using this MLoc, but does not appear in "
-             "ActiveMLocs?");
       LostMLocIt->second.erase(LocVarIt.second);
     }
 
@@ -1341,19 +1338,6 @@ bool InstrRefBasedLDV::transferDebugValue(const MachineInstr &MI) {
   if (Scope == nullptr)
     return true; // handled it; by doing nothing
 
-  // For now, ignore DBG_VALUE_LISTs when extending ranges. Allow it to
-  // contribute to locations in this block, but don't propagate further.
-  // Interpret it like a DBG_VALUE $noreg.
-  if (MI.isDebugValueList()) {
-    SmallVector<DbgOpID> EmptyDebugOps;
-    SmallVector<ResolvedDbgOp> EmptyResolvedDebugOps;
-    if (VTracker)
-      VTracker->defVar(MI, Properties, EmptyDebugOps);
-    if (TTracker)
-      TTracker->redefVar(MI, Properties, EmptyResolvedDebugOps);
-    return true;
-  }
-
   // MLocTracker needs to know that this register is read, even if it's only
   // read by a debug inst.
   for (const MachineOperand &MO : MI.debug_operands())
@@ -1446,8 +1430,7 @@ bool InstrRefBasedLDV::transferDebugInstrRef(MachineInstr &MI,
   // Try to lookup the instruction number, and find the machine value number
   // that it defines. It could be an instruction, or a PHI.
   auto InstrIt = DebugInstrNumToInstr.find(InstNo);
-  auto PHIIt = std::lower_bound(DebugPHINumToValue.begin(),
-                                DebugPHINumToValue.end(), InstNo);
+  auto PHIIt = llvm::lower_bound(DebugPHINumToValue, InstNo);
   if (InstrIt != DebugInstrNumToInstr.end()) {
     const MachineInstr &TargetInstr = *InstrIt->second.first;
     uint64_t BlockNo = TargetInstr.getParent()->getNumber();

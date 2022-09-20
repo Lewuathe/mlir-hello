@@ -446,6 +446,8 @@ module std [system] {
     header "array"
     export initializer_list
     export *
+
+    module array_fwd { private header "__fwd/array.h" }
   }
   module atomic {
     header "atomic"
@@ -490,29 +492,43 @@ module std [system] {
     export *
 
     module __chrono {
-      module calendar              { private header "__chrono/calendar.h" }
-      module convert_to_timespec   { private header "__chrono/convert_to_timespec.h" }
-      module day                   { private header "__chrono/day.h" }
-      module duration              { private header "__chrono/duration.h" }
-      module file_clock            { private header "__chrono/file_clock.h" }
-      module hh_mm_ss              { private header "__chrono/hh_mm_ss.h" }
-      module high_resolution_clock {
+      module calendar               { private header "__chrono/calendar.h" }
+      module convert_to_timespec    { private header "__chrono/convert_to_timespec.h" }
+      module convert_to_tm          { private header "__chrono/convert_to_tm.h" }
+      module day                    { private header "__chrono/day.h" }
+      module duration               { private header "__chrono/duration.h" }
+      module file_clock             { private header "__chrono/file_clock.h" }
+      module formatter              {
+        @requires_LIBCXX_ENABLE_LOCALIZATION@
+        private header "__chrono/formatter.h"
+      }
+      module hh_mm_ss               { private header "__chrono/hh_mm_ss.h" }
+      module high_resolution_clock  {
         private header "__chrono/high_resolution_clock.h"
         export steady_clock
         export system_clock
       }
-      module literals              { private header "__chrono/literals.h" }
-      module month                 { private header "__chrono/month.h" }
-      module month_weekday         { private header "__chrono/month_weekday.h" }
-      module monthday              { private header "__chrono/monthday.h" }
-      module steady_clock          { private header "__chrono/steady_clock.h" }
-      module system_clock          { private header "__chrono/system_clock.h" }
-      module time_point            { private header "__chrono/time_point.h" }
-      module weekday               { private header "__chrono/weekday.h" }
-      module year                  { private header "__chrono/year.h" }
-      module year_month            { private header "__chrono/year_month.h" }
-      module year_month_day        { private header "__chrono/year_month_day.h" }
-      module year_month_weekday    { private header "__chrono/year_month_weekday.h" }
+      module literals               { private header "__chrono/literals.h" }
+      module month                  { private header "__chrono/month.h" }
+      module month_weekday          { private header "__chrono/month_weekday.h" }
+      module monthday               { private header "__chrono/monthday.h" }
+      module ostream                {
+        @requires_LIBCXX_ENABLE_LOCALIZATION@
+        private header "__chrono/ostream.h"
+      }
+      module parser_std_format_spec {
+        @requires_LIBCXX_ENABLE_LOCALIZATION@
+        private header "__chrono/parser_std_format_spec.h"
+      }
+      module statically_widen       { private header "__chrono/statically_widen.h" }
+      module steady_clock           { private header "__chrono/steady_clock.h" }
+      module system_clock           { private header "__chrono/system_clock.h" }
+      module time_point             { private header "__chrono/time_point.h" }
+      module weekday                { private header "__chrono/weekday.h" }
+      module year                   { private header "__chrono/year.h" }
+      module year_month             { private header "__chrono/year_month.h" }
+      module year_month_day         { private header "__chrono/year_month_day.h" }
+      module year_month_weekday     { private header "__chrono/year_month_weekday.h" }
     }
   }
   module codecvt {
@@ -834,6 +850,7 @@ module std [system] {
 
     module __memory {
       module addressof                       { private header "__memory/addressof.h" }
+      module align                           { private header "__memory/align.h" }
       module allocate_at_least               { private header "__memory/allocate_at_least.h" }
       module allocation_guard                { private header "__memory/allocation_guard.h" }
       module allocator                       { private header "__memory/allocator.h" }
@@ -841,15 +858,18 @@ module std [system] {
       module allocator_traits                { private header "__memory/allocator_traits.h" }
       module assume_aligned                  { private header "__memory/assume_aligned.h" }
       module auto_ptr                        { private header "__memory/auto_ptr.h" }
+      module builtin_new_allocator           { private header "__memory/builtin_new_allocator.h" }
       module compressed_pair                 { private header "__memory/compressed_pair.h" }
       module concepts                        { private header "__memory/concepts.h" }
       module construct_at                    { private header "__memory/construct_at.h" }
+      module destruct_n                      { private header "__memory/destruct_n.h" }
       module pointer_traits                  { private header "__memory/pointer_traits.h" }
       module ranges_construct_at             { private header "__memory/ranges_construct_at.h" }
       module ranges_uninitialized_algorithms { private header "__memory/ranges_uninitialized_algorithms.h" }
       module raw_storage_iterator            { private header "__memory/raw_storage_iterator.h" }
       module shared_ptr                      { private header "__memory/shared_ptr.h" }
       module swap_allocator                  { private header "__memory/swap_allocator.h" }
+      module temp_value                      { private header "__memory/temp_value.h" }
       module temporary_buffer                { private header "__memory/temporary_buffer.h" }
       module uninitialized_algorithms        { private header "__memory/uninitialized_algorithms.h" }
       module unique_ptr                      { private header "__memory/unique_ptr.h" }
@@ -918,7 +938,10 @@ module std [system] {
       module clamp_to_integral               { private header "__random/clamp_to_integral.h" }
       module default_random_engine           { private header "__random/default_random_engine.h" }
       module discard_block_engine            { private header "__random/discard_block_engine.h" }
-      module discrete_distribution           { private header "__random/discrete_distribution.h" }
+      module discrete_distribution {
+        private header "__random/discrete_distribution.h"
+        export vector
+      }
       module exponential_distribution        { private header "__random/exponential_distribution.h" }
       module extreme_value_distribution      { private header "__random/extreme_value_distribution.h" }
       module fisher_f_distribution           { private header "__random/fisher_f_distribution.h" }
@@ -935,8 +958,14 @@ module std [system] {
       module mersenne_twister_engine         { private header "__random/mersenne_twister_engine.h" }
       module negative_binomial_distribution  { private header "__random/negative_binomial_distribution.h" }
       module normal_distribution             { private header "__random/normal_distribution.h" }
-      module piecewise_constant_distribution { private header "__random/piecewise_constant_distribution.h" }
-      module piecewise_linear_distribution   { private header "__random/piecewise_linear_distribution.h" }
+      module piecewise_constant_distribution {
+        private header "__random/piecewise_constant_distribution.h"
+        export vector
+      }
+      module piecewise_linear_distribution {
+        private header "__random/piecewise_linear_distribution.h"
+        export vector
+      }
       module poisson_distribution            { private header "__random/poisson_distribution.h" }
       module random_device                   { private header "__random/random_device.h" }
       module ranlux                          { private header "__random/ranlux.h" }
@@ -1096,6 +1125,17 @@ module std [system] {
   module tuple {
     header "tuple"
     export *
+
+    module apply_cv         { private header "__tuple/apply_cv.h" }
+    module get_fwd          { private header "__fwd/get.h" }
+    module make_tuple_types { private header "__tuple/make_tuple_types.h" }
+    module sfinae_helpers   { private header "__tuple/sfinae_helpers.h" }
+    module tuple_element    { private header "__tuple/tuple_element.h" }
+    module tuple_fwd        { private header "__fwd/tuple.h" }
+    module tuple_indices    { private header "__tuple/tuple_indices.h" }
+    module tuple_like       { private header "__tuple/tuple_like.h" }
+    module tuple_size       { private header "__tuple/tuple_size.h" }
+    module tuple_types      { private header "__tuple/tuple_types.h" }
   }
   module type_traits {
     header "type_traits"
@@ -1129,6 +1169,7 @@ module std [system] {
     module integral_constant                   { private header "__type_traits/integral_constant.h" }
     module is_abstract                         { private header "__type_traits/is_abstract.h" }
     module is_aggregate                        { private header "__type_traits/is_aggregate.h" }
+    module is_allocator                        { private header "__type_traits/is_allocator.h" }
     module is_arithmetic                       { private header "__type_traits/is_arithmetic.h" }
     module is_array                            { private header "__type_traits/is_array.h" }
     module is_assignable                       { private header "__type_traits/is_assignable.h" }
@@ -1211,6 +1252,7 @@ module std [system] {
     module maybe_const                         { private header "__type_traits/maybe_const.h" }
     module nat                                 { private header "__type_traits/nat.h" }
     module negation                            { private header "__type_traits/negation.h" }
+    module noexcept_move_assign_container      { private header "__type_traits/noexcept_move_assign_container.h" }
     module promote                             { private header "__type_traits/promote.h" }
     module rank                                { private header "__type_traits/rank.h" }
     module remove_all_extents                  { private header "__type_traits/remove_all_extents.h" }
@@ -1259,6 +1301,7 @@ module std [system] {
       module declval             { private header "__utility/declval.h" }
       module exchange            { private header "__utility/exchange.h" }
       module forward             { private header "__utility/forward.h" }
+      module forward_like        { private header "__utility/forward_like.h" }
       module in_place            { private header "__utility/in_place.h" }
       module integer_sequence    { private header "__utility/integer_sequence.h" }
       module move                { private header "__utility/move.h" }
@@ -1318,7 +1361,6 @@ module std [system] {
   }
   module __threading_support {         header "__threading_support" export * }
   module __tree              {         header "__tree"              export * }
-  module __tuple             { private header "__tuple"             export * }
   module __undef_macros      {         header "__undef_macros"      export * }
   module __verbose_abort     {         header "__verbose_abort"     export * }
 

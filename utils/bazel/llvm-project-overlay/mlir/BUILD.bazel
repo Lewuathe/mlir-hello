@@ -17,27 +17,18 @@ load(
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
-    licenses = ["notice"],
 )
+
+licenses(["notice"])
 
 exports_files([
     "LICENSE.TXT",
-    "include/mlir/Dialect/LLVMIR/LLVMOps.td",
     "run_lit.sh",
-    "utils/textmate/mlir.json",
 ])
 
 filegroup(
     name = "c_headers",
     srcs = glob(["include/mlir-c/**/*"]),  # <== i.e. match the entire tree
-)
-
-filegroup(
-    name = "ConversionPassDetail",
-    srcs = [
-        "include/mlir/Conversion/GPUToROCDL/Runtimes.h",
-        "lib/Conversion/PassDetail.h",
-    ],
 )
 
 exports_files(glob(["include/**/*.td"]))
@@ -405,6 +396,7 @@ mlir_c_api_cc_library(
     includes = ["include"],
     deps = [
         ":AsmParser",
+        ":BytecodeWriter",
         ":ConversionPassIncGen",
         ":FuncDialect",
         ":InferTypeOpInterface",
@@ -1132,6 +1124,20 @@ gentbl_cc_library(
     tbl_outs = [
         (
             [
+                "-gen-attrdef-decls",
+                "-dialect=amdgpu",
+            ],
+            "include/mlir/Dialect/AMDGPU/AMDGPUAttributes.h.inc",
+        ),
+        (
+            [
+                "-gen-attrdef-defs",
+                "-dialect=amdgpu",
+            ],
+            "include/mlir/Dialect/AMDGPU/AMDGPUAttributes.cpp.inc",
+        ),
+        (
+            [
                 "-gen-dialect-decls",
                 "-dialect=amdgpu",
             ],
@@ -1143,6 +1149,14 @@ gentbl_cc_library(
                 "-dialect=amdgpu",
             ],
             "include/mlir/Dialect/AMDGPU/AMDGPUDialect.cpp.inc",
+        ),
+        (
+            ["-gen-enum-decls"],
+            "include/mlir/Dialect/AMDGPU/AMDGPUEnums.h.inc",
+        ),
+        (
+            ["-gen-enum-defs"],
+            "include/mlir/Dialect/AMDGPU/AMDGPUEnums.cpp.inc",
         ),
         (
             ["-gen-op-decls"],
@@ -1440,7 +1454,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/ArmNeon2dToIntr/*.cpp",
         "lib/Conversion/ArmNeon2dToIntr/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/ArmNeon2dToIntr/*.h",
     ]),
@@ -2097,6 +2111,7 @@ cc_library(
         ":SparseTensorDialect",
         ":SparseTensorTransforms",
         ":TensorTransforms",
+        ":Transforms",
         ":VectorToLLVM",
         ":VectorTransforms",
     ],
@@ -2189,7 +2204,6 @@ cc_library(
     srcs = [
         "lib/Dialect/NVGPU/Transforms/MmaSyncTF32Transform.cpp",
         "lib/Dialect/NVGPU/Transforms/OptimizeSharedMemory.cpp",
-        "lib/Dialect/NVGPU/Transforms/PassDetail.h",
     ],
     hdrs = [
         "include/mlir/Dialect/NVGPU/Passes.h",
@@ -2585,7 +2599,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/AsyncToLLVM/*.cpp",
         "lib/Conversion/AsyncToLLVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob(["include/mlir/Conversion/AsyncToLLVM/*.h"]),
     includes = ["include"],
     deps = [
@@ -2610,7 +2624,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/AffineToStandard/*.cpp",
         "lib/Conversion/AffineToStandard/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob(["include/mlir/Conversion/AffineToStandard/*.h"]),
     includes = ["include"],
     deps = [
@@ -2664,6 +2678,7 @@ cc_library(
     ),
     includes = ["include"],
     deps = [
+        ":AffineDialect",
         ":ArithmeticDialect",
         ":ArithmeticUtils",
         ":BufferizationDialect",
@@ -2890,7 +2905,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/ShapeToStandard/*.cpp",
         "lib/Conversion/ShapeToStandard/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = ["include/mlir/Conversion/ShapeToStandard/ShapeToStandard.h"],
     includes = ["include"],
     deps = [
@@ -3251,8 +3266,10 @@ cc_library(
     includes = ["include"],
     deps = [
         ":AsmParser",
+        ":BytecodeWriter",
         ":IR",
         ":MlirLspServerSupportLib",
+        ":Parser",
         ":Support",
         "//llvm:Support",
     ],
@@ -3744,7 +3761,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/GPUToNVVM/*.cpp",
         "lib/Conversion/GPUToNVVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/GPUToNVVM/*.h",
     ]),
@@ -3779,7 +3796,8 @@ cc_library(
     srcs = glob([
         "lib/Conversion/AMDGPUToROCDL/*.cpp",
         "lib/Conversion/AMDGPUToROCDL/*.h",
-    ]) + [":ConversionPassDetail"],
+        "include/mlir/Conversion/GPUToROCDL/Runtimes.h",
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/AMDGPUToROCDL/*.h",
     ]),
@@ -3789,6 +3807,7 @@ cc_library(
         ":ConversionPassIncGen",
         ":IR",
         ":LLVMCommonConversion",
+        ":LLVMDialect",
         ":Pass",
         ":ROCDLDialect",
         ":Support",
@@ -3802,7 +3821,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/NVGPUToNVVM/*.cpp",
         "lib/Conversion/NVGPUToNVVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/NVGPUToNVVM/*.h",
     ]),
@@ -3825,7 +3844,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/VectorToSPIRV/*.cpp",
         "lib/Conversion/VectorToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/VectorToSPIRV/*.h",
     ]),
@@ -3862,8 +3881,8 @@ gentbl_cc_library(
 cc_library(
     name = "GPUToROCDLTransforms",
     srcs = [
+        "include/mlir/Conversion/GPUToROCDL/Runtimes.h",
         "lib/Conversion/GPUToROCDL/LowerGpuOpsToROCDLOps.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = ["include/mlir/Conversion/GPUToROCDL/GPUToROCDLPass.h"],
     includes = ["include"],
@@ -3897,7 +3916,6 @@ cc_library(
     srcs = [
         "lib/Conversion/GPUToVulkan/ConvertGPULaunchFuncToVulkanLaunchFunc.cpp",
         "lib/Conversion/GPUToVulkan/ConvertLaunchFuncToVulkanCalls.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = ["include/mlir/Conversion/GPUToVulkan/ConvertGPUToVulkanPass.h"],
     includes = ["include"],
@@ -3919,7 +3937,6 @@ cc_library(
     name = "GPUToGPURuntimeTransforms",
     srcs = [
         "lib/Conversion/GPUCommon/GPUToLLVMConversion.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = ["include/mlir/Conversion/GPUCommon/GPUCommonPass.h"],
     includes = ["include"],
@@ -3949,7 +3966,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/GPUToSPIRV/*.cpp",
         "lib/Conversion/GPUToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/GPUToSPIRV/*.h",
     ]),
@@ -3981,7 +3998,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/PDLToPDLInterp/*.cpp",
         "lib/Conversion/PDLToPDLInterp/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = ["include/mlir/Conversion/PDLToPDLInterp/PDLToPDLInterp.h"],
     includes = ["include"],
     deps = [
@@ -4000,7 +4017,7 @@ cc_library(
     name = "SPIRVToLLVM",
     srcs = glob([
         "lib/Conversion/SPIRVToLLVM/*.cpp",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/SPIRVToLLVM/*.h",
     ]),
@@ -4688,7 +4705,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/MathToSPIRV/*.cpp",
         "lib/Conversion/MathToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/MathToSPIRV/*.h",
     ]),
@@ -4715,7 +4732,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/FuncToSPIRV/*.cpp",
         "lib/Conversion/FuncToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/FuncToSPIRV/*.h",
     ]),
@@ -4747,7 +4764,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/TensorToLinalg/*.cpp",
         "lib/Conversion/TensorToLinalg/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/TensorToLinalg/*.h",
     ]),
@@ -4776,7 +4793,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/TensorToSPIRV/*.cpp",
         "lib/Conversion/TensorToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/TensorToSPIRV/*.h",
     ]),
@@ -5045,12 +5062,14 @@ cc_library(
     hdrs = [
         "include/mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h",
         "include/mlir/Dialect/Tensor/Transforms/Passes.h",
+        "include/mlir/Dialect/Tensor/Transforms/TransformUtils.h",
         "include/mlir/Dialect/Tensor/Transforms/Transforms.h",
     ],
     includes = ["include"],
     deps = [
         ":AffineDialect",
         ":ArithmeticDialect",
+        ":ArithmeticUtils",
         ":BufferizationDialect",
         ":BufferizationTransforms",
         ":DialectUtils",
@@ -5371,7 +5390,7 @@ cc_library(
 
 cc_library(
     name = "SCFToGPU",
-    srcs = glob(["lib/Conversion/SCFToGPU/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/SCFToGPU/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/SCFToGPU/*.h"]),
     includes = ["include"],
     deps = [
@@ -5399,7 +5418,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/SCFToSPIRV/*.cpp",
         "lib/Conversion/SCFToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/SCFToSPIRV/*.h",
     ]),
@@ -5427,7 +5446,6 @@ cc_library(
     name = "SCFToOpenMP",
     srcs = [
         "lib/Conversion/SCFToOpenMP/SCFToOpenMP.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = ["include/mlir/Conversion/SCFToOpenMP/SCFToOpenMP.h"],
     includes = ["include"],
@@ -5452,7 +5470,6 @@ cc_library(
     name = "SCFToControlFlow",
     srcs = [
         "lib/Conversion/SCFToControlFlow/SCFToControlFlow.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = ["include/mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"],
     includes = ["include"],
@@ -5489,7 +5506,7 @@ cc_library(
 
 cc_library(
     name = "ReconcileUnrealizedCasts",
-    srcs = glob(["lib/Conversion/ReconcileUnrealizedCasts/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/ReconcileUnrealizedCasts/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/ReconcileUnrealizedCasts/*.h"]),
     includes = ["include"],
     deps = [
@@ -5504,7 +5521,6 @@ cc_library(
     name = "FuncToLLVM",
     srcs = [
         "lib/Conversion/FuncToLLVM/FuncToLLVM.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = [
         "include/mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h",
@@ -5539,7 +5555,6 @@ cc_library(
     name = "ControlFlowToLLVM",
     srcs = [
         "lib/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = [
         "include/mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h",
@@ -5569,7 +5584,7 @@ cc_library(
 
 cc_library(
     name = "ControlFlowToSPIRV",
-    srcs = glob(["lib/Conversion/ControlFlowToSPIRV/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/ControlFlowToSPIRV/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/ControlFlowToSPIRV/*.h"]),
     includes = ["include"],
     deps = [
@@ -5589,7 +5604,7 @@ cc_library(
 
 cc_library(
     name = "MemRefToLLVM",
-    srcs = glob(["lib/Conversion/MemRefToLLVM/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/MemRefToLLVM/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/MemRefToLLVM/*.h"]),
     includes = ["include"],
     deps = [
@@ -5614,7 +5629,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/MemRefToSPIRV/*.cpp",
         "lib/Conversion/MemRefToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/MemRefToSPIRV/*.h",
     ]),
@@ -5638,7 +5653,7 @@ cc_library(
 
 cc_library(
     name = "ArithmeticToLLVM",
-    srcs = glob(["lib/Conversion/ArithmeticToLLVM/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/ArithmeticToLLVM/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/ArithmeticToLLVM/*.h"]),
     includes = ["include"],
     deps = [
@@ -5656,7 +5671,7 @@ cc_library(
 
 cc_library(
     name = "ArithmeticToSPIRV",
-    srcs = glob(["lib/Conversion/ArithmeticToSPIRV/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/ArithmeticToSPIRV/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/ArithmeticToSPIRV/*.h"]),
     includes = ["include"],
     deps = [
@@ -5676,7 +5691,7 @@ cc_library(
 
 cc_library(
     name = "MathToLLVM",
-    srcs = glob(["lib/Conversion/MathToLLVM/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/MathToLLVM/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/MathToLLVM/*.h"]),
     includes = ["include"],
     deps = [
@@ -5695,7 +5710,7 @@ cc_library(
 
 cc_library(
     name = "MathToFuncs",
-    srcs = glob(["lib/Conversion/MathToFuncs/*.cpp"]) + [":ConversionPassDetail"],
+    srcs = glob(["lib/Conversion/MathToFuncs/*.cpp"]),
     hdrs = glob(["include/mlir/Conversion/MathToFuncs/*.h"]),
     includes = ["include"],
     deps = [
@@ -6381,8 +6396,10 @@ cc_binary(
     includes = ["include"],
     deps = [
         ":AllPassesAndDialects",
+        ":BytecodeWriter",
         ":IR",
         ":MlirLspServerLib",
+        ":Parser",
     ],
 )
 
@@ -6423,6 +6440,7 @@ cc_binary(
         "//mlir/test:TestSPIRV",
         "//mlir/test:TestShapeDialect",
         "//mlir/test:TestTensor",
+        "//mlir/test:TestTestDynDialect",
         "//mlir/test:TestTilingInterface",
         "//mlir/test:TestTosaDialect",
         "//mlir/test:TestTransformDialect",
@@ -6456,7 +6474,36 @@ cc_library(
 )
 
 cc_library(
-    name = "mlir_c_runner_utils",
+    name = "mlir_async_runtime_api",
+    hdrs = ["include/mlir/ExecutionEngine/AsyncRuntime.h"],
+    includes = ["include"],
+)
+
+cc_library(
+    name = "_mlir_async_runtime",
+    srcs = ["lib/ExecutionEngine/AsyncRuntime.cpp"],
+    copts = ["-Dmlir_async_runtime_EXPORTS"],
+    deps = [
+        ":mlir_async_runtime_api",
+        "//llvm:Support",
+    ],
+)
+
+# Indirection to avoid 'libmlir_async_runtime.so' filename clash.
+alias(
+    name = "mlir_async_runtime",
+    actual = "_mlir_async_runtime",
+)
+
+cc_binary(
+    name = "libmlir_async_runtime.so",
+    linkshared = True,
+    linkstatic = False,
+    deps = [":mlir_async_runtime"],
+)
+
+cc_library(
+    name = "_mlir_c_runner_utils",
     srcs = [
         "lib/ExecutionEngine/CRunnerUtils.cpp",
         "lib/ExecutionEngine/Float16bits.cpp",
@@ -6471,28 +6518,38 @@ cc_library(
     includes = ["include"],
 )
 
-cc_library(
-    name = "mlir_async_runtime_api",
-    hdrs = ["include/mlir/ExecutionEngine/AsyncRuntime.h"],
-    includes = ["include"],
+# Indirection to avoid 'libmlir_c_runner_utils.so' filename clash.
+alias(
+    name = "mlir_c_runner_utils",
+    actual = "_mlir_c_runner_utils",
+)
+
+cc_binary(
+    name = "libmlir_c_runner_utils.so",
+    linkshared = True,
+    linkstatic = False,
+    deps = [":mlir_c_runner_utils"],
 )
 
 cc_library(
-    name = "mlir_async_runtime",
-    srcs = ["lib/ExecutionEngine/AsyncRuntime.cpp"],
-    copts = ["-Dmlir_async_runtime_EXPORTS"],
-    deps = [
-        ":mlir_async_runtime_api",
-        "//llvm:Support",
-    ],
-)
-
-cc_library(
-    name = "mlir_runner_utils",
+    name = "_mlir_runner_utils",
     srcs = ["lib/ExecutionEngine/RunnerUtils.cpp"],
     hdrs = ["include/mlir/ExecutionEngine/RunnerUtils.h"],
     includes = ["include"],
     deps = [":mlir_c_runner_utils"],
+)
+
+# Indirection to avoid 'libmlir_runner_utils.so' filename clash.
+alias(
+    name = "mlir_runner_utils",
+    actual = "_mlir_runner_utils",
+)
+
+cc_binary(
+    name = "libmlir_runner_utils.so",
+    linkshared = True,
+    linkstatic = False,
+    deps = [":mlir_runner_utils"],
 )
 
 cc_binary(
@@ -6531,7 +6588,7 @@ cc_headers_only(
 )
 
 cc_library(
-    name = "mlir_cuda_runtime",
+    name = "_mlir_cuda_runtime",
     srcs = ["lib/ExecutionEngine/CudaRuntimeWrappers.cpp"],
     # Prevent needing EnableABIBreakingChecks symbol from LLVMSupport.
     copts = ["-DLLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING=1"],
@@ -6545,6 +6602,27 @@ cc_library(
         "@cuda//:cuda_headers",
         "@cuda//:libcuda",
     ],
+)
+
+# Indirection to avoid 'libmlir_cuda_runtime.so' filename clash.
+alias(
+    name = "mlir_cuda_runtime",
+    actual = "_mlir_cuda_runtime",
+    tags = [
+        "manual",  # External dependency
+        "nobuildkite",  # TODO(gcmn): Add support for this target
+    ],
+)
+
+cc_binary(
+    name = "libmlir_cuda_runtime.so",
+    linkshared = True,
+    linkstatic = False,
+    tags = [
+        "manual",  # External dependency
+        "nobuildkite",  # TODO(gcmn): Add support for this target
+    ],
+    deps = [":mlir_cuda_runtime"],
 )
 
 cc_library(
@@ -6568,7 +6646,7 @@ cc_library(
 )
 
 cc_binary(
-    name = "tools/libvulkan-runtime-wrappers.so",
+    name = "libvulkan-runtime-wrappers.so",
     srcs = ["tools/mlir-vulkan-runner/vulkan-runtime-wrappers.cpp"],
     linkshared = True,
     tags = [
@@ -6962,7 +7040,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/OpenACCToSCF/*.cpp",
         "lib/Conversion/OpenACCToSCF/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/OpenACCToSCF/*.h",
     ]),
@@ -6984,7 +7062,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/OpenACCToLLVM/*.cpp",
         "lib/Conversion/OpenACCToLLVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/OpenACCToLLVM/*.h",
     ]),
@@ -7008,7 +7086,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/OpenMPToLLVM/*.cpp",
         "lib/Conversion/OpenMPToLLVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/OpenMPToLLVM/*.h",
     ]),
@@ -7339,7 +7417,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/LinalgToLLVM/*.cpp",
         "lib/Conversion/LinalgToLLVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/LinalgToLLVM/*.h",
     ]),
@@ -7372,7 +7450,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/LinalgToStandard/*.cpp",
         "lib/Conversion/LinalgToStandard/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/LinalgToStandard/*.h",
     ]),
@@ -7400,7 +7478,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/LinalgToSPIRV/*.cpp",
         "lib/Conversion/LinalgToSPIRV/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/LinalgToSPIRV/*.h",
     ]),
@@ -7470,6 +7548,7 @@ cc_library(
         ":ArithmeticDialect",
         ":AsmParser",
         ":ControlFlowDialect",
+        ":GPUDialect",
         ":IR",
         ":LinalgDialect",
         ":LinalgTransformOpsIncGen",
@@ -7684,6 +7763,14 @@ gentbl_cc_library(
             "include/mlir/Dialect/Vector/IR/VectorOpsEnums.cpp.inc",
         ),
         (
+            ["-gen-attrdef-decls"],
+            "include/mlir/Dialect/Vector/IR/VectorOpsAttrDefs.h.inc",
+        ),
+        (
+            ["-gen-attrdef-defs"],
+            "include/mlir/Dialect/Vector/IR/VectorOpsAttrDefs.cpp.inc",
+        ),
+        (
             ["-gen-op-doc"],
             "g3doc/Dialects/Vector/VectorOps.md",
         ),
@@ -7698,7 +7785,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/VectorToLLVM/*.cpp",
         "lib/Conversion/VectorToLLVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/VectorToLLVM/*.h",
     ]),
@@ -7736,7 +7823,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/VectorToGPU/*.cpp",
         "lib/Conversion/VectorToGPU/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/VectorToGPU/*.h",
     ]),
@@ -7771,7 +7858,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/VectorToSCF/*.cpp",
         "lib/Conversion/VectorToSCF/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/VectorToSCF/*.h",
     ]),
@@ -7920,7 +8007,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/TosaToArith/*.cpp",
         "lib/Conversion/TosaToArith/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/TosaToArith/*.h",
     ]),
@@ -7944,7 +8031,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/TosaToLinalg/*.cpp",
         "lib/Conversion/TosaToLinalg/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/TosaToLinalg/*.h",
     ]),
@@ -7974,7 +8061,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/TosaToSCF/*.cpp",
         "lib/Conversion/TosaToSCF/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/TosaToSCF/*.h",
     ]),
@@ -7984,6 +8071,7 @@ cc_library(
     ],
     deps = [
         ":ConversionPassIncGen",
+        ":FuncDialect",
         ":IR",
         ":Pass",
         ":SCFDialect",
@@ -7998,7 +8086,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/TosaToTensor/*.cpp",
         "lib/Conversion/TosaToTensor/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/TosaToTensor/*.h",
     ]),
@@ -8276,7 +8364,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/ComplexToLLVM/*.cpp",
         "lib/Conversion/ComplexToLLVM/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/ComplexToLLVM/*.h",
     ]),
@@ -8302,7 +8390,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/ComplexToLibm/*.cpp",
         "lib/Conversion/ComplexToLibm/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/ComplexToLibm/*.h",
     ]),
@@ -8326,7 +8414,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/ComplexToStandard/*.cpp",
         "lib/Conversion/ComplexToStandard/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/ComplexToStandard/*.h",
     ]),
@@ -8489,10 +8577,9 @@ cc_library(
         "lib/Dialect/Arithmetic/Transforms/*.cpp",
         "lib/Dialect/Arithmetic/Transforms/*.h",
     ]),
-    hdrs = [
-        "include/mlir/Dialect/Arithmetic/Transforms/BufferizableOpInterfaceImpl.h",
-        "include/mlir/Dialect/Arithmetic/Transforms/Passes.h",
-    ],
+    hdrs = glob([
+        "include/mlir/Dialect/Arithmetic/Transforms/*.h",
+    ]),
     includes = ["include"],
     deps = [
         ":Analysis",
@@ -8502,12 +8589,14 @@ cc_library(
         ":BufferizationDialect",
         ":BufferizationTransforms",
         ":FuncDialect",
+        ":FuncTransforms",
         ":IR",
         ":InferIntRangeInterface",
         ":MemRefDialect",
         ":Pass",
         ":TransformUtils",
         ":Transforms",
+        ":VectorDialect",
         "//llvm:Support",
     ],
 )
@@ -8636,7 +8725,7 @@ cc_library(
     srcs = glob([
         "lib/Conversion/MathToLibm/*.cpp",
         "lib/Conversion/MathToLibm/*.h",
-    ]) + [":ConversionPassDetail"],
+    ]),
     hdrs = glob([
         "include/mlir/Conversion/MathToLibm/*.h",
     ]),
@@ -8780,6 +8869,7 @@ cc_library(
         ":AffineUtils",
         ":ArithmeticDialect",
         ":ArithmeticTransforms",
+        ":ArithmeticUtils",
         ":DialectUtils",
         ":FuncDialect",
         ":IR",
@@ -9078,6 +9168,7 @@ cc_library(
         ":BufferizableOpInterfaceIncGen",
         ":BufferizationBaseIncGen",
         ":BufferizationOpsIncGen",
+        ":ControlFlowInterfaces",
         ":CopyOpInterface",
         ":FuncDialect",
         ":IR",
@@ -9131,6 +9222,7 @@ cc_library(
         ":Pass",
         ":TensorDialect",
         ":Transforms",
+        ":ViewLikeInterface",
         "//llvm:Support",
     ],
 )
@@ -9139,7 +9231,6 @@ cc_library(
     name = "BufferizationToMemRef",
     srcs = [
         "lib/Conversion/BufferizationToMemRef/BufferizationToMemRef.cpp",
-        ":ConversionPassDetail",
     ],
     hdrs = [
         "include/mlir/Conversion/BufferizationToMemRef/BufferizationToMemRef.h",

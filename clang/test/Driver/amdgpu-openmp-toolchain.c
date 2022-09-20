@@ -26,7 +26,7 @@
 // CHECK-PHASES: 8: assembler, {7}, object, (device-openmp)
 // CHECK-PHASES: 9: offload, "device-openmp (amdgcn-amd-amdhsa)" {8}, object
 // CHECK-PHASES: 10: clang-offload-packager, {9}, image
-// CHECK-PHASES: 11: offload, "host-openmp (x86_64-unknown-linux-gnu)" {2}, " (x86_64-unknown-linux-gnu)" {10}, ir
+// CHECK-PHASES: 11: offload, "host-openmp (x86_64-unknown-linux-gnu)" {2}, "device-openmp (x86_64-unknown-linux-gnu)" {10}, ir
 // CHECK-PHASES: 12: backend, {11}, assembler, (host-openmp)
 // CHECK-PHASES: 13: assembler, {12}, object, (host-openmp)
 // CHECK-PHASES: 14: clang-linker-wrapper, {13}, image, (host-openmp)
@@ -49,5 +49,12 @@
 // RUN:   %clang -### --target=x86_64-unknown-linux-gnu -emit-llvm -S -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx803 -nogpulib %s 2>&1 | FileCheck %s --check-prefix=CHECK-EMIT-LLVM-IR
 // CHECK-EMIT-LLVM-IR: "-cc1" "-triple" "amdgcn-amd-amdhsa"{{.*}}"-emit-llvm"
 
-// RUN: %clang -### -target x86_64-pc-linux-gnu -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx803 -lm --rocm-device-lib-path=%S/Inputs/rocm/amdgcn/bitcode -fopenmp-new-driver %s 2>&1 | FileCheck %s --check-prefix=CHECK-LIB-DEVICE-NEW
-// CHECK-LIB-DEVICE-NEW: {{.*}}clang-linker-wrapper{{.*}}--bitcode-library=openmp-amdgcn-amd-amdhsa-gfx803={{.*}}ocml.bc"{{.*}}ockl.bc"{{.*}}oclc_daz_opt_on.bc"{{.*}}oclc_unsafe_math_off.bc"{{.*}}oclc_finite_only_off.bc"{{.*}}oclc_correctly_rounded_sqrt_on.bc"{{.*}}oclc_wavefrontsize64_on.bc"{{.*}}oclc_isa_version_803.bc"
+// RUN: %clang -### -target x86_64-pc-linux-gnu -fopenmp --offload-arch=gfx803 \
+// RUN:   --rocm-device-lib-path=%S/Inputs/rocm/amdgcn/bitcode -fopenmp-new-driver %s  2>&1 | \
+// RUN: FileCheck %s --check-prefix=CHECK-LIB-DEVICE
+// CHECK-LIB-DEVICE: "-cc1" {{.*}}ocml.bc"{{.*}}ockl.bc"{{.*}}oclc_daz_opt_on.bc"{{.*}}oclc_unsafe_math_off.bc"{{.*}}oclc_finite_only_off.bc"{{.*}}oclc_correctly_rounded_sqrt_on.bc"{{.*}}oclc_wavefrontsize64_on.bc"{{.*}}oclc_isa_version_803.bc"
+
+// RUN: %clang -### -target x86_64-pc-linux-gnu -fopenmp --offload-arch=gfx803 -nogpulib \
+// RUN:   --rocm-device-lib-path=%S/Inputs/rocm/amdgcn/bitcode -fopenmp-new-driver %s  2>&1 | \
+// RUN: FileCheck %s --check-prefix=CHECK-LIB-DEVICE-NOGPULIB
+// CHECK-LIB-DEVICE-NOGPULIB-NOT: "-cc1" {{.*}}ocml.bc"{{.*}}ockl.bc"{{.*}}oclc_daz_opt_on.bc"{{.*}}oclc_unsafe_math_off.bc"{{.*}}oclc_finite_only_off.bc"{{.*}}oclc_correctly_rounded_sqrt_on.bc"{{.*}}oclc_wavefrontsize64_on.bc"{{.*}}oclc_isa_version_803.bc"

@@ -70,7 +70,7 @@ static SmallVector<T> applyPermutationToVector(const SmallVector<T> &vector,
 static SmallVector<unsigned>
 invertPermutationVector(ArrayRef<unsigned> interchange) {
   SmallVector<unsigned> inversion(interchange.size());
-  for (auto pos : llvm::enumerate(interchange)) {
+  for (const auto &pos : llvm::enumerate(interchange)) {
     inversion[pos.value()] = pos.index();
   }
   return inversion;
@@ -257,8 +257,8 @@ scf::TileUsingSCFForOp::returningMatchAndRewrite(
     if (!tilingResult.loops.empty())
       rewriter.setInsertionPoint(
           tilingResult.loops.back().getBody()->getTerminator());
-    SmallVector<Operation *> tiledImplementation = op.getTiledImplementation(
-        rewriter, op.getDestinationOperands(rewriter), offsets, sizes, true);
+    SmallVector<Operation *> tiledImplementation =
+        op.getTiledImplementation(rewriter, offsets, sizes);
     if (tiledImplementation.size() != 1) {
       return rewriter.notifyMatchFailure(
           op, "expected tiled implementation to return a single op");

@@ -20,9 +20,6 @@
 // would need to add significant complexity to make that work.
 // UNSUPPORTED: no-localization, no-threads, no-wide-characters, no-filesystem, libcpp-has-no-incomplete-format
 
-// TODO(mordante) FIX C++ 03, the issue is the experimental library doesn't work with C++03 but isn't guarded.
-// UNSUPPORTED: c++03
-
 // When built with modules, this test doesn't work because --trace-includes doesn't
 // report the stack of includes correctly.
 // UNSUPPORTED: modules-build
@@ -36,7 +33,7 @@
 // This test is not supported when we remove the transitive includes provided for backwards
 // compatibility. When we bulk-remove them, we'll adjust the includes that are expected by
 // this test instead.
-// XFAIL: transitive-includes-disabled
+// UNSUPPORTED: transitive-includes-disabled
 
 // Prevent <ext/hash_map> from generating deprecated warnings for this test.
 #if defined(__DEPRECATED)

@@ -770,18 +770,13 @@ typedef regex_token_iterator<wstring::const_iterator> wsregex_token_iterator;
 #include <__iterator/wrap_iter.h>
 #include <__locale>
 #include <__utility/move.h>
+#include <__utility/pair.h>
 #include <__utility/swap.h>
 #include <deque>
-#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include <version>
-
-#ifndef _LIBCPP_REMOVE_TRANSITIVE_INCLUDES
-#  include <iterator>
-#  include <utility>
-#endif
 
 // standard-mandated includes
 
@@ -1355,7 +1350,7 @@ inline _LIBCPP_INLINE_VISIBILITY
 unsigned char __to_lower(unsigned char __c)
 {
 #if defined(__MVS__) && !defined(__NATIVE_ASCII_F)
-    return c & 0xBF;
+    return __c & 0xBF;
 #else
     return __c | 0x20;
 #endif
@@ -6843,5 +6838,10 @@ regex_replace(const _CharT* __s,
 _LIBCPP_END_NAMESPACE_STD
 
 _LIBCPP_POP_MACROS
+
+#if !defined(_LIBCPP_REMOVE_TRANSITIVE_INCLUDES) && _LIBCPP_STD_VER <= 20
+#  include <iterator>
+#  include <utility>
+#endif
 
 #endif // _LIBCPP_REGEX

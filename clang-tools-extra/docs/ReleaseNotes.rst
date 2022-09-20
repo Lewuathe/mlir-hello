@@ -129,17 +129,25 @@ Changes in existing checks
   <clang-tidy/checks/cppcoreguidelines/pro-type-member-init>` when warnings
   would be emitted for uninitialized members of an anonymous union despite
   there being an initializer for one of the other members.
-  
-- Improved `modernize-use-emplace <clang-tidy/checks/modernize/use-emplace.html>`_ check.
+
+- Improved :doc:`modernize-use-emplace <clang-tidy/checks/modernize/use-emplace>`
+  check.
 
   The check now supports detecting inefficient invocations of ``push`` and
   ``push_front`` on STL-style containers and replacing them with ``emplace``
   or ``emplace_front``.
 
-- Improved `modernize-use-equals-default <clang-tidy/checks/modernize/use-equals-default.html>`_ check.
+  The check now supports detecting alias cases of ``push_back`` ``push`` and
+  ``push_front`` on STL-style containers and replacing them with ``emplace_back``,
+  ``emplace`` or ``emplace_front``.
 
-  The check now skips unions since in this case a default constructor with empty body
-  is not equivalent to the explicitly defaulted one.
+- Improved :doc:`modernize-use-equals-default <clang-tidy/checks/modernize/use-equals-default>`
+  check.
+
+  The check now skips unions/union-like classes since in this case a default constructor
+  with empty body is not equivalent to the explicitly defaulted one. The check also skips
+  copy assignment operators with nonstandard return types. The check is restricted to
+  c++11-or-later.
 
 Removed checks
 ^^^^^^^^^^^^^^

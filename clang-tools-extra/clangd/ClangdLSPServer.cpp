@@ -466,6 +466,35 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
   if (Server)
     return Reply(llvm::make_error<LSPError>("server already initialized",
                                             ErrorCode::InvalidRequest));
+
+  Opts.CodeComplete.EnableSnippets = Params.capabilities.CompletionSnippets;
+  Opts.CodeComplete.IncludeFixIts = Params.capabilities.CompletionFixes;
+  if (!Opts.CodeComplete.BundleOverloads)
+    Opts.CodeComplete.BundleOverloads = Params.capabilities.HasSignatureHelp;
+  Opts.CodeComplete.DocumentationFormat =
+      Params.capabilities.CompletionDocumentationFormat;
+  Opts.SignatureHelpDocumentationFormat =
+      Params.capabilities.SignatureHelpDocumentationFormat;
+  DiagOpts.EmbedFixesInDiagnostics = Params.capabilities.DiagnosticFixes;
+  DiagOpts.SendDiagnosticCategory = Params.capabilities.DiagnosticCategory;
+  DiagOpts.EmitRelatedLocations =
+      Params.capabilities.DiagnosticRelatedInformation;
+  if (Params.capabilities.WorkspaceSymbolKinds)
+    SupportedSymbolKinds |= *Params.capabilities.WorkspaceSymbolKinds;
+  if (Params.capabilities.CompletionItemKinds)
+    SupportedCompletionItemKinds |= *Params.capabilities.CompletionItemKinds;
+  SupportsCodeAction = Params.capabilities.CodeActionStructure;
+  SupportsHierarchicalDocumentSymbol =
+      Params.capabilities.HierarchicalDocumentSymbol;
+  SupportFileStatus = Params.initializationOptions.FileStatus;
+  HoverContentFormat = Params.capabilities.HoverContentFormat;
+  Opts.LineFoldingOnly = Params.capabilities.LineFoldingOnly;
+  SupportsOffsetsInSignatureHelp = Params.capabilities.OffsetsInSignatureHelp;
+  if (Params.capabilities.WorkDoneProgress)
+    BackgroundIndexProgressState = BackgroundIndexProgress::Empty;
+  BackgroundIndexSkipCreate = Params.capabilities.ImplicitProgressCreation;
+  Opts.ImplicitCancellation = !Params.capabilities.CancelsStaleRequests;
+
   if (Opts.UseDirBasedCDB) {
     DirectoryBasedGlobalCompilationDatabase::Options CDBOpts(TFS);
     if (const auto &Dir = Params.initializationOptions.compilationDatabasePath)
@@ -492,33 +521,6 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
     Server.emplace(*CDB, TFS, Opts,
                    static_cast<ClangdServer::Callbacks *>(this));
   }
-
-  Opts.CodeComplete.EnableSnippets = Params.capabilities.CompletionSnippets;
-  Opts.CodeComplete.IncludeFixIts = Params.capabilities.CompletionFixes;
-  if (!Opts.CodeComplete.BundleOverloads)
-    Opts.CodeComplete.BundleOverloads = Params.capabilities.HasSignatureHelp;
-  Opts.CodeComplete.DocumentationFormat =
-      Params.capabilities.CompletionDocumentationFormat;
-  Opts.SignatureHelpDocumentationFormat =
-      Params.capabilities.SignatureHelpDocumentationFormat;
-  DiagOpts.EmbedFixesInDiagnostics = Params.capabilities.DiagnosticFixes;
-  DiagOpts.SendDiagnosticCategory = Params.capabilities.DiagnosticCategory;
-  DiagOpts.EmitRelatedLocations =
-      Params.capabilities.DiagnosticRelatedInformation;
-  if (Params.capabilities.WorkspaceSymbolKinds)
-    SupportedSymbolKinds |= *Params.capabilities.WorkspaceSymbolKinds;
-  if (Params.capabilities.CompletionItemKinds)
-    SupportedCompletionItemKinds |= *Params.capabilities.CompletionItemKinds;
-  SupportsCodeAction = Params.capabilities.CodeActionStructure;
-  SupportsHierarchicalDocumentSymbol =
-      Params.capabilities.HierarchicalDocumentSymbol;
-  SupportFileStatus = Params.initializationOptions.FileStatus;
-  HoverContentFormat = Params.capabilities.HoverContentFormat;
-  SupportsOffsetsInSignatureHelp = Params.capabilities.OffsetsInSignatureHelp;
-  if (Params.capabilities.WorkDoneProgress)
-    BackgroundIndexProgressState = BackgroundIndexProgress::Empty;
-  BackgroundIndexSkipCreate = Params.capabilities.ImplicitProgressCreation;
-  Opts.ImplicitCancellation = !Params.capabilities.CancelsStaleRequests;
 
   llvm::json::Object ServerCaps{
       {"textDocumentSync",
@@ -583,6 +585,7 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
       {"callHierarchyProvider", true},
       {"clangdInlayHintsProvider", true},
       {"inlayHintProvider", true},
+      {"foldingRangeProvider", true},
   };
 
   {
@@ -612,8 +615,6 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
                                  CodeAction::INFO_KIND}}}
           : llvm::json::Value(true);
 
-  if (Opts.FoldingRanges)
-    ServerCaps["foldingRangeProvider"] = true;
 
   std::vector<llvm::StringRef> Commands;
   for (llvm::StringRef Command : Handlers.CommandHandlers.keys())
@@ -1617,8 +1618,7 @@ void ClangdLSPServer::bindMethods(LSPBinder &Bind,
   Bind.method("clangd/inlayHints", this, &ClangdLSPServer::onClangdInlayHints);
   Bind.method("textDocument/inlayHint", this, &ClangdLSPServer::onInlayHint);
   Bind.method("$/memoryUsage", this, &ClangdLSPServer::onMemoryUsage);
-  if (Opts.FoldingRanges)
-    Bind.method("textDocument/foldingRange", this, &ClangdLSPServer::onFoldingRange);
+  Bind.method("textDocument/foldingRange", this, &ClangdLSPServer::onFoldingRange);
   Bind.command(ApplyFixCommand, this, &ClangdLSPServer::onCommandApplyEdit);
   Bind.command(ApplyTweakCommand, this, &ClangdLSPServer::onCommandApplyTweak);
 

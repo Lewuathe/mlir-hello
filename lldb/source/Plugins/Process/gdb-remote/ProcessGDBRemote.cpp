@@ -60,7 +60,6 @@
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/LLDBLog.h"
-#include "lldb/Utility/Reproducer.h"
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/Timer.h"
@@ -266,12 +265,6 @@ ProcessGDBRemote::ProcessGDBRemote(lldb::TargetSP target_sp,
   m_async_broadcaster.SetEventName(eBroadcastBitAsyncThreadDidExit,
                                    "async thread did exit");
 
-  if (repro::Generator *g = repro::Reproducer::Instance().GetGenerator()) {
-    repro::GDBRemoteProvider &provider =
-        g->GetOrCreate<repro::GDBRemoteProvider>();
-    m_gdb_comm.SetPacketRecorder(provider.GetNewPacketRecorder());
-  }
-
   Log *log = GetLog(GDBRLog::Async);
 
   const uint32_t async_event_mask =
@@ -282,14 +275,6 @@ ProcessGDBRemote::ProcessGDBRemote(lldb::TargetSP target_sp,
     LLDB_LOGF(log,
               "ProcessGDBRemote::%s failed to listen for "
               "m_async_broadcaster events",
-              __FUNCTION__);
-  }
-
-  const uint32_t gdb_event_mask = Communication::eBroadcastBitReadThreadDidExit;
-  if (m_async_listener_sp->StartListeningForEvents(
-          &m_gdb_comm, gdb_event_mask) != gdb_event_mask) {
-    LLDB_LOGF(log,
-              "ProcessGDBRemote::%s failed to listen for m_gdb_comm events",
               __FUNCTION__);
   }
 
@@ -518,16 +503,16 @@ void ProcessGDBRemote::BuildDynamicRegisterInfo(bool force) {
   AddRemoteRegisters(registers, arch_to_use);
 }
 
-Status ProcessGDBRemote::WillLaunch(lldb_private::Module *module) {
+Status ProcessGDBRemote::DoWillLaunch(lldb_private::Module *module) {
   return WillLaunchOrAttach();
 }
 
-Status ProcessGDBRemote::WillAttachToProcessWithID(lldb::pid_t pid) {
+Status ProcessGDBRemote::DoWillAttachToProcessWithID(lldb::pid_t pid) {
   return WillLaunchOrAttach();
 }
 
-Status ProcessGDBRemote::WillAttachToProcessWithName(const char *process_name,
-                                                     bool wait_for_launch) {
+Status ProcessGDBRemote::DoWillAttachToProcessWithName(const char *process_name,
+                                                       bool wait_for_launch) {
   return WillLaunchOrAttach();
 }
 
@@ -583,7 +568,7 @@ Status ProcessGDBRemote::DoConnectRemote(llvm::StringRef remote_url) {
           const bool force_symbol_search = true;
           const bool notify = true;
           DynamicLoader::LoadBinaryWithUUIDAndAddress(
-              this, standalone_uuid, standalone_value,
+              this, llvm::StringRef(), standalone_uuid, standalone_value,
               standalone_value_is_offset, force_symbol_search, notify);
         }
       }
@@ -601,10 +586,22 @@ Status ProcessGDBRemote::DoConnectRemote(llvm::StringRef remote_url) {
         UUID uuid;
         const bool value_is_slide = false;
         for (addr_t addr : bin_addrs) {
-          const bool force_symbol_search = true;
           const bool notify = true;
+          // First see if this is a special platform
+          // binary that may determine the DynamicLoader and
+          // Platform to be used in this Process/Target in the
+          // process of loading it.
+          if (GetTarget()
+                  .GetDebugger()
+                  .GetPlatformList()
+                  .LoadPlatformBinaryAndSetup(this, addr, notify))
+            continue;
+
+          const bool force_symbol_search = true;
+          // Second manually load this binary into the Target.
           DynamicLoader::LoadBinaryWithUUIDAndAddress(
-              this, uuid, addr, value_is_slide, force_symbol_search, notify);
+              this, llvm::StringRef(), uuid, addr, value_is_slide,
+              force_symbol_search, notify);
         }
       }
 
@@ -946,8 +943,8 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
              process_arch.GetTriple().getTriple());
   }
 
-  if (int addresssable_bits = m_gdb_comm.GetAddressingBits()) {
-    lldb::addr_t address_mask = ~((1ULL << addresssable_bits) - 1);
+  if (int addressable_bits = m_gdb_comm.GetAddressingBits()) {
+    lldb::addr_t address_mask = ~((1ULL << addressable_bits) - 1);
     SetCodeAddressMask(address_mask);
     SetDataAddressMask(address_mask);
   }
@@ -1176,7 +1173,7 @@ Status ProcessGDBRemote::DoResume() {
   ListenerSP listener_sp(
       Listener::MakeListener("gdb-remote.resume-packet-sent"));
   if (listener_sp->StartListeningForEvents(
-          &m_gdb_comm, GDBRemoteCommunication::eBroadcastBitRunPacketSent)) {
+          &m_gdb_comm, GDBRemoteClientBase::eBroadcastBitRunPacketSent)) {
     listener_sp->StartListeningForEvents(
         &m_async_broadcaster,
         ProcessGDBRemote::eBroadcastBitAsyncThreadDidExit);
@@ -3564,21 +3561,6 @@ thread_result_t ProcessGDBRemote::AsyncThread() {
                     "ProcessGDBRemote::%s(pid = %" PRIu64
                     ") got eBroadcastBitAsyncThreadShouldExit...",
                     __FUNCTION__, GetID());
-          done = true;
-          break;
-
-        default:
-          LLDB_LOGF(log,
-                    "ProcessGDBRemote::%s(pid = %" PRIu64
-                    ") got unknown event 0x%8.8x",
-                    __FUNCTION__, GetID(), event_type);
-          done = true;
-          break;
-        }
-      } else if (event_sp->BroadcasterIs(&m_gdb_comm)) {
-        switch (event_type) {
-        case Communication::eBroadcastBitReadThreadDidExit:
-          SetExitStatus(-1, "lost connection");
           done = true;
           break;
 

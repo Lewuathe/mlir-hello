@@ -58,7 +58,7 @@ static void sha256(const uint8_t *data, size_t len, uint8_t *output) {
 #else
   ArrayRef<uint8_t> block(data, len);
   std::array<uint8_t, 32> hash = SHA256::hash(block);
-  static_assert(hash.size() == CodeSignatureSection::hashSize, "");
+  static_assert(hash.size() == CodeSignatureSection::hashSize);
   memcpy(output, hash.data(), hash.size());
 #endif
 }
@@ -715,7 +715,7 @@ void StubHelperSection::writeTo(uint8_t *buf) const {
   }
 }
 
-void StubHelperSection::setup() {
+void StubHelperSection::setUp() {
   Symbol *binder = symtab->addUndefined("dyld_stub_binder", /*file=*/nullptr,
                                         /*isWeakRef=*/false);
   if (auto *undefined = dyn_cast<Undefined>(binder))
@@ -752,11 +752,7 @@ ObjCStubsSection::ObjCStubsSection()
 
 void ObjCStubsSection::addEntry(Symbol *sym) {
   assert(sym->getName().startswith(symbolPrefix) && "not an objc stub");
-  // Ensure our lookup string has the length of the actual string + the null
-  // terminator to mirror
-  StringRef methname =
-      StringRef(sym->getName().data() + symbolPrefix.size(),
-                sym->getName().size() - symbolPrefix.size() + 1);
+  StringRef methname = sym->getName().drop_front(symbolPrefix.size());
   offsets.push_back(
       in.objcMethnameSection->getStringOffset(methname).outSecOff);
   Defined *newSym = replaceSymbol<Defined>(
@@ -769,7 +765,7 @@ void ObjCStubsSection::addEntry(Symbol *sym) {
   symbols.push_back(newSym);
 }
 
-void ObjCStubsSection::setup() {
+void ObjCStubsSection::setUp() {
   Symbol *objcMsgSend = symtab->addUndefined("_objc_msgSend", /*file=*/nullptr,
                                              /*isWeakRef=*/false);
   objcMsgSend->used = true;
@@ -933,8 +929,8 @@ static std::vector<MachO::data_in_code_entry> collectDataInCodeEntries() {
     if (entries.empty())
       continue;
 
-    assert(is_sorted(dataInCodeEntries, [](const data_in_code_entry &lhs,
-                                           const data_in_code_entry &rhs) {
+    assert(is_sorted(entries, [](const data_in_code_entry &lhs,
+                                 const data_in_code_entry &rhs) {
       return lhs.offset < rhs.offset;
     }));
     // For each code subsection find 'data in code' entries residing in it.
@@ -963,6 +959,12 @@ static std::vector<MachO::data_in_code_entry> collectDataInCodeEntries() {
       }
     }
   }
+
+  // ld64 emits the table in sorted order too.
+  llvm::sort(dataInCodeEntries,
+             [](const data_in_code_entry &lhs, const data_in_code_entry &rhs) {
+               return lhs.offset < rhs.offset;
+             });
   return dataInCodeEntries;
 }
 
@@ -1381,8 +1383,8 @@ void StringTableSection::writeTo(uint8_t *buf) const {
   }
 }
 
-static_assert((CodeSignatureSection::blobHeadersSize % 8) == 0, "");
-static_assert((CodeSignatureSection::fixedHeadersSize % 8) == 0, "");
+static_assert((CodeSignatureSection::blobHeadersSize % 8) == 0);
+static_assert((CodeSignatureSection::fixedHeadersSize % 8) == 0);
 
 CodeSignatureSection::CodeSignatureSection()
     : LinkEditSection(segment_names::linkEdit, section_names::codeSignature) {
@@ -1566,7 +1568,7 @@ void CStringSection::finalizeContents() {
       isec->pieces[i].outSecOff = offset;
       isec->isFinal = true;
       StringRef string = isec->getStringRef(i);
-      offset += string.size();
+      offset += string.size() + 1; // account for null terminator
     }
   }
   size = offset;
@@ -1639,7 +1641,8 @@ void DeduplicatedCStringSection::finalizeContents() {
       StringOffset &offsetInfo = it->second;
       if (offsetInfo.outSecOff == UINT64_MAX) {
         offsetInfo.outSecOff = alignTo(size, 1ULL << offsetInfo.trailingZeros);
-        size = offsetInfo.outSecOff + s.size();
+        size =
+            offsetInfo.outSecOff + s.size() + 1; // account for null terminator
       }
       isec->pieces[i].outSecOff = offsetInfo.outSecOff;
     }
@@ -1814,6 +1817,67 @@ void ObjCImageInfoSection::writeTo(uint8_t *buf) const {
   uint32_t flags = info.hasCategoryClassProperties ? 0x40 : 0x0;
   flags |= info.swiftVersion << 8;
   write32le(buf + 4, flags);
+}
+
+InitOffsetsSection::InitOffsetsSection()
+    : SyntheticSection(segment_names::text, section_names::initOffsets) {
+  flags = S_INIT_FUNC_OFFSETS;
+}
+
+uint64_t InitOffsetsSection::getSize() const {
+  size_t count = 0;
+  for (const ConcatInputSection *isec : sections)
+    count += isec->relocs.size();
+  return count * sizeof(uint32_t);
+}
+
+void InitOffsetsSection::writeTo(uint8_t *buf) const {
+  // FIXME: Add function specified by -init when that argument is implemented.
+  for (ConcatInputSection *isec : sections) {
+    for (const Reloc &rel : isec->relocs) {
+      const Symbol *referent = rel.referent.dyn_cast<Symbol *>();
+      assert(referent && "section relocation should have been rejected");
+      uint64_t offset = referent->getVA() - in.header->addr;
+      // FIXME: Can we handle this gracefully?
+      if (offset > UINT32_MAX)
+        fatal(isec->getLocation(rel.offset) + ": offset to initializer " +
+              referent->getName() + " (" + utohexstr(offset) +
+              ") does not fit in 32 bits");
+
+      // Entries need to be added in the order they appear in the section, but
+      // relocations aren't guaranteed to be sorted.
+      size_t index = rel.offset >> target->p2WordSize;
+      write32le(&buf[index * sizeof(uint32_t)], offset);
+    }
+    buf += isec->relocs.size() * sizeof(uint32_t);
+  }
+}
+
+// The inputs are __mod_init_func sections, which contain pointers to
+// initializer functions, therefore all relocations should be of the UNSIGNED
+// type. InitOffsetsSection stores offsets, so if the initializer's address is
+// not known at link time, stub-indirection has to be used.
+void InitOffsetsSection::setUp() {
+  for (const ConcatInputSection *isec : sections) {
+    for (const Reloc &rel : isec->relocs) {
+      RelocAttrs attrs = target->getRelocAttrs(rel.type);
+      if (!attrs.hasAttr(RelocAttrBits::UNSIGNED))
+        error(isec->getLocation(rel.offset) +
+              ": unsupported relocation type: " + attrs.name);
+      if (rel.addend != 0)
+        error(isec->getLocation(rel.offset) +
+              ": relocation addend is not representable in __init_offsets");
+      if (rel.referent.is<InputSection *>())
+        error(isec->getLocation(rel.offset) +
+              ": unexpected section relocation");
+
+      Symbol *sym = rel.referent.dyn_cast<Symbol *>();
+      if (auto *undefined = dyn_cast<Undefined>(sym))
+        treatUndefinedSymbol(*undefined, isec, rel.offset);
+      if (needsBinding(sym))
+        in.stubs->addEntry(sym);
+    }
+  }
 }
 
 void macho::createSyntheticSymbols() {

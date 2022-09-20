@@ -6,11 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Convert sparse tensor primitives to calls into a runtime support library.
-// Note that this is a current implementation choice to keep the conversion
-// simple. In principle, these primitives could also be converted to actual
-// elaborate IR code that implements the primitives on the selected sparse
-// tensor storage schemes.
+// A pass that converts sparse tensor primitives into calls into a runtime
+// support library. Sparse tensor types are converted into opaque pointers
+// to the underlying sparse storage schemes. The use of opaque pointers
+// together with runtime support library keeps the conversion relatively
+// simple, but at the expense of IR opacity, which obscures opportunities
+// for subsequent optimization of the IR. An alternative is provided by
+// the SparseTensorCodegen pass.
 //
 //===----------------------------------------------------------------------===//
 
@@ -46,6 +48,13 @@ enum class EmitCInterface : bool { Off = false, On = true };
 /// execution engine.
 static Type getOpaquePointerType(OpBuilder &builder) {
   return LLVM::LLVMPointerType::get(builder.getI8Type());
+}
+
+/// Maps each sparse tensor type to an opaque pointer.
+static Optional<Type> convertSparseTensorTypes(Type type) {
+  if (getSparseTensorEncoding(type) != nullptr)
+    return LLVM::LLVMPointerType::get(IntegerType::get(type.getContext(), 8));
+  return llvm::None;
 }
 
 /// Returns a function reference (first hit also inserts into module). Sets
@@ -457,6 +466,8 @@ static bool canUseDirectConversion(
       if (alreadyCompressed)
         return false; // Dense after Compressed not yet supported.
       break;
+    default: // TODO: investigate
+      return false;
     }
   }
   return true;
@@ -530,14 +541,18 @@ static void translateIndices(Location loc, ConversionPatternRewriter &rewriter,
 ///     coo->add(reshape(elem.indices), elem.value)
 ///   }
 ///   s = newSparseTensor(coo)
+template <typename ReshapeOp>
 static LogicalResult
-genSparse2SparseReshape(Operation *op, ConversionPatternRewriter &rewriter,
-                        ArrayRef<ReassociationIndices> reassociation, Value src,
-                        RankedTensorType dstTp, RankedTensorType srcTp) {
-  Location loc = op->getLoc();
-  auto encDst = getSparseTensorEncoding(dstTp);
+genSparse2SparseReshape(ReshapeOp op, typename ReshapeOp::Adaptor adaptor,
+                        ConversionPatternRewriter &rewriter) {
+  Location loc = op.getLoc();
+  auto srcTp = op.getSrc().getType().template cast<RankedTensorType>();
+  auto dstTp = op.getResult().getType().template cast<RankedTensorType>();
   auto encSrc = getSparseTensorEncoding(srcTp);
-  assert(encDst && encSrc);
+  auto encDst = getSparseTensorEncoding(dstTp);
+  if (!encDst || !encSrc)
+    return failure();
+
   unsigned srcRank = srcTp.getRank();
   unsigned dstRank = dstTp.getRank();
   Type elemTp = srcTp.getElementType();
@@ -549,14 +564,16 @@ genSparse2SparseReshape(Operation *op, ConversionPatternRewriter &rewriter,
       encSrc.getPointerBitWidth(), encSrc.getIndexBitWidth());
   SmallVector<Value, 4> sizes;
   SmallVector<Value, 8> params;
-  sizesFromPtr(rewriter, sizes, loc, noPerm, srcTp, src);
+  sizesFromPtr(rewriter, sizes, loc, encSrc, srcTp, adaptor.getSrc());
   newParams(rewriter, params, loc, srcTp, noPerm, Action::kToIterator, sizes,
-            src);
+            adaptor.getSrc());
   Value iter = genNewCall(rewriter, loc, params);
   // Start a new COO for the destination tensor.
   sizes.clear();
   params.clear();
-  sizesFromPtr(rewriter, sizes, loc, encDst, dstTp, src);
+  // Fills sizes array using the sizes from destination type.
+  assert(dstTp.hasStaticShape());
+  sizesFromType(rewriter, sizes, loc, dstTp);
   newParams(rewriter, params, loc, dstTp, encDst, Action::kEmptyCOO, sizes);
   Value coo = genNewCall(rewriter, loc, params);
   Value dstPerm = params[2];
@@ -575,7 +592,8 @@ genSparse2SparseReshape(Operation *op, ConversionPatternRewriter &rewriter,
   // not need to store the value in elemPtr, as the value is still there.
   Block *after = rewriter.createBlock(&whileOp.getAfter(), {}, noTypes);
   rewriter.setInsertionPointToStart(after);
-  translateIndices(loc, rewriter, reassociation, dstTp, srcTp, dstIdx, srcIdx);
+  translateIndices(loc, rewriter, op.getReassociationIndices(), dstTp, srcTp,
+                   dstIdx, srcIdx);
   genAddEltCall(rewriter, loc, elemTp, coo, elemPtr, dstIdx, dstPerm);
   rewriter.create<scf::YieldOp>(loc);
   // Final call to construct sparse tensor storage and free temporary resources.
@@ -745,15 +763,7 @@ public:
   LogicalResult
   matchAndRewrite(ReshapeOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Type dstType = op.getResult().getType();
-    Type srcType = op.getSrc().getType();
-    auto encDst = getSparseTensorEncoding(dstType);
-    auto encSrc = getSparseTensorEncoding(srcType);
-    if (encDst && encSrc)
-      return genSparse2SparseReshape(
-          op, rewriter, op.getReassociationIndices(), adaptor.getOperands()[0],
-          dstType.cast<RankedTensorType>(), srcType.cast<RankedTensorType>());
-    return failure(); // handled elsewhere
+    return genSparse2SparseReshape(op, adaptor, rewriter);
   }
 };
 
@@ -1066,8 +1076,10 @@ public:
     Type resType = op.getType();
     Type ptrType = resType.cast<ShapedType>().getElementType();
     SmallString<16> name{"sparsePointers", overheadTypeFunctionSuffix(ptrType)};
-    replaceOpWithFuncCall(rewriter, op, name, resType, adaptor.getOperands(),
-                          EmitCInterface::On);
+    Value dim =
+        constantIndex(rewriter, op->getLoc(), op.getDimension().getZExtValue());
+    replaceOpWithFuncCall(rewriter, op, name, resType,
+                          {adaptor.getTensor(), dim}, EmitCInterface::On);
     return success();
   }
 };
@@ -1082,8 +1094,10 @@ public:
     Type resType = op.getType();
     Type indType = resType.cast<ShapedType>().getElementType();
     SmallString<15> name{"sparseIndices", overheadTypeFunctionSuffix(indType)};
-    replaceOpWithFuncCall(rewriter, op, name, resType, adaptor.getOperands(),
-                          EmitCInterface::On);
+    Value dim =
+        constantIndex(rewriter, op->getLoc(), op.getDimension().getZExtValue());
+    replaceOpWithFuncCall(rewriter, op, name, resType,
+                          {adaptor.getTensor(), dim}, EmitCInterface::On);
     return success();
   }
 };
@@ -1122,13 +1136,15 @@ public:
   }
 };
 
-/// Sparse conversion rule for inserting in lexicographic index order.
-class SparseTensorLexInsertConverter : public OpConversionPattern<LexInsertOp> {
+/// Sparse conversion rule for the insertion operator.
+class SparseTensorInsertConverter : public OpConversionPattern<InsertOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(LexInsertOp op, OpAdaptor adaptor,
+  matchAndRewrite(InsertOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    // Note that the current regime only allows for strict lexicographic
+    // index order.
     Type elemTp = op.getTensor().getType().cast<ShapedType>().getElementType();
     SmallString<12> name{"lexInsert", primaryTypeFunctionSuffix(elemTp)};
     replaceOpWithFuncCall(rewriter, op, name, {}, adaptor.getOperands(),
@@ -1151,10 +1167,14 @@ public:
     Type idxType = rewriter.getIndexType();
     // All initialization should be done on entry of the loop nest.
     rewriter.setInsertionPointAfter(op.getTensor().getDefiningOp());
-    // Determine the size for access expansion.
+    // Determine the size for access expansion (always the innermost stored
+    // dimension size, translated back to original dimension).
     auto enc = getSparseTensorEncoding(srcType);
-    Value src = adaptor.getOperands()[0];
-    Value sz = genDimSizeCall(rewriter, loc, enc, src, srcType.getRank() - 1);
+    unsigned innerDim = srcType.getRank() - 1;
+    if (AffineMap p = enc.getDimOrdering())
+      innerDim = p.getDimPosition(innerDim);
+    auto sz = sizeFromPtrAtDim(rewriter, loc, enc, srcType, adaptor.getTensor(),
+                               innerDim);
     // Allocate temporary buffers for values, filled-switch, and indices.
     // We do not use stack buffers for this, since the expanded size may
     // be rather large (as it envelops a single expanded dense dimension).
@@ -1345,6 +1365,7 @@ public:
     return success();
   }
 };
+
 /// Sparse conversion rule for the output operator.
 class SparseTensorOutConverter : public OpConversionPattern<OutOp> {
 public:
@@ -1388,6 +1409,15 @@ public:
 } // namespace
 
 //===----------------------------------------------------------------------===//
+// Sparse tensor type conversion into opaque pointer.
+//===----------------------------------------------------------------------===//
+
+mlir::SparseTensorTypeToPtrConverter::SparseTensorTypeToPtrConverter() {
+  addConversion([](Type type) { return type; });
+  addConversion(convertSparseTensorTypes);
+}
+
+//===----------------------------------------------------------------------===//
 // Public method for populating conversion rules.
 //===----------------------------------------------------------------------===//
 
@@ -1403,7 +1433,7 @@ void mlir::populateSparseTensorConversionPatterns(
                SparseTensorConcatConverter, SparseTensorAllocConverter,
                SparseTensorDeallocConverter, SparseTensorToPointersConverter,
                SparseTensorToIndicesConverter, SparseTensorToValuesConverter,
-               SparseTensorLoadConverter, SparseTensorLexInsertConverter,
+               SparseTensorLoadConverter, SparseTensorInsertConverter,
                SparseTensorExpandConverter, SparseTensorCompressConverter,
                SparseTensorOutConverter>(typeConverter, patterns.getContext());
 

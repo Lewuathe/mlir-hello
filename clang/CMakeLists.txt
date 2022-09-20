@@ -418,7 +418,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   endif()
 
   add_custom_target(bash-autocomplete DEPENDS utils/bash-autocomplete.sh)
-  install(PROGRAMS utils/bash-autocomplete.sh
+  install(FILES utils/bash-autocomplete.sh
           DESTINATION "${CMAKE_INSTALL_DATADIR}/clang"
           COMPONENT bash-autocomplete)
   if(NOT LLVM_ENABLE_IDE)
@@ -483,6 +483,9 @@ option(CLANG_INCLUDE_TESTS
        ${LLVM_INCLUDE_TESTS})
 
 add_subdirectory(utils/TableGen)
+
+# Export CLANG_TABLEGEN_EXE for use by flang docs.
+set(CLANG_TABLEGEN_EXE "${CLANG_TABLEGEN_EXE}" CACHE INTERNAL "")
 
 add_subdirectory(include)
 

@@ -1719,8 +1719,7 @@ void SelectionDAGLegalize::ExpandDYNAMIC_STACKALLOC(SDNode* Node,
                        DAG.getConstant(-Alignment.value(), dl, VT));
   Chain = DAG.getCopyToReg(Chain, dl, SPReg, Tmp1);     // Output chain
 
-  Tmp2 = DAG.getCALLSEQ_END(Chain, DAG.getIntPtrConstant(0, dl, true),
-                            DAG.getIntPtrConstant(0, dl, true), SDValue(), dl);
+  Tmp2 = DAG.getCALLSEQ_END(Chain, 0, 0, SDValue(), dl);
 
   Results.push_back(Tmp1);
   Results.push_back(Tmp2);
@@ -2914,6 +2913,9 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
         DAG.getConstant(16, dl,
                         TLI.getShiftAmountTy(MVT::i32, DAG.getDataLayout())));
     Op = DAG.getNode(ISD::BITCAST, dl, MVT::f32, Op);
+    // Add fp_extend in case the output is bigger than f32.
+    if (Node->getValueType(0) != MVT::f32)
+      Op = DAG.getNode(ISD::FP_EXTEND, dl, Node->getValueType(0), Op);
     Results.push_back(Op);
     break;
   }

@@ -119,11 +119,6 @@ struct IncrementLoopInfo {
 
   // Data members for structured loops.
   fir::DoLoopOp doLoop = nullptr;
-  // Do loop block argument holding the current value
-  // of the do-variable. It has the same data type as the original
-  // do-variable. It is non-null after genFIRIncrementLoopBegin()
-  // iff doVarIsALoopArg() returns true.
-  mlir::Value doVarValue = nullptr;
 
   // Data members for unstructured loops.
   bool hasRealControl = false;
@@ -1275,7 +1270,6 @@ private:
           // The loop variable value is the region's argument rather
           // than the DoLoop's index value.
           value = info.doLoop.getRegionIterArgs()[0];
-          info.doVarValue = value;
         }
         builder->create<fir::StoreOp>(loc, value, info.loopVariable);
         if (info.maskExpr) {
@@ -1377,8 +1371,10 @@ private:
             // type, so we need to cast it, first.
             mlir::Value stepCast = builder->createConvert(
                 loc, info.getLoopVariableType(), info.doLoop.getStep());
+            mlir::Value doVarValue =
+                builder->create<fir::LoadOp>(loc, info.loopVariable);
             results.push_back(builder->create<mlir::arith::AddIOp>(
-                loc, info.doVarValue, stepCast));
+                loc, doVarValue, stepCast));
           }
           builder->create<fir::ResultOp>(loc, results);
         }
@@ -2684,9 +2680,26 @@ private:
                eval.getLastNestedEvaluation()
                    .lexicalSuccessor->isIntermediateConstructStmt())
         successor = eval.constructExit;
+      else if (eval.isConstructStmt() &&
+               eval.lexicalSuccessor == eval.controlSuccessor)
+        // empty construct block
+        successor = eval.parentConstruct->constructExit;
       if (successor && successor->block)
         genFIRBranch(successor->block);
     }
+  }
+
+  void mapCPtrArgByValue(const Fortran::semantics::Symbol &sym,
+                         mlir::Value val) {
+    mlir::Type symTy = Fortran::lower::translateSymbolToFIRType(*this, sym);
+    mlir::Location loc = toLocation();
+    mlir::Value res = builder->create<fir::AllocaOp>(loc, symTy);
+    mlir::Value resAddr =
+        fir::factory::genCPtrOrCFunptrAddr(*builder, loc, res, symTy);
+    mlir::Value argAddrVal =
+        builder->createConvert(loc, fir::unwrapRefType(resAddr.getType()), val);
+    builder->create<fir::StoreOp>(loc, argAddrVal, resAddr);
+    addSymbol(sym, res);
   }
 
   /// Map mlir function block arguments to the corresponding Fortran dummy
@@ -2707,6 +2720,16 @@ private:
         addSymbol(arg.entity->get(), box);
       } else {
         if (arg.entity.has_value()) {
+          if (arg.passBy == PassBy::Value) {
+            mlir::Type argTy = arg.firArgument.getType();
+            if (argTy.isa<fir::RecordType>())
+              TODO(toLocation(), "derived type argument passed by value");
+            if (Fortran::semantics::IsBuiltinCPtr(arg.entity->get()) &&
+                Fortran::lower::isCPtrArgByValueType(argTy)) {
+              mapCPtrArgByValue(arg.entity->get(), arg.firArgument);
+              return;
+            }
+          }
           addSymbol(arg.entity->get(), arg.firArgument);
         } else {
           assert(funit.parentHasHostAssoc());
