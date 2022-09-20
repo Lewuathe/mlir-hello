@@ -86,7 +86,7 @@ public:
 
     // Generate a call to printf for the current element of the loop.
     auto printOp = mlir::cast<hello::PrintOp>(op);
-    auto elementLoad = rewriter.create<mlir::memref::LoadOp>(loc, printOp.input(), loopIvs);
+    auto elementLoad = rewriter.create<mlir::memref::LoadOp>(loc, printOp.getInput(), loopIvs);
     rewriter.create<mlir::func::CallOp>(loc, printfRef, rewriter.getIntegerType(32),
                             mlir::ArrayRef<mlir::Value>({formatSpecifierCst, elementLoad}));
 
