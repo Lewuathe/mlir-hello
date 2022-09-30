@@ -13,6 +13,7 @@ __attribute__((availability(shadermodel, introduced = 6.0)))
 __attribute__((clang_builtin_alias(__builtin_hlsl_wave_active_count_bits))) uint
 WaveActiveCountBits(bool bBit);
 
+// abs builtins
 #ifdef __HLSL_ENABLE_16_BIT
 __attribute__((clang_builtin_alias(__builtin_elementwise_abs)))
 int16_t abs(int16_t);
@@ -59,5 +60,43 @@ __attribute__((clang_builtin_alias(__builtin_elementwise_abs)))
 double3 abs(double3);
 __attribute__((clang_builtin_alias(__builtin_elementwise_abs)))
 double4 abs(double4);
+
+// sqrt builtins
+__attribute__((clang_builtin_alias(__builtin_sqrt))) double sqrt(double In);
+__attribute__((clang_builtin_alias(__builtin_sqrtf))) float sqrt(float In);
+
+#ifdef __HLSL_ENABLE_16_BIT
+__attribute__((clang_builtin_alias(__builtin_sqrtf16))) half sqrt(half In);
+#endif
+
+// ceil builtins
+#ifdef __HLSL_ENABLE_16_BIT
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+half ceil(half);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+half2 ceil(half2);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+half3 ceil(half3);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+half4 ceil(half4);
+#endif
+
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil))) float
+ceil(float);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+float2 ceil(float2);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+float3 ceil(float3);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+float4 ceil(float4);
+
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil))) double
+ceil(double);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+double2 ceil(double2);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+double3 ceil(double3);
+__attribute__((clang_builtin_alias(__builtin_elementwise_ceil)))
+double4 ceil(double4);
 
 #endif //_HLSL_HLSL_INTRINSICS_H_

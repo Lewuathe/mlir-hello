@@ -9,8 +9,8 @@
 #include "mlir/Dialect/Linalg/Transforms/TilingInterfaceImpl.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Arithmetic/Utils/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -90,11 +90,13 @@ struct LinalgOpTilingInterface
   }
 
   /// Return the loop iterator type.
-  SmallVector<StringRef> getLoopIteratorTypes(Operation *op) const {
+  SmallVector<utils::IteratorType> getLoopIteratorTypes(Operation *op) const {
     LinalgOpTy concreteOp = cast<LinalgOpTy>(op);
     return llvm::to_vector(
         llvm::map_range(concreteOp.iterator_types(), [](Attribute strAttr) {
-          return strAttr.cast<StringAttr>().getValue();
+          return utils::symbolizeIteratorType(
+                     strAttr.cast<StringAttr>().getValue())
+              .value();
         }));
   }
 

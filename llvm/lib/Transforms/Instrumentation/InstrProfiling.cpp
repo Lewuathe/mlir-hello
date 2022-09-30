@@ -529,10 +529,11 @@ bool InstrProfiling::run(
   if (NeedsRuntimeHook)
     MadeChange = emitRuntimeHook();
 
-  // Improve compile time by avoiding linear scans when there is no work.
+  bool ContainsProfiling = containsProfilingIntrinsics(M);
   GlobalVariable *CoverageNamesVar =
       M.getNamedGlobal(getCoverageUnusedNamesVarName());
-  if (!containsProfilingIntrinsics(M) && !CoverageNamesVar)
+  // Improve compile time by avoiding linear scans when there is no work.
+  if (!ContainsProfiling && !CoverageNamesVar)
     return MadeChange;
 
   // We did not know how many value sites there would be inside
@@ -567,11 +568,11 @@ bool InstrProfiling::run(
   emitVNodes();
   emitNameData();
 
-  // Emit runtime hook except for the cases where coverage is enabled on
-  // code that is eliminated by the front-end, e.g. unused functions with
-  // internal linkage, and the target does not require pulling in profile
-  // runtime.
-  if (containsProfilingIntrinsics(M) || !CoverageNamesVar || NeedsRuntimeHook)
+  // Emit runtime hook for the cases where the target does not unconditionally
+  // require pulling in profile runtime, and coverage is enabled on code that is
+  // not eliminated by the front-end, e.g. unused functions with internal
+  // linkage.
+  if (!NeedsRuntimeHook && ContainsProfiling)
     emitRuntimeHook();
 
   emitRegistration();

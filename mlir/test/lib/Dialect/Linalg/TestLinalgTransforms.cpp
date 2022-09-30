@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -103,6 +103,10 @@ struct TestLinalgTransforms
       *this, "test-split-reduction",
       llvm::cl::desc("Test split reduction transformation"),
       llvm::cl::init(false)};
+  Option<bool> testSplitReductionInnerParallel{
+      *this, "test-split-reduction-inner-parallel",
+      llvm::cl::desc("Test split reduction with inner parallel transformation"),
+      llvm::cl::init(false)};
   ListOption<int64_t> peeledLoops{
       *this, "peeled-loops",
       llvm::cl::desc("Loops to be peeled when test-tile-pattern")};
@@ -122,6 +126,11 @@ struct TestLinalgTransforms
       *this, "test-bubble-up-extract-slice-op-pattern",
       llvm::cl::desc("Test rewrite of linalgOp + extract_slice into "
                      "extract_slice + linalgOp"),
+      llvm::cl::init(false)};
+  Option<bool> testSwapExtractSliceWithFill{
+      *this, "test-swap-extract-slice-with-fill-pattern",
+      llvm::cl::desc(
+          "Test patterns to swap tensor.extract_slice(linalg.fill())"),
       llvm::cl::init(false)};
 };
 } // namespace
@@ -494,7 +503,21 @@ static void applySplitReduction(func::FuncOp funcOp) {
       patterns,
       [](LinalgOp op) {
         unsigned insertDimIndex = op.getNumLoops() - 1;
-        return std::make_pair(4, insertDimIndex);
+        return SplitReductionOptions{4, insertDimIndex, false};
+      },
+      LinalgTransformationFilter(
+          ArrayRef<StringAttr>{},
+          StringAttr::get(funcOp.getContext(), "SPLIT")));
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
+static void applySplitReductionInnerParallel(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  linalg::populateSplitReductionPattern(
+      patterns,
+      [](LinalgOp op) {
+        unsigned insertDimIndex = op.getNumLoops() - 1;
+        return SplitReductionOptions{4, insertDimIndex, true};
       },
       LinalgTransformationFilter(
           ArrayRef<StringAttr>{},
@@ -505,6 +528,12 @@ static void applySplitReduction(func::FuncOp funcOp) {
 static void applyBubbleUpExtractSliceOpPattern(func::FuncOp funcOp) {
   RewritePatternSet patterns(funcOp.getContext());
   populateBubbleUpExtractSliceOpPatterns(patterns);
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
+static void applySwapExtractSliceWithFillPattern(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  populateSwapExtractSliceWithFillPatterns(patterns);
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
@@ -549,8 +578,12 @@ void TestLinalgTransforms::runOnOperation() {
                             /*peeledLoops=*/{}, /*scalarizeDynamicDims=*/true);
   if (testSplitReduction)
     return applySplitReduction(getOperation());
+  if (testSplitReductionInnerParallel)
+    return applySplitReductionInnerParallel(getOperation());
   if (testBubbleUpExtractSliceOpPattern)
     return applyBubbleUpExtractSliceOpPattern(getOperation());
+  if (testSwapExtractSliceWithFill)
+    return applySwapExtractSliceWithFillPattern(getOperation());
 }
 
 namespace mlir {

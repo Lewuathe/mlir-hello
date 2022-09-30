@@ -722,6 +722,7 @@ class SOPK_Pseudo <string opName, dag outs, dag ins,
   let hasSideEffects = 0;
   let SALU = 1;
   let SOPK = 1;
+  let FixedSize = 1;
   let SchedRW = [WriteSALU];
   let UseNamedOperandTable = 1;
   string Mnemonic = opName;
@@ -737,6 +738,7 @@ class SOPK_Real<SOPK_Pseudo ps> :
   let SOPK = 1;
   let isPseudo = 0;
   let isCodeGenOnly = 0;
+  let UseNamedOperandTable = 1;
 
   // copy relevant pseudo op flags
   let SubtargetPredicate = ps.SubtargetPredicate;

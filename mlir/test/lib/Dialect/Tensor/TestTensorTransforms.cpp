@@ -10,7 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -30,8 +30,8 @@ struct TestTensorTransforms
   TestTensorTransforms(const TestTensorTransforms &pass) : PassWrapper(pass) {}
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithmeticDialect, scf::SCFDialect,
-                    linalg::LinalgDialect>();
+    registry
+        .insert<arith::ArithDialect, scf::SCFDialect, linalg::LinalgDialect>();
   }
 
   StringRef getArgument() const final {
@@ -51,6 +51,12 @@ struct TestTensorTransforms
   Option<bool> testFoldConstantExtractSlice{
       *this, "test-fold-constant-extract-slice",
       llvm::cl::desc("Test folding arith.constant and tensor.extract_slice"),
+      llvm::cl::init(false)};
+
+  Option<bool> testFoldConsecutiveInsertExtractSlice{
+      *this, "test-fold-consecutive-insert-extract-slice",
+      llvm::cl::desc(
+          "Test folding consecutive tensor.insert_slice/tensor.extract_slice"),
       llvm::cl::init(false)};
 
   Option<bool> testRewriteExtractSliceWithTiledCollapseShape{
@@ -87,6 +93,12 @@ static void applyFoldConstantExtractSlicePatterns(Operation *rootOp) {
       };
 
   tensor::populateFoldConstantExtractSlicePatterns(patterns, controlFn);
+  (void)applyPatternsAndFoldGreedily(rootOp, std::move(patterns));
+}
+
+static void applyFoldConsecutiveInsertExtractSlicePatterns(Operation *rootOp) {
+  RewritePatternSet patterns(rootOp->getContext());
+  tensor::populateMergeConsecutiveInsertExtractSlicePatterns(patterns);
   (void)applyPatternsAndFoldGreedily(rootOp, std::move(patterns));
 }
 
@@ -233,6 +245,8 @@ void TestTensorTransforms::runOnOperation() {
     applySplitPaddingPatterns(rootOp);
   if (testFoldConstantExtractSlice)
     applyFoldConstantExtractSlicePatterns(rootOp);
+  if (testFoldConsecutiveInsertExtractSlice)
+    applyFoldConsecutiveInsertExtractSlicePatterns(rootOp);
   if (testRewriteExtractSliceWithTiledCollapseShape) {
     if (failed(
             applyRewriteExtractFromCollapseShapePatterns(rootOp, useForeach)))

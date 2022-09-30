@@ -338,15 +338,16 @@ static Type convertBoolMemrefType(const spirv::TargetEnv &targetEnv,
     return nullptr;
   }
 
-  // For OpenCL Kernel we can just emit a pointer pointing to the element.
-  if (targetEnv.allows(spirv::Capability::Kernel))
-    return spirv::PointerType::get(arrayElemType, storageClass);
 
-  // For Vulkan we need extra wrapping struct and array to satisfy interface
-  // needs.
   if (!type.hasStaticShape()) {
+    // For OpenCL Kernel, dynamic shaped memrefs convert into a pointer pointing
+    // to the element.
+    if (targetEnv.allows(spirv::Capability::Kernel))
+      return spirv::PointerType::get(arrayElemType, storageClass);
     int64_t stride = needsExplicitLayout(storageClass) ? *arrayElemSize : 0;
     auto arrayType = spirv::RuntimeArrayType::get(arrayElemType, stride);
+    // For Vulkan we need extra wrapping struct and array to satisfy interface
+    // needs.
     return wrapInStructAndGetPointer(arrayType, storageClass);
   }
 
@@ -354,7 +355,8 @@ static Type convertBoolMemrefType(const spirv::TargetEnv &targetEnv,
   auto arrayElemCount = llvm::divideCeil(memrefSize, *arrayElemSize);
   int64_t stride = needsExplicitLayout(storageClass) ? *arrayElemSize : 0;
   auto arrayType = spirv::ArrayType::get(arrayElemType, arrayElemCount, stride);
-
+  if (targetEnv.allows(spirv::Capability::Kernel))
+    return spirv::PointerType::get(arrayType, storageClass);
   return wrapInStructAndGetPointer(arrayType, storageClass);
 }
 
@@ -403,15 +405,16 @@ static Type convertMemrefType(const spirv::TargetEnv &targetEnv,
     return nullptr;
   }
 
-  // For OpenCL Kernel we can just emit a pointer pointing to the element.
-  if (targetEnv.allows(spirv::Capability::Kernel))
-    return spirv::PointerType::get(arrayElemType, storageClass);
 
-  // For Vulkan we need extra wrapping struct and array to satisfy interface
-  // needs.
   if (!type.hasStaticShape()) {
+    // For OpenCL Kernel, dynamic shaped memrefs convert into a pointer pointing
+    // to the element.
+    if (targetEnv.allows(spirv::Capability::Kernel))
+      return spirv::PointerType::get(arrayElemType, storageClass);
     int64_t stride = needsExplicitLayout(storageClass) ? *arrayElemSize : 0;
     auto arrayType = spirv::RuntimeArrayType::get(arrayElemType, stride);
+    // For Vulkan we need extra wrapping struct and array to satisfy interface
+    // needs.
     return wrapInStructAndGetPointer(arrayType, storageClass);
   }
 
@@ -425,7 +428,8 @@ static Type convertMemrefType(const spirv::TargetEnv &targetEnv,
   auto arrayElemCount = llvm::divideCeil(*memrefSize, *arrayElemSize);
   int64_t stride = needsExplicitLayout(storageClass) ? *arrayElemSize : 0;
   auto arrayType = spirv::ArrayType::get(arrayElemType, arrayElemCount, stride);
-
+  if (targetEnv.allows(spirv::Capability::Kernel))
+    return spirv::PointerType::get(arrayType, storageClass);
   return wrapInStructAndGetPointer(arrayType, storageClass);
 }
 
@@ -510,7 +514,7 @@ FuncOpConversion::matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
       return failure();
   }
 
-  // Create the converted spv.func op.
+  // Create the converted spirv.func op.
   auto newFuncOp = rewriter.create<spirv::FuncOp>(
       funcOp.getLoc(), funcOp.getName(),
       rewriter.getFunctionType(signatureConverter.getConvertedTypes(),
@@ -545,7 +549,7 @@ void mlir::populateBuiltinFuncToSPIRVPatterns(SPIRVTypeConverter &typeConverter,
 static spirv::GlobalVariableOp getBuiltinVariable(Block &body,
                                                   spirv::BuiltIn builtin) {
   // Look through all global variables in the given `body` block and check if
-  // there is a spv.GlobalVariable that has the same `builtin` attribute.
+  // there is a spirv.GlobalVariable that has the same `builtin` attribute.
   for (auto varOp : body.getOps<spirv::GlobalVariableOp>()) {
     if (auto builtinAttr = varOp->getAttrOfType<StringAttr>(
             spirv::SPIRVDialect::getAttributeName(
@@ -642,7 +646,7 @@ static spirv::PointerType getPushConstantStorageType(unsigned elementCount,
 static spirv::GlobalVariableOp getPushConstantVariable(Block &body,
                                                        unsigned elementCount) {
   for (auto varOp : body.getOps<spirv::GlobalVariableOp>()) {
-    auto ptrType = varOp.type().dyn_cast<spirv::PointerType>();
+    auto ptrType = varOp.getType().dyn_cast<spirv::PointerType>();
     if (!ptrType)
       continue;
 
@@ -776,14 +780,19 @@ Value mlir::spirv::getOpenCLElementPtr(SPIRVTypeConverter &typeConverter,
   auto indexType = typeConverter.getIndexType();
 
   SmallVector<Value, 2> linearizedIndices;
-  auto zero = spirv::ConstantOp::getZero(indexType, loc, builder);
-
   Value linearIndex;
   if (baseType.getRank() == 0) {
-    linearIndex = zero;
+    linearIndex = spirv::ConstantOp::getZero(indexType, loc, builder);
   } else {
     linearIndex =
         linearizeIndex(indices, strides, offset, indexType, loc, builder);
+  }
+  Type pointeeType =
+      basePtr.getType().cast<spirv::PointerType>().getPointeeType();
+  if (pointeeType.isa<spirv::ArrayType>()) {
+    linearizedIndices.push_back(linearIndex);
+    return builder.create<spirv::AccessChainOp>(loc, basePtr,
+                                                linearizedIndices);
   }
   return builder.create<spirv::PtrAccessChainOp>(loc, basePtr, linearIndex,
                                                  linearizedIndices);
@@ -874,7 +883,7 @@ bool SPIRVConversionTarget::isLegalOp(Operation *op) {
   // Special treatment for global variables, whose type requirements are
   // conveyed by type attributes.
   if (auto globalVar = dyn_cast<spirv::GlobalVariableOp>(op))
-    valueTypes.push_back(globalVar.type());
+    valueTypes.push_back(globalVar.getType());
 
   // Make sure the op's operands/results use types that are allowed by the
   // target environment.

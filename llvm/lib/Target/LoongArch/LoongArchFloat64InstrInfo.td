@@ -149,6 +149,8 @@ def : PatFprFpr<fsub, FSUB_D, FPR64>;
 def : PatFprFpr<fmul, FMUL_D, FPR64>;
 def : PatFprFpr<fdiv, FDIV_D, FPR64>;
 def : PatFprFpr<fcopysign, FCOPYSIGN_D, FPR64>;
+def : PatFprFpr<fmaxnum_ieee, FMAX_D, FPR64>;
+def : PatFprFpr<fminnum_ieee, FMIN_D, FPR64>;
 def : PatFpr<fneg, FNEG_D, FPR64>;
 def : PatFpr<fabs, FABS_D, FPR64>;
 def : PatFpr<fsqrt, FSQRT_D, FPR64>;
@@ -160,13 +162,11 @@ def : Pat<(fcopysign FPR64:$fj, FPR32:$fk),
 def : Pat<(fcopysign FPR32:$fj, FPR64:$fk),
           (FCOPYSIGN_S FPR32:$fj, (FCVT_S_D FPR64:$fk))>;
 
+def : Pat<(fcanonicalize FPR64:$fj), (FMAX_D $fj, $fj)>;
+
 /// Setcc
 
 // Match non-signaling comparison
-
-// TODO: Change setcc to any_fsetcc after call is supported because
-// we need to call llvm.experimental.constrained.fcmp.f64 in testcase.
-// See RISCV float-fcmp-strict.ll for reference.
 
 // SETOGT/SETOGE/SETUGT/SETUGE will expand into SETOLT/SETOLE/SETULT/SETULE.
 def : PatFPSetcc<SETOEQ, FCMP_CEQ_D,  FPR64>;
@@ -193,7 +193,19 @@ defm : PatFPBrcond<SETUNE, FCMP_CUNE_D, FPR64>;
 defm : PatFPBrcond<SETUO,  FCMP_CUN_D, FPR64>;
 defm : PatFPBrcond<SETLT,  FCMP_CLT_D, FPR64>;
 
-// TODO: Match signaling comparison strict_fsetccs with FCMP_S*_D instructions.
+// Match signaling comparison
+
+def : PatStrictFsetccs<SETOEQ, FCMP_SEQ_D,  FPR64>;
+def : PatStrictFsetccs<SETOLT, FCMP_SLT_D,  FPR64>;
+def : PatStrictFsetccs<SETOLE, FCMP_SLE_D,  FPR64>;
+def : PatStrictFsetccs<SETONE, FCMP_SNE_D,  FPR64>;
+def : PatStrictFsetccs<SETO,   FCMP_SOR_D,  FPR64>;
+def : PatStrictFsetccs<SETUEQ, FCMP_SUEQ_D, FPR64>;
+def : PatStrictFsetccs<SETULT, FCMP_SULT_D, FPR64>;
+def : PatStrictFsetccs<SETULE, FCMP_SULE_D, FPR64>;
+def : PatStrictFsetccs<SETUNE, FCMP_SUNE_D, FPR64>;
+def : PatStrictFsetccs<SETUO,  FCMP_SUN_D,  FPR64>;
+def : PatStrictFsetccs<SETLT,  FCMP_SLT_D,  FPR64>;
 
 /// Select
 

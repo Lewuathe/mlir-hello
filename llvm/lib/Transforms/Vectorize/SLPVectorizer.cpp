@@ -5782,6 +5782,80 @@ bool BoUpSLP::areAllUsersVectorized(Instruction *I,
          });
 }
 
+namespace {
+/// Helper to keep track of the extracted elements to compute an accumulated
+/// scalarization extraction cost.
+class ScalarizationOverheadBuilder {
+  /// Keep track of demanded elements by source vector or type.
+  typedef DenseMap<Value *, APInt> ExtractByClass;
+  typedef DenseMap<FixedVectorType *, APInt> ExtractByType;
+
+  /// TODO: Add getExtractWithExtendCost support to getScalarizationOverhead.
+  struct ExtractWithExtendOps {
+    unsigned Opcode;
+    VectorType *VecTy;
+    Type *SclTy;
+    unsigned Idx;
+  };
+
+  ExtractByClass m_ExtractsByClass;
+  ExtractByType m_ExtractsByType;
+  SmallVector<ExtractWithExtendOps> m_ExtractsWithExtends;
+
+public:
+  /// Add an extraction from a specific source and element index.
+  void addExtract(Value *Src, unsigned Idx) {
+    auto *Ty = cast<FixedVectorType>(Src->getType());
+    unsigned NumElts = Ty->getNumElements();
+    if (m_ExtractsByClass.count(Src)) {
+      if (Idx < NumElts)
+        m_ExtractsByClass[Src].setBit(Idx);
+      else
+        m_ExtractsByClass[Src].setAllBits();
+      return;
+    }
+    m_ExtractsByClass[Src] = Idx < NumElts ? APInt::getOneBitSet(NumElts, Idx)
+                                           : APInt::getAllOnes(NumElts);
+  }
+
+  /// Add an extraction from a vector type and specific element index.
+  /// We assume that all extractions from a given type are from the same source.
+  void addExtract(FixedVectorType *VecTy, unsigned Idx) {
+    unsigned NumElts = VecTy->getNumElements();
+    if (m_ExtractsByType.count(VecTy)) {
+      if (Idx < NumElts)
+        m_ExtractsByType[VecTy].setBit(Idx);
+      else
+        m_ExtractsByType[VecTy].setAllBits();
+      return;
+    }
+    m_ExtractsByType[VecTy] = Idx < NumElts ? APInt::getOneBitSet(NumElts, Idx)
+                                            : APInt::getAllOnes(NumElts);
+  }
+
+  /// Add an extended extraction from a specific source and element index.
+  void addExtractWithExtend(unsigned Opcode, Type *SclTy,
+                            VectorType *VecTy,
+                            unsigned Idx) {
+    m_ExtractsWithExtends.push_back({Opcode, VecTy, SclTy, Idx});
+  }
+
+  /// Determine the accumulated scalarization cost for the specified extractions.
+  InstructionCost getCost(const TargetTransformInfo *TTI) {
+    InstructionCost Cost = 0;
+    for (struct ExtractWithExtendOps &It : m_ExtractsWithExtends)
+      Cost +=
+          TTI->getExtractWithExtendCost(It.Opcode, It.SclTy, It.VecTy, It.Idx);
+    for (detail::DenseMapPair<FixedVectorType *, APInt> &It : m_ExtractsByType)
+      Cost += TTI->getScalarizationOverhead(It.first, It.second, false, true);
+    for (detail::DenseMapPair<Value *, APInt> &It : m_ExtractsByClass)
+      Cost += TTI->getScalarizationOverhead(
+          cast<VectorType>(It.first->getType()), It.second, false, true);
+    return Cost;
+  }
+};
+} // anonymous namespace
+
 static std::pair<InstructionCost, InstructionCost>
 getVectorCallCosts(CallInst *CI, FixedVectorType *VecTy,
                    TargetTransformInfo *TTI, TargetLibraryInfo *TLI) {
@@ -5961,6 +6035,13 @@ TTI::OperandValueInfo BoUpSLP::getOperandInfo(ArrayRef<Value *> VL,
       return CI->getValue().isPowerOf2();
     return false;
   });
+  const bool IsNegatedPowerOfTwo = all_of(VL, [&](Value *V) {
+    // TODO: We should allow undef elements here
+    auto *Op = cast<Instruction>(V)->getOperand(OpIdx);
+    if (auto *CI = dyn_cast<ConstantInt>(Op))
+      return CI->getValue().isNegatedPowerOf2();
+    return false;
+  });
 
   TTI::OperandValueKind VK = TTI::OK_AnyValue;
   if (IsConstant && IsUniform)
@@ -5970,8 +6051,10 @@ TTI::OperandValueInfo BoUpSLP::getOperandInfo(ArrayRef<Value *> VL,
   else if (IsUniform)
     VK = TTI::OK_UniformValue;
 
-  const TTI::OperandValueProperties VP =
-    IsPowerOfTwo ? TTI::OP_PowerOf2 : TTI::OP_None;
+  TTI::OperandValueProperties VP = TTI::OP_None;
+  VP = IsPowerOfTwo ? TTI::OP_PowerOf2 : VP;
+  VP = IsNegatedPowerOfTwo ? TTI::OP_NegatedPowerOf2 : VP;
+
   return {VK, VP};
 }
 
@@ -6000,9 +6083,9 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
   bool NeedToShuffleReuses = !E->ReuseShuffleIndices.empty();
   // FIXME: it tries to fix a problem with MSVC buildbots.
   TargetTransformInfo &TTIRef = *TTI;
-  auto &&AdjustExtractsCost = [this, &TTIRef, CostKind, VL, VecTy,
+  auto &&AdjustExtractsCost = [this, &TTIRef, CostKind, VL,
                                VectorizedVals, E](InstructionCost &Cost) {
-    DenseMap<Value *, int> ExtractVectorsTys;
+    ScalarizationOverheadBuilder ScalarizationCost;
     SmallPtrSet<Value *, 4> CheckedExtracts;
     for (auto *V : VL) {
       if (isa<UndefValue>(V))
@@ -6023,12 +6106,6 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
       if (!EEIdx)
         continue;
       unsigned Idx = *EEIdx;
-      if (TTIRef.getNumberOfParts(VecTy) !=
-          TTIRef.getNumberOfParts(EE->getVectorOperandType())) {
-        auto It =
-            ExtractVectorsTys.try_emplace(EE->getVectorOperand(), Idx).first;
-        It->getSecond() = std::min<int>(It->second, Idx);
-      }
       // Take credit for instruction that will become dead.
       if (EE->hasOneUse()) {
         Instruction *Ext = EE->user_back();
@@ -6037,9 +6114,9 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
             })) {
           // Use getExtractWithExtendCost() to calculate the cost of
           // extractelement/ext pair.
-          Cost -=
-              TTIRef.getExtractWithExtendCost(Ext->getOpcode(), Ext->getType(),
-                                              EE->getVectorOperandType(), Idx);
+          ScalarizationCost.addExtractWithExtend(
+              Ext->getOpcode(), Ext->getType(), EE->getVectorOperandType(),
+              Idx);
           // Add back the cost of s|zext which is subtracted separately.
           Cost += TTIRef.getCastInstrCost(
               Ext->getOpcode(), Ext->getType(), EE->getType(),
@@ -6047,36 +6124,9 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
           continue;
         }
       }
-      Cost -= TTIRef.getVectorInstrCost(*EE, EE->getVectorOperandType(), Idx);
+      ScalarizationCost.addExtract(EE->getVectorOperand(), Idx);
     }
-    // Add a cost for subvector extracts/inserts if required.
-    for (const auto &Data : ExtractVectorsTys) {
-      auto *EEVTy = cast<FixedVectorType>(Data.first->getType());
-      unsigned NumElts = VecTy->getNumElements();
-      if (Data.second % NumElts == 0)
-        continue;
-      if (TTIRef.getNumberOfParts(EEVTy) > TTIRef.getNumberOfParts(VecTy)) {
-        unsigned Idx = (Data.second / NumElts) * NumElts;
-        unsigned EENumElts = EEVTy->getNumElements();
-        if (Idx + NumElts <= EENumElts) {
-          Cost +=
-              TTIRef.getShuffleCost(TargetTransformInfo::SK_ExtractSubvector,
-                                    EEVTy, None, CostKind, Idx, VecTy);
-        } else {
-          // Need to round up the subvector type vectorization factor to avoid a
-          // crash in cost model functions. Make SubVT so that Idx + VF of SubVT
-          // <= EENumElts.
-          auto *SubVT =
-              FixedVectorType::get(VecTy->getElementType(), EENumElts - Idx);
-          Cost +=
-              TTIRef.getShuffleCost(TargetTransformInfo::SK_ExtractSubvector,
-                                    EEVTy, None, CostKind, Idx, SubVT);
-        }
-      } else {
-        Cost += TTIRef.getShuffleCost(TargetTransformInfo::SK_InsertSubvector,
-                                      VecTy, None, CostKind, 0, EEVTy);
-      }
-    }
+    Cost -= ScalarizationCost.getCost(&TTIRef);
   };
   if (E->State == TreeEntry::NeedToGather) {
     if (allConstant(VL))
@@ -6277,16 +6327,16 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
     case Instruction::ExtractElement: {
       // The common cost of removal ExtractElement/ExtractValue instructions +
       // the cost of shuffles, if required to resuffle the original vector.
+      ScalarizationOverheadBuilder ScalarizationCost, ReuseScalarizationCost;
       if (NeedToShuffleReuses) {
         unsigned Idx = 0;
         for (unsigned I : E->ReuseShuffleIndices) {
           if (ShuffleOrOp == Instruction::ExtractElement) {
             auto *EE = cast<ExtractElementInst>(VL[I]);
-            CommonCost -= TTI->getVectorInstrCost(
-                *EE, EE->getVectorOperandType(), *getExtractIndex(EE));
+            ReuseScalarizationCost.addExtract(EE->getVectorOperand(),
+                                              *getExtractIndex(EE));
           } else {
-            CommonCost -= TTI->getVectorInstrCost(Instruction::ExtractElement,
-                                                  VecTy, Idx);
+            ReuseScalarizationCost.addExtract(VecTy, Idx);
             ++Idx;
           }
         }
@@ -6294,16 +6344,18 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
         for (Value *V : VL) {
           if (ShuffleOrOp == Instruction::ExtractElement) {
             auto *EE = cast<ExtractElementInst>(V);
-            CommonCost += TTI->getVectorInstrCost(
-                *EE, EE->getVectorOperandType(), *getExtractIndex(EE));
+            ScalarizationCost.addExtract(EE->getVectorOperand(),
+                                         *getExtractIndex(EE));
           } else {
             --Idx;
-            CommonCost += TTI->getVectorInstrCost(Instruction::ExtractElement,
-                                                  VecTy, Idx);
+            ScalarizationCost.addExtract(VecTy, Idx);
           }
         }
+        CommonCost -= ReuseScalarizationCost.getCost(TTI);
+        CommonCost += ScalarizationCost.getCost(TTI);
       }
       if (ShuffleOrOp == Instruction::ExtractValue) {
+        ScalarizationOverheadBuilder ValueScalarizationCost;
         for (unsigned I = 0, E = VL.size(); I < E; ++I) {
           auto *EI = cast<Instruction>(VL[I]);
           // Take credit for instruction that will become dead.
@@ -6312,20 +6364,20 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
             if (isa<SExtInst, ZExtInst>(Ext) &&
                 all_of(Ext->users(),
                        [](User *U) { return isa<GetElementPtrInst>(U); })) {
-            // Use getExtractWithExtendCost() to calculate the cost of
-            // extractelement/ext pair.
-            CommonCost -= TTI->getExtractWithExtendCost(
-                Ext->getOpcode(), Ext->getType(), VecTy, I);
-            // Add back the cost of s|zext which is subtracted separately.
-            CommonCost += TTI->getCastInstrCost(
-                Ext->getOpcode(), Ext->getType(), EI->getType(),
-                TTI::getCastContextHint(Ext), CostKind, Ext);
-            continue;
+              // Use getExtractWithExtendCost() to calculate the cost of
+              // extractelement/ext pair.
+              ValueScalarizationCost.addExtractWithExtend(
+                  Ext->getOpcode(), Ext->getType(), VecTy, I);
+              // Add back the cost of s|zext which is subtracted separately.
+              CommonCost += TTI->getCastInstrCost(
+                  Ext->getOpcode(), Ext->getType(), EI->getType(),
+                  TTI::getCastContextHint(Ext), CostKind, Ext);
+              continue;
             }
           }
-          CommonCost -=
-              TTI->getVectorInstrCost(Instruction::ExtractElement, VecTy, I);
+          ValueScalarizationCost.addExtract(VecTy, I);
         }
+        CommonCost -= ValueScalarizationCost.getCost(TTI);
       } else {
         AdjustExtractsCost(CommonCost);
       }
@@ -6340,14 +6392,17 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
 
       unsigned NumOfParts = TTI->getNumberOfParts(SrcVecTy);
 
+      SmallVector<int> InsertMask(NumElts, UndefMaskElem);
       unsigned OffsetBeg = *getInsertIndex(VL.front());
       unsigned OffsetEnd = OffsetBeg;
-      for (Value *V : VL.drop_front()) {
+      InsertMask[OffsetBeg] = 0;
+      for (auto [I, V] : enumerate(VL.drop_front())) {
         unsigned Idx = *getInsertIndex(V);
         if (OffsetBeg > Idx)
           OffsetBeg = Idx;
         else if (OffsetEnd < Idx)
           OffsetEnd = Idx;
+        InsertMask[Idx] = I + 1;
       }
       unsigned VecScalarsSz = PowerOf2Ceil(NumElts);
       if (NumOfParts > 0)
@@ -6412,8 +6467,6 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
       // initial vector or inserting a subvector.
       // TODO: Implement the analysis of the FirstInsert->getOperand(0)
       // subvector of ActualVecTy.
-      SmallVector<int> InsertMask(NumElts, UndefMaskElem);
-      copy(Mask, std::next(InsertMask.begin(), OffsetBeg));
       if (!isUndefVector(FirstInsert->getOperand(0), InsertMask) &&
           NumScalars != NumElts && !IsWholeSubvector) {
         if (InsertVecSz != VecSz) {
@@ -6540,32 +6593,26 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
     case Instruction::And:
     case Instruction::Or:
     case Instruction::Xor: {
-      TTI::OperandValueInfo Op1Info = {TTI::OK_AnyValue, TTI::OP_None};
-
-      // Certain instructions can be cheaper to vectorize if they have a
-      // constant second vector operand.
       const unsigned OpIdx = isa<BinaryOperator>(VL0) ? 1 : 0;
-      auto Op2Info = getOperandInfo(VL, OpIdx);
 
-      SmallVector<const Value *, 4> Operands(VL0->operand_values());
-      InstructionCost ScalarEltCost =
+      InstructionCost ScalarCost = 0;
+      for (auto *V : VL) {
+        auto *VI = cast<Instruction>(V);
+        TTI::OperandValueInfo Op1Info = TTI::getOperandInfo(VI->getOperand(0));
+        TTI::OperandValueInfo Op2Info = TTI::getOperandInfo(VI->getOperand(OpIdx));
+        SmallVector<const Value *, 4> Operands(VI->operand_values());
+        ScalarCost +=
           TTI->getArithmeticInstrCost(E->getOpcode(), ScalarTy, CostKind,
-                                      Op1Info, Op2Info,
-                                      Operands, VL0);
+                                      Op1Info, Op2Info, Operands, VI);
+      }
       if (NeedToShuffleReuses) {
-        CommonCost -= (EntryVF - VL.size()) * ScalarEltCost;
+        CommonCost -= (EntryVF - VL.size()) * ScalarCost/VL.size();
       }
-      InstructionCost ScalarCost = VecTy->getNumElements() * ScalarEltCost;
-      for (unsigned I = 0, Num = VL0->getNumOperands(); I < Num; ++I) {
-        if (all_of(VL, [I](Value *V) {
-              return isConstant(cast<Instruction>(V)->getOperand(I));
-            }))
-          Operands[I] = ConstantVector::getNullValue(VecTy);
-      }
+      TTI::OperandValueInfo Op1Info = getOperandInfo(VL, 0);
+      TTI::OperandValueInfo Op2Info = getOperandInfo(VL, OpIdx);
       InstructionCost VecCost =
           TTI->getArithmeticInstrCost(E->getOpcode(), VecTy, CostKind,
-                                      Op1Info, Op2Info,
-                                      Operands, VL0);
+                                      Op1Info, Op2Info);
       LLVM_DEBUG(dumpTreeCosts(E, CommonCost, VecCost, ScalarCost));
       return CommonCost + VecCost - ScalarCost;
     }
@@ -6630,16 +6677,18 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
       auto *SI =
           cast<StoreInst>(IsReorder ? VL[E->ReorderIndices.front()] : VL0);
       Align Alignment = SI->getAlign();
+      InstructionCost ScalarStCost = 0;
+      for (auto *V : VL) {
+        auto *VI = cast<Instruction>(V);
+        TTI::OperandValueInfo OpInfo = TTI::getOperandInfo(VI->getOperand(0));
+        ScalarStCost +=
+          TTI->getMemoryOpCost(Instruction::Store, ScalarTy, Alignment, 0,
+                               CostKind, OpInfo, VI);
+      }
       TTI::OperandValueInfo OpInfo = getOperandInfo(VL, 0);
-      InstructionCost ScalarEltCost = TTI->getMemoryOpCost(
-          Instruction::Store, ScalarTy, Alignment, 0, CostKind, OpInfo, VL0);
-      InstructionCost ScalarStCost = VecTy->getNumElements() * ScalarEltCost;
-      TTI::OperandValueKind OpVK = TTI::OK_AnyValue;
-      if (OpInfo.isConstant())
-        OpVK = TTI::OK_NonUniformConstantValue;
-      InstructionCost VecStCost = TTI->getMemoryOpCost(
-          Instruction::Store, VecTy, Alignment, 0, CostKind,
-          {OpVK, TTI::OP_None}, VL0);
+      InstructionCost VecStCost =
+        TTI->getMemoryOpCost(Instruction::Store, VecTy, Alignment, 0, CostKind,
+                             OpInfo);
       LLVM_DEBUG(dumpTreeCosts(E, CommonCost, VecStCost, ScalarStCost));
       return CommonCost + VecStCost - ScalarStCost;
     }
@@ -7228,6 +7277,7 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
   SmallVector<MapVector<const TreeEntry *, SmallVector<int>>> ShuffleMasks;
   SmallVector<std::pair<Value *, const TreeEntry *>> FirstUsers;
   SmallVector<APInt> DemandedElts;
+  ScalarizationOverheadBuilder ScalarizationCost;
   for (ExternalUser &EU : ExternalUses) {
     // We only add extract cost once for the same scalar.
     if (!isa_and_nonnull<InsertElementInst>(EU.User) &&
@@ -7318,20 +7368,20 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
     // If we plan to rewrite the tree in a smaller type, we will need to sign
     // extend the extracted value back to the original type. Here, we account
     // for the extract and the added cost of the sign extend if needed.
-    auto *VecTy = FixedVectorType::get(EU.Scalar->getType(), BundleWidth);
     auto *ScalarRoot = VectorizableTree[0]->Scalars[0];
     if (MinBWs.count(ScalarRoot)) {
       auto *MinTy = IntegerType::get(F->getContext(), MinBWs[ScalarRoot].first);
       auto Extend =
           MinBWs[ScalarRoot].second ? Instruction::SExt : Instruction::ZExt;
-      VecTy = FixedVectorType::get(MinTy, BundleWidth);
-      ExtractCost += TTI->getExtractWithExtendCost(Extend, EU.Scalar->getType(),
-                                                   VecTy, EU.Lane);
+      auto *VecTy = FixedVectorType::get(MinTy, BundleWidth);
+      ScalarizationCost.addExtractWithExtend(Extend, EU.Scalar->getType(),
+                                             VecTy, EU.Lane);
     } else {
-      ExtractCost +=
-          TTI->getVectorInstrCost(Instruction::ExtractElement, VecTy, EU.Lane);
+      auto *VecTy = FixedVectorType::get(EU.Scalar->getType(), BundleWidth);
+      ScalarizationCost.addExtract(VecTy, EU.Lane);
     }
   }
+  ExtractCost += ScalarizationCost.getCost(TTI);
 
   InstructionCost SpillCost = getSpillCost();
   Cost += SpillCost + ExtractCost;
@@ -10401,6 +10451,11 @@ bool SLPVectorizerPass::vectorizeStores(ArrayRef<StoreInst *> Stores,
       ValueTy = Trunc->getSrcTy();
     unsigned MinVF = TTI->getStoreMinimumVF(
         R.getMinVF(DL->getTypeSizeInBits(ValueTy)), StoreTy, ValueTy);
+
+    if (MaxVF <= MinVF) {
+      LLVM_DEBUG(dbgs() << "SLP: Vectorization infeasible as MaxVF (" << MaxVF << ") <= "
+                        << "MinVF (" << MinVF << ")\n");
+    }
 
     // FIXME: Is division-by-2 the correct step? Should we assert that the
     // register size is a power-of-2?
