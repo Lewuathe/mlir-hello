@@ -51,7 +51,7 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
   using OpRewritePattern<hello::ConstantOp>::OpRewritePattern;
 
   mlir::LogicalResult matchAndRewrite(hello::ConstantOp op, mlir::PatternRewriter &rewriter) const final {
-    mlir::DenseElementsAttr constantValue = op.value();
+    mlir::DenseElementsAttr constantValue = op.getValue();
     mlir::Location loc = op.getLoc();
 
     // When lowering the constant operation, we allocate and assign the constant
