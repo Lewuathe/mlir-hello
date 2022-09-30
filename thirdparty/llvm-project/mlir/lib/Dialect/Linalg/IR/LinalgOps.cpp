@@ -14,8 +14,8 @@
 
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Arithmetic/Utils/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -1539,22 +1539,6 @@ LogicalResult IndexOp::verify() {
 
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Linalg/IR/LinalgStructuredOps.cpp.inc"
-
-/// Return the dims that are `iteratorTypeName` loops in the LinalgOp `op`.
-/// Assumes `op` is a LinalgOp.
-void mlir::linalg::getDimsOfType(Operation *op, StringRef iteratorTypeName,
-                                 SmallVectorImpl<unsigned> &res) {
-  if (!cast<LinalgOp>(op).iterator_types())
-    return;
-
-  unsigned dim = 0;
-  for (auto tn :
-       cast<LinalgOp>(op).iterator_types().getAsValueRange<StringAttr>()) {
-    if (tn == iteratorTypeName)
-      res.push_back(dim);
-    ++dim;
-  }
-}
 
 AffineMap mlir::linalg::extractOrIdentityMap(Optional<AffineMap> maybeMap,
                                              unsigned rank,

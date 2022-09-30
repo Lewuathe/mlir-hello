@@ -1901,8 +1901,8 @@ HeaderFileInfoTrait::ReadData(internal_key_ref key, const unsigned char *d,
          "Wrong data length in HeaderFileInfo deserialization");
   while (d != End) {
     uint32_t LocalSMID = endian::readNext<uint32_t, little, unaligned>(d);
-    auto HeaderRole = static_cast<ModuleMap::ModuleHeaderRole>(LocalSMID & 3);
-    LocalSMID >>= 2;
+    auto HeaderRole = static_cast<ModuleMap::ModuleHeaderRole>(LocalSMID & 7);
+    LocalSMID >>= 3;
 
     // This header is part of a module. Associate it with the module to enable
     // implicit module import.
@@ -4227,10 +4227,7 @@ ASTReader::ASTReadResult ASTReader::ReadAST(StringRef FileName,
           ReadASTCore(FileName, Type, ImportLoc,
                       /*ImportedBy=*/nullptr, Loaded, 0, 0, ASTFileSignature(),
                       ClientLoadCapabilities)) {
-    ModuleMgr.removeModules(ModuleMgr.begin() + NumModules,
-                            PP.getLangOpts().Modules
-                                ? &PP.getHeaderSearchInfo().getModuleMap()
-                                : nullptr);
+    ModuleMgr.removeModules(ModuleMgr.begin() + NumModules);
 
     // If we find that any modules are unusable, the global index is going
     // to be out-of-date. Just remove it.
@@ -6665,7 +6662,7 @@ void TypeLocReader::VisitTypeOfTypeLoc(TypeOfTypeLoc TL) {
   TL.setTypeofLoc(readSourceLocation());
   TL.setLParenLoc(readSourceLocation());
   TL.setRParenLoc(readSourceLocation());
-  TL.setUnderlyingTInfo(GetTypeSourceInfo());
+  TL.setUnmodifiedTInfo(GetTypeSourceInfo());
 }
 
 void TypeLocReader::VisitDecltypeTypeLoc(DecltypeTypeLoc TL) {

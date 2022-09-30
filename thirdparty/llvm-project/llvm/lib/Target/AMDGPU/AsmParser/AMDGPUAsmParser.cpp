@@ -343,6 +343,7 @@ public:
   }
 
   bool isVRegWithInputMods() const;
+  bool isT16VRegWithInputMods() const;
 
   bool isSDWAOperand(MVT type) const;
   bool isSDWAFP16Operand() const;
@@ -522,6 +523,10 @@ public:
     return isRegOrInlineNoMods(AMDGPU::VS_64RegClassID, MVT::i64);
   }
 
+  bool isVCSrcTB16_Lo128() const {
+    return isRegOrInlineNoMods(AMDGPU::VS_32_Lo128RegClassID, MVT::i16);
+  }
+
   bool isVCSrcB16() const {
     return isRegOrInlineNoMods(AMDGPU::VS_32RegClassID, MVT::i16);
   }
@@ -538,6 +543,10 @@ public:
     return isRegOrInlineNoMods(AMDGPU::VS_64RegClassID, MVT::f64);
   }
 
+  bool isVCSrcTF16_Lo128() const {
+    return isRegOrInlineNoMods(AMDGPU::VS_32_Lo128RegClassID, MVT::f16);
+  }
+
   bool isVCSrcF16() const {
     return isRegOrInlineNoMods(AMDGPU::VS_32RegClassID, MVT::f16);
   }
@@ -552,6 +561,10 @@ public:
 
   bool isVSrcB64() const {
     return isVCSrcF64() || isLiteralImm(MVT::i64);
+  }
+
+  bool isVSrcTB16_Lo128() const {
+    return isVCSrcTB16_Lo128() || isLiteralImm(MVT::i16);
   }
 
   bool isVSrcB16() const {
@@ -584,6 +597,10 @@ public:
 
   bool isVSrcF64() const {
     return isVCSrcF64() || isLiteralImm(MVT::f64);
+  }
+
+  bool isVSrcTF16_Lo128() const {
+    return isVCSrcTF16_Lo128() || isLiteralImm(MVT::f16);
   }
 
   bool isVSrcF16() const {
@@ -1647,7 +1664,6 @@ private:
   bool validateSMEMOffset(const MCInst &Inst, const OperandVector &Operands);
   bool validateSOPLiteral(const MCInst &Inst) const;
   bool validateConstantBusLimitations(const MCInst &Inst, const OperandVector &Operands);
-  bool validateEarlyClobberLimitations(const MCInst &Inst, const OperandVector &Operands);
   bool validateIntClampSupported(const MCInst &Inst);
   bool validateMIMGAtomicDMask(const MCInst &Inst);
   bool validateMIMGGatherDMask(const MCInst &Inst);
@@ -1669,6 +1685,7 @@ private:
   bool validateBLGP(const MCInst &Inst, const OperandVector &Operands);
   bool validateGWS(const MCInst &Inst, const OperandVector &Operands);
   bool validateDivScale(const MCInst &Inst);
+  bool validateWaitCnt(const MCInst &Inst, const OperandVector &Operands);
   bool validateCoherencyBits(const MCInst &Inst, const OperandVector &Operands,
                              const SMLoc &IDLoc);
   bool validateLdsDMA(uint64_t Enc, const MCInst &Inst,
@@ -2047,6 +2064,10 @@ bool AMDGPUOperand::isVRegWithInputMods() const {
          // GFX90A allows DPP on 64-bit operands.
          (isRegClass(AMDGPU::VReg_64RegClassID) &&
           AsmParser->getFeatureBits()[AMDGPU::Feature64BitDPP]);
+}
+
+bool AMDGPUOperand::isT16VRegWithInputMods() const {
+  return isRegClass(AMDGPU::VGPR_32_Lo128RegClassID);
 }
 
 bool AMDGPUOperand::isSDWAOperand(MVT type) const {
@@ -3554,46 +3575,6 @@ bool AMDGPUAsmParser::validateConstantBusLimitations(
   return false;
 }
 
-bool
-AMDGPUAsmParser::validateEarlyClobberLimitations(const MCInst &Inst,
-                                                 const OperandVector &Operands) {
-  const unsigned Opcode = Inst.getOpcode();
-  const MCInstrDesc &Desc = MII.get(Opcode);
-
-  const int DstIdx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::vdst);
-  if (DstIdx == -1 ||
-      Desc.getOperandConstraint(DstIdx, MCOI::EARLY_CLOBBER) == -1) {
-    return true;
-  }
-
-  const MCRegisterInfo *TRI = getContext().getRegisterInfo();
-
-  const int Src0Idx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src0);
-  const int Src1Idx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src1);
-  const int Src2Idx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src2);
-
-  assert(DstIdx != -1);
-  const MCOperand &Dst = Inst.getOperand(DstIdx);
-  assert(Dst.isReg());
-
-  const int SrcIndices[] = { Src0Idx, Src1Idx, Src2Idx };
-
-  for (int SrcIdx : SrcIndices) {
-    if (SrcIdx == -1) break;
-    const MCOperand &Src = Inst.getOperand(SrcIdx);
-    if (Src.isReg()) {
-      if (TRI->regsOverlap(Dst.getReg(), Src.getReg())) {
-        const unsigned SrcReg = mc2PseudoReg(Src.getReg());
-        Error(getRegLoc(SrcReg, Operands),
-          "destination must be different than all sources");
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
 bool AMDGPUAsmParser::validateIntClampSupported(const MCInst &Inst) {
 
   const unsigned Opc = Inst.getOpcode();
@@ -4474,6 +4455,29 @@ bool AMDGPUAsmParser::validateBLGP(const MCInst &Inst,
   return false;
 }
 
+bool AMDGPUAsmParser::validateWaitCnt(const MCInst &Inst,
+                                      const OperandVector &Operands) {
+  if (!isGFX11Plus())
+    return true;
+
+  unsigned Opc = Inst.getOpcode();
+  if (Opc != AMDGPU::S_WAITCNT_EXPCNT_gfx11 &&
+      Opc != AMDGPU::S_WAITCNT_LGKMCNT_gfx11 &&
+      Opc != AMDGPU::S_WAITCNT_VMCNT_gfx11 &&
+      Opc != AMDGPU::S_WAITCNT_VSCNT_gfx11)
+    return true;
+
+  int Src0Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::sdst);
+  assert(Src0Idx >= 0 && Inst.getOperand(Src0Idx).isReg());
+  auto Reg = mc2PseudoReg(Inst.getOperand(Src0Idx).getReg());
+  if (Reg == AMDGPU::SGPR_NULL)
+    return true;
+
+  SMLoc RegLoc = getRegLoc(Reg, Operands);
+  Error(RegLoc, "src0 must be null");
+  return false;
+}
+
 // gfx90a has an undocumented limitation:
 // DS_GWS opcodes must use even aligned registers.
 bool AMDGPUAsmParser::validateGWS(const MCInst &Inst,
@@ -4622,9 +4626,6 @@ bool AMDGPUAsmParser::validateInstruction(const MCInst &Inst,
   if (!validateConstantBusLimitations(Inst, Operands)) {
     return false;
   }
-  if (!validateEarlyClobberLimitations(Inst, Operands)) {
-    return false;
-  }
   if (!validateIntClampSupported(Inst)) {
     Error(getImmLoc(AMDGPUOperand::ImmTyClampSI, Operands),
       "integer clamping is not supported on this GPU");
@@ -4715,6 +4716,9 @@ bool AMDGPUAsmParser::validateInstruction(const MCInst &Inst,
 
   if (!validateDivScale(Inst)) {
     Error(IDLoc, "ABS not allowed in VOP3B instructions");
+    return false;
+  }
+  if (!validateWaitCnt(Inst, Operands)) {
     return false;
   }
   if (!validateExeczVcczOperands(Operands)) {
@@ -8329,19 +8333,16 @@ void AMDGPUAsmParser::cvtVOP3(MCInst &Inst, const OperandVector &Operands,
   // we don't allow modifiers for this operand in assembler so src2_modifiers
   // should be 0.
   if (Opc == AMDGPU::V_MAC_F32_e64_gfx6_gfx7 ||
-      Opc == AMDGPU::V_MAC_F32_e64_gfx10 ||
-      Opc == AMDGPU::V_MAC_F32_e64_vi ||
+      Opc == AMDGPU::V_MAC_F32_e64_gfx10 || Opc == AMDGPU::V_MAC_F32_e64_vi ||
       Opc == AMDGPU::V_MAC_LEGACY_F32_e64_gfx6_gfx7 ||
       Opc == AMDGPU::V_MAC_LEGACY_F32_e64_gfx10 ||
-      Opc == AMDGPU::V_MAC_F16_e64_vi ||
-      Opc == AMDGPU::V_FMAC_F64_e64_gfx90a ||
+      Opc == AMDGPU::V_MAC_F16_e64_vi || Opc == AMDGPU::V_FMAC_F64_e64_gfx90a ||
       Opc == AMDGPU::V_FMAC_F32_e64_gfx10 ||
-      Opc == AMDGPU::V_FMAC_F32_e64_gfx11 ||
-      Opc == AMDGPU::V_FMAC_F32_e64_vi ||
+      Opc == AMDGPU::V_FMAC_F32_e64_gfx11 || Opc == AMDGPU::V_FMAC_F32_e64_vi ||
       Opc == AMDGPU::V_FMAC_LEGACY_F32_e64_gfx10 ||
       Opc == AMDGPU::V_FMAC_DX9_ZERO_F32_e64_gfx11 ||
       Opc == AMDGPU::V_FMAC_F16_e64_gfx10 ||
-      Opc == AMDGPU::V_FMAC_F16_e64_gfx11) {
+      Opc == AMDGPU::V_FMAC_F16_t16_e64_gfx11) {
     auto it = Inst.begin();
     std::advance(it, AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src2_modifiers));
     it = Inst.insert(it, MCOperand::createImm(0)); // no modifiers for src2

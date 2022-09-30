@@ -8,8 +8,7 @@ add_mlir_dialect_library(MLIRSCFDialect
   MLIRSCFOpsIncGen
 
   LINK_LIBS PUBLIC
-  MLIRAffineDialect
-  MLIRArithmeticDialect
+  MLIRArithDialect
   MLIRBufferizationDialect
   MLIRControlFlowDialect
   MLIRIR

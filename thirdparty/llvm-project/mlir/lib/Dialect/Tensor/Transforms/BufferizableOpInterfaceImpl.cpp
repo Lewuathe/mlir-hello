@@ -8,7 +8,7 @@
 
 #include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -107,6 +107,29 @@ struct CollapseShapeOpInterface
   BufferRelation bufferRelation(Operation *op, OpResult opResult,
                                 const AnalysisState &state) const {
     return BufferRelation::Equivalent;
+  }
+
+  FailureOr<BaseMemRefType>
+  getBufferType(Operation *op, Value value, const BufferizationOptions &options,
+                const DenseMap<Value, BaseMemRefType> &fixedTypes) const {
+    auto collapseShapeOp = cast<tensor::CollapseShapeOp>(op);
+    auto maybeSrcBufferType = bufferization::getBufferType(
+        collapseShapeOp.getSrc(), options, fixedTypes);
+    if (failed(maybeSrcBufferType))
+      return failure();
+    auto srcBufferType = maybeSrcBufferType->cast<MemRefType>();
+    bool canBeCollapsed = memref::CollapseShapeOp::isGuaranteedCollapsible(
+        srcBufferType, collapseShapeOp.getReassociationIndices());
+
+    if (!canBeCollapsed) {
+      // If dims cannot be collapsed, this op bufferizes to a new allocation.
+      RankedTensorType tensorResultType = collapseShapeOp.getResultType();
+      return bufferization::getMemRefTypeWithStaticIdentityLayout(
+          tensorResultType, srcBufferType.getMemorySpaceAsInt());
+    }
+
+    return memref::CollapseShapeOp::computeCollapsedType(
+        srcBufferType, collapseShapeOp.getReassociationIndices());
   }
 
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
@@ -230,6 +253,23 @@ struct ExpandShapeOpInterface
   BufferRelation bufferRelation(Operation *op, OpResult opResult,
                                 const AnalysisState &state) const {
     return BufferRelation::Equivalent;
+  }
+
+  FailureOr<BaseMemRefType>
+  getBufferType(Operation *op, Value value, const BufferizationOptions &options,
+                const DenseMap<Value, BaseMemRefType> &fixedTypes) const {
+    auto expandShapeOp = cast<tensor::ExpandShapeOp>(op);
+    auto maybeSrcBufferType = bufferization::getBufferType(
+        expandShapeOp.getSrc(), options, fixedTypes);
+    if (failed(maybeSrcBufferType))
+      return failure();
+    auto srcBufferType = maybeSrcBufferType->cast<MemRefType>();
+    auto maybeResultType = memref::ExpandShapeOp::computeExpandedType(
+        srcBufferType, expandShapeOp.getResultType().getShape(),
+        expandShapeOp.getReassociationIndices());
+    if (failed(maybeResultType))
+      return failure();
+    return *maybeResultType;
   }
 
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
@@ -1011,6 +1051,6 @@ void mlir::tensor::registerBufferizableOpInterfaceExternalModels(
     ReshapeOp::attachInterface<ReshapeOpInterface>(*ctx);
 
     // Load additional dialects of which ops may get created.
-    ctx->loadDialect<arith::ArithmeticDialect, scf::SCFDialect>();
+    ctx->loadDialect<arith::ArithDialect, scf::SCFDialect>();
   });
 }

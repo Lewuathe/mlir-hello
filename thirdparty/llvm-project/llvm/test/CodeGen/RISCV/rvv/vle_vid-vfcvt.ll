@@ -98,3 +98,17 @@ entry:
   store <4 x float> <float -3.0, float -2.0, float -1.0, float -0.0>, ptr %t, align 16
   ret void
 }
+
+define void @foo_8(ptr nocapture noundef writeonly %t) {
+; CHECK-LABEL: foo_8:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lui a1, %hi(.LCPI7_0)
+; CHECK-NEXT:    addi a1, a1, %lo(.LCPI7_0)
+; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, mu
+; CHECK-NEXT:    vle32.v v8, (a1)
+; CHECK-NEXT:    vse32.v v8, (a0)
+; CHECK-NEXT:    ret
+entry:
+  store <4 x float> <float 1.5, float 2.5, float 3.5, float 4.5>, ptr %t, align 16
+  ret void
+}

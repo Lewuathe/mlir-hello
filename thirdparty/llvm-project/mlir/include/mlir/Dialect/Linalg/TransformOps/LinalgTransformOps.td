@@ -464,6 +464,8 @@ def SplitReductionOp : Op<Transform_Dialect, "structured.split_reduction",
         remaining reduction after splitting).
       - insert_split_dimension: the dimension in the temporary tensor into 
         which the new parallel dimension is inserted.
+      - inner_parallel: specifies whether the parallel dimension is before or
+        after the reduction dimension in the splitting op.
       - use_scaling_algorithm: whether to use a scaling based formulation that 
         does not create an ExpandShapeOp (default: do not use scaling)
       - use_alloc: whether to use an alloc op to allocate the temporary 
@@ -587,6 +589,7 @@ def SplitReductionOp : Op<Transform_Dialect, "structured.split_reduction",
   let arguments = (ins PDL_Operation:$target,
                    DefaultValuedAttr<I64Attr, "{}">:$split_factor,
                    DefaultValuedAttr<I64Attr, "{}">:$insert_split_dimension,
+                   UnitAttr:$inner_parallel,
                    UnitAttr:$use_scaling_algorithm,
                    UnitAttr:$use_alloc);
   let results = (outs PDL_Operation:$init_or_alloc_op,
@@ -783,8 +786,8 @@ def MapNestedForeachThreadToGpuThreads :
       The operation alters the block size of the given gpu_launch using 
       blockDim argument.
 
-      Return modes:
-      =============
+      #### Return modes:
+      
       This operation ignores non-gpu_launch ops and drops them in the return.
 
       If any scf.foreach_thread with tensors is found, the transform definitely 
@@ -798,8 +801,7 @@ def MapNestedForeachThreadToGpuThreads :
       producing a new SSA value to satisfy chaining and linearity of the IR 
       properties.
 
-      Example:
-      ========
+      #### Example:
 
       ```
       gpu.launch blocks(%bx, %by, %bz) in (%x = %0, %y = %1, %z = %2)
@@ -834,7 +836,65 @@ def MapNestedForeachThreadToGpuThreads :
     }];
 
   let arguments = (ins PDL_Operation:$target,
-                   DefaultValuedAttr<I64ArrayAttr, "{}">:$blockDim);
+                   DefaultValuedAttr<I64ArrayAttr, "{}">:$blockDim,
+                   DefaultValuedAttr<BoolAttr, "true">:$syncAfterDistribute);
+  let results = (outs PDL_Operation:$result);
+
+  let assemblyFormat = "$target attr-dict";
+  let extraClassDeclaration = [{
+    ::mlir::DiagnosedSilenceableFailure applyToOne(
+        ::mlir::Operation *target, 
+        ::llvm::SmallVectorImpl<::mlir::Operation *> &results, 
+        ::mlir::transform::TransformState &state);
+  }];
+}
+
+def MapNestedForeachThreadToGpuBlocks : Op<Transform_Dialect, 
+    "structured.map_nested_foreach_thread_to_gpu_blocks",
+    [FunctionalStyleTransformOpTrait,
+     MemoryEffectsOpInterface,
+     TransformOpInterface,
+     TransformEachOpTrait]> {
+  let description = [{
+    Target the gpu_launch op and rewrite the top level `scf.foreach_thread`
+    to distributed gpu.block_id attribute. If `generate_gpu_launch` attribute 
+    is set, then first generates `gpu_launch` and moves the top level 
+    `scf.foreach_thread` inside.
+
+    The operation searches top level `scf.foreach_thread` ops under 
+    `gpu_launch` and maps each such op to GPU blocks. Mapping is 
+    one-to-one and the induction variables of `scf.foreach_thread` are 
+    rewritten to gpu.block_id according to the `thread_dim_apping` attribute.
+
+    Dynamic, `scf.foreach_thread` trip counts are currently not supported. 
+    Dynamic block dim sizes are currently not supported.
+
+    Only **bufferized** scf.foreach_thread are currently supported.
+    Only scf.foreach_thread distributed to **at most 3 dimensions** are 
+    currently supported.
+
+    The operation alters the block size of the given gpu_launch using 
+    gridDim argument.
+
+    #### Return modes:
+    
+    This operation ignores non-gpu_launch ops and drops them in the return.
+
+    If any scf.foreach_thread with tensors is found, the transform definitely 
+    fails.    
+
+    If all the scf.foreach_thread operations contained within the LaunchOp 
+    referred to by the `target` PDLOperation lower to GPU properly, the 
+    transform succeeds. Otherwise the transform definitely fails.
+
+    The returned handle points to the same LaunchOp operand, consuming it and
+    producing a new SSA value to satisfy chaining and linearity of the IR 
+    properties.
+  }];
+
+  let arguments = (ins PDL_Operation:$target,
+                   DefaultValuedAttr<I64ArrayAttr, "{}">:$gridDim,
+                   UnitAttr:$generate_gpu_launch);
   let results = (outs PDL_Operation:$result);
 
   let assemblyFormat = "$target attr-dict";

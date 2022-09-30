@@ -797,6 +797,18 @@ def OIListAllowedLiteral : TEST_Op<"oilist_allowed_literal"> {
   }];
 }
 
+def TestEllipsisOp : TEST_Op<"ellipsis"> {
+  let arguments = (ins Variadic<AnyType>:$operands, UnitAttr:$variadic);
+  let assemblyFormat = [{
+    `(` $operands (`...` $variadic^)? `)` attr-dict `:` type($operands) `...`
+  }];
+}
+
+def ElseAnchorOp : TEST_Op<"else_anchor"> {
+  let arguments = (ins Optional<AnyType>:$a);
+  let assemblyFormat = "`(` (`?`) : (`` $a^ `:` type($a))? `)` attr-dict";
+}
+
 // This is used to test encoding of a string attribute into an SSA name of a
 // pretty printed value name.
 def StringAttrPrettyNameOp
@@ -1897,6 +1909,12 @@ def PolyForOp : TEST_Op<"polyfor", [OpAsmOpInterface]> {
   }];
   let regions = (region SizedRegion<1>:$region);
   let hasCustomAssemblyFormat = 1;
+}
+
+def TestAttrWithLoc : TEST_Op<"attr_with_loc"> {
+  let summary = "op's attribute has a location";
+  let arguments = (ins AnyAttr:$loc, AnyAttr:$value);
+  let assemblyFormat = "`(` $value `` custom<OptionalLoc>($loc) `)` attr-dict";
 }
 
 //===----------------------------------------------------------------------===//

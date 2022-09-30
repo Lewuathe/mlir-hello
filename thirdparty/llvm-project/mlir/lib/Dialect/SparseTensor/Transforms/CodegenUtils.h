@@ -13,9 +13,11 @@
 #ifndef MLIR_DIALECT_SPARSETENSOR_TRANSFORMS_CODEGENUTILS_H_
 #define MLIR_DIALECT_SPARSETENSOR_TRANSFORMS_CODEGENUTILS_H_
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/SparseTensor/IR/SparseTensor.h"
+#include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
+#include "mlir/ExecutionEngine/SparseTensor/Enums.h"
 #include "mlir/ExecutionEngine/SparseTensorUtils.h"
 #include "mlir/IR/Builders.h"
 
@@ -193,6 +195,12 @@ constantDimLevelTypeEncoding(OpBuilder &builder, Location loc,
                     static_cast<uint8_t>(dimLevelTypeEncoding(dlt)));
 }
 
+/// Helper method to translate indices during a reshaping operation.
+void translateIndicesArray(OpBuilder &builder, Location loc,
+                           ArrayRef<ReassociationIndices> reassociation,
+                           ValueRange srcIndices, ArrayRef<Value> srcShape,
+                           ArrayRef<Value> dstShape,
+                           SmallVectorImpl<Value> &dstIndices);
 } // namespace sparse_tensor
 } // namespace mlir
 

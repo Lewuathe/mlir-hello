@@ -20163,6 +20163,8 @@ RCPair ARMTargetLowering::getRegForInlineAsmConstraint(
     case 't':
       if (VT == MVT::Other)
         break;
+      if (VT == MVT::f16 || VT == MVT::bf16)
+        return RCPair(0U, &ARM::HPRRegClass);
       if (VT == MVT::f32 || VT == MVT::i32)
         return RCPair(0U, &ARM::SPRRegClass);
       if (VT.getSizeInBits() == 64)
@@ -21189,6 +21191,21 @@ bool ARMTargetLowering::isCheapToSpeculateCttz(Type *Ty) const {
 
 bool ARMTargetLowering::isCheapToSpeculateCtlz(Type *Ty) const {
   return Subtarget->hasV6T2Ops();
+}
+
+bool ARMTargetLowering::isMaskAndCmp0FoldingBeneficial(
+    const Instruction &AndI) const {
+  if (!Subtarget->hasV7Ops())
+    return false;
+
+  // Sink the `and` instruction only if the mask would fit into a modified
+  // immediate operand.
+  ConstantInt *Mask = dyn_cast<ConstantInt>(AndI.getOperand(1));
+  if (!Mask || Mask->getValue().getBitWidth() > 32u)
+    return false;
+  auto MaskVal = unsigned(Mask->getValue().getZExtValue());
+  return (Subtarget->isThumb2() ? ARM_AM::getT2SOImmVal(MaskVal)
+                                : ARM_AM::getSOImmVal(MaskVal)) != -1;
 }
 
 bool ARMTargetLowering::shouldExpandShift(SelectionDAG &DAG, SDNode *N) const {

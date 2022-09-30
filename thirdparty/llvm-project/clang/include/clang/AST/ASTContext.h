@@ -1714,9 +1714,9 @@ public:
   /// Return a ObjCObjectPointerType type for the given ObjCObjectType.
   QualType getObjCObjectPointerType(QualType OIT) const;
 
-  /// GCC extension.
-  QualType getTypeOfExprType(Expr *e) const;
-  QualType getTypeOfType(QualType t) const;
+  /// C2x feature and GCC extension.
+  QualType getTypeOfExprType(Expr *E, TypeOfKind Kind) const;
+  QualType getTypeOfType(QualType QT, TypeOfKind Kind) const;
 
   QualType getReferenceQualifiedType(const Expr *e) const;
 
@@ -2668,6 +2668,11 @@ public:
   /// Determine whether the given template names refer to the same
   /// template.
   bool hasSameTemplateName(const TemplateName &X, const TemplateName &Y) const;
+
+  /// Determine whether two Friend functions are different because constraints
+  /// that refer to an enclosing template, according to [temp.friend] p9.
+  bool FriendsDifferByConstraints(const FunctionDecl *X,
+                                  const FunctionDecl *Y) const;
 
   /// Determine whether the two declarations refer to the same entity.
   bool isSameEntity(const NamedDecl *X, const NamedDecl *Y) const;

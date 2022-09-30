@@ -1634,10 +1634,18 @@ void UnwrappedLineParser::parseStructuralElement(
       parseJavaScriptEs6ImportExport();
       return;
     }
-    if (!Style.isCpp())
-      break;
-    // Handle C++ "(inline|export) namespace".
-    [[fallthrough]];
+    if (Style.isCpp()) {
+      nextToken();
+      if (FormatTok->is(Keywords.kw_import)) {
+        parseModuleImport();
+        return;
+      }
+      if (FormatTok->is(tok::kw_namespace)) {
+        parseNamespace();
+        return;
+      }
+    }
+    break;
   case tok::kw_inline:
     nextToken();
     if (FormatTok->is(tok::kw_namespace)) {
@@ -2230,6 +2238,7 @@ bool UnwrappedLineParser::tryToParseLambda() {
     case tok::star:
     case tok::kw_const:
     case tok::kw_constexpr:
+    case tok::kw_consteval:
     case tok::comma:
     case tok::greater:
     case tok::identifier:
@@ -2237,6 +2246,7 @@ bool UnwrappedLineParser::tryToParseLambda() {
     case tok::coloncolon:
     case tok::kw_mutable:
     case tok::kw_noexcept:
+    case tok::kw_static:
       nextToken();
       break;
     // Specialization of a template with an integer parameter can contain
@@ -2973,6 +2983,11 @@ void UnwrappedLineParser::parseNew() {
 
   if (Style.isCSharp()) {
     do {
+      // Handle constructor invocation, e.g. `new(field: value)`.
+      if (FormatTok->is(tok::l_paren))
+        parseParens();
+
+      // Handle array initialization syntax, e.g. `new[] {10, 20, 30}`.
       if (FormatTok->is(tok::l_brace))
         parseBracedList();
 
@@ -3528,9 +3543,9 @@ void UnwrappedLineParser::parseConstraintExpression() {
       // concept C = bool(...);
       // and bool is the only type, all other types as cast must be inside a
       // cast to bool an thus are handled by the other cases.
-      nextToken();
-      if (FormatTok->isNot(tok::l_paren))
+      if (Tokens->peekNextToken()->isNot(tok::l_paren))
         return;
+      nextToken();
       parseParens();
       break;
 
