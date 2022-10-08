@@ -20,7 +20,7 @@
 #include "Hello/HelloPasses.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Pass/Pass.h"
@@ -153,7 +153,7 @@ void HelloToAffineLowerPass::runOnOperation() {
 
   target.addIllegalDialect<hello::HelloDialect>();
   target.addLegalDialect<mlir::AffineDialect, mlir::BuiltinDialect,
-    mlir::func::FuncDialect, mlir::arith::ArithmeticDialect, mlir::memref::MemRefDialect>();
+    mlir::func::FuncDialect, mlir::arith::ArithDialect, mlir::memref::MemRefDialect>();
   target.addDynamicallyLegalOp<hello::PrintOp>([](hello::PrintOp op) {
       return llvm::none_of(op->getOperandTypes(),
                            [](mlir::Type type) { return type.isa<mlir::TensorType>(); });
