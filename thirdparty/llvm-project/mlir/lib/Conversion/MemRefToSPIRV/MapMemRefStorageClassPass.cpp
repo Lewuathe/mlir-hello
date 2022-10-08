@@ -11,17 +11,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "../PassDetail.h"
-#include "mlir/Conversion/MemRefToSPIRV/MemRefToSPIRV.h"
 #include "mlir/Conversion/MemRefToSPIRV/MemRefToSPIRVPass.h"
+
+#include "mlir/Conversion/MemRefToSPIRV/MemRefToSPIRV.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVAttributes.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVDialect.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVEnums.h"
+#include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Debug.h"
+
+namespace mlir {
+#define GEN_PASS_DEF_MAPMEMREFSTORAGECLASS
+#include "mlir/Conversion/Passes.h.inc"
+} // namespace mlir
 
 #define DEBUG_TYPE "mlir-map-memref-storage-class"
 
@@ -284,7 +290,7 @@ void spirv::populateMemorySpaceToStorageClassPatterns(
 
 namespace {
 class MapMemRefStorageClassPass final
-    : public MapMemRefStorageClassBase<MapMemRefStorageClassPass> {
+    : public impl::MapMemRefStorageClassBase<MapMemRefStorageClassPass> {
 public:
   explicit MapMemRefStorageClassPass() {
     memorySpaceMap = spirv::mapMemorySpaceToVulkanStorageClass;
@@ -319,6 +325,15 @@ LogicalResult MapMemRefStorageClassPass::initializeOptions(StringRef options) {
 void MapMemRefStorageClassPass::runOnOperation() {
   MLIRContext *context = &getContext();
   Operation *op = getOperation();
+
+  if (spirv::TargetEnvAttr attr = spirv::lookupTargetEnv(op)) {
+    spirv::TargetEnv targetEnv(attr);
+    if (targetEnv.allows(spirv::Capability::Kernel)) {
+      memorySpaceMap = spirv::mapMemorySpaceToOpenCLStorageClass;
+    } else if (targetEnv.allows(spirv::Capability::Shader)) {
+      memorySpaceMap = spirv::mapMemorySpaceToVulkanStorageClass;
+    }
+  }
 
   auto target = spirv::getMemorySpaceToStorageClassTarget(*context);
   spirv::MemorySpaceToStorageClassConverter converter(memorySpaceMap);

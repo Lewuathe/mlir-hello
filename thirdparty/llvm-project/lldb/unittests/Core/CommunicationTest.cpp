@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/Communication.h"
+#include "lldb/Core/ThreadedCommunication.h"
 #include "lldb/Host/Config.h"
 #include "lldb/Host/ConnectionFileDescriptor.h"
 #include "lldb/Host/Pipe.h"
@@ -15,6 +16,7 @@
 #include "TestingSupport/Host/SocketTestUtilities.h"
 #include "TestingSupport/SubsystemRAII.h"
 
+#include <chrono>
 #include <thread>
 
 #if LLDB_ENABLE_POSIX
@@ -36,7 +38,7 @@ static void CommunicationReadTest(bool use_read_thread) {
   ASSERT_THAT_ERROR(a->Write("test", num_bytes).ToError(), llvm::Succeeded());
   ASSERT_EQ(num_bytes, 4U);
 
-  Communication comm("test");
+  ThreadedCommunication comm("test");
   comm.SetConnection(std::make_unique<ConnectionFileDescriptor>(b.release()));
   comm.SetCloseOnEOF(true);
 
@@ -78,8 +80,30 @@ static void CommunicationReadTest(bool use_read_thread) {
   EXPECT_EQ(status, lldb::eConnectionStatusEndOfFile);
   EXPECT_THAT_ERROR(error.ToError(), llvm::Succeeded());
 
-  // JoinReadThread() should just return immediately since there was no read
+  // JoinReadThread() should just return immediately if there was no read
   // thread started.
+  EXPECT_TRUE(comm.JoinReadThread());
+
+  // Test using Communication that is disconnected.
+  ASSERT_EQ(comm.Disconnect(), lldb::eConnectionStatusSuccess);
+  if (use_read_thread)
+    ASSERT_TRUE(comm.StartReadThread());
+  error.Clear();
+  EXPECT_EQ(
+      comm.Read(buf, sizeof(buf), std::chrono::seconds(5), status, &error), 0U);
+  EXPECT_EQ(status, lldb::eConnectionStatusLostConnection);
+  EXPECT_THAT_ERROR(error.ToError(), llvm::Failed());
+  EXPECT_TRUE(comm.JoinReadThread());
+
+  // Test using Communication without a connection.
+  comm.SetConnection(nullptr);
+  if (use_read_thread)
+    ASSERT_TRUE(comm.StartReadThread());
+  error.Clear();
+  EXPECT_EQ(
+      comm.Read(buf, sizeof(buf), std::chrono::seconds(5), status, &error), 0U);
+  EXPECT_EQ(status, lldb::eConnectionStatusNoConnection);
+  EXPECT_THAT_ERROR(error.ToError(), llvm::Failed());
   EXPECT_TRUE(comm.JoinReadThread());
 }
 
@@ -95,7 +119,7 @@ TEST_F(CommunicationTest, SynchronizeWhileClosing) {
   std::unique_ptr<TCPSocket> a, b;
   ASSERT_TRUE(CreateTCPConnectedSockets("localhost", &a, &b));
 
-  Communication comm("test");
+  ThreadedCommunication comm("test");
   comm.SetConnection(std::make_unique<ConnectionFileDescriptor>(b.release()));
   comm.SetCloseOnEOF(true);
   ASSERT_TRUE(comm.StartReadThread());
@@ -123,7 +147,7 @@ TEST_F(CommunicationTest, WriteAll) {
 
   ConnectionFileDescriptor read_conn{pipe.ReleaseReadFileDescriptor(),
                                      /*owns_fd=*/true};
-  Communication write_comm("test");
+  Communication write_comm;
   write_comm.SetConnection(
       std::make_unique<ConnectionFileDescriptor>(write_fd, /*owns_fd=*/true));
 

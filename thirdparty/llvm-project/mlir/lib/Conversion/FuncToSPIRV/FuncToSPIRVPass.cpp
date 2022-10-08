@@ -11,17 +11,22 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Conversion/FuncToSPIRV/FuncToSPIRVPass.h"
-#include "../PassDetail.h"
+
 #include "mlir/Conversion/FuncToSPIRV/FuncToSPIRV.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVDialect.h"
 #include "mlir/Dialect/SPIRV/Transforms/SPIRVConversion.h"
+
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTFUNCTOSPIRV
+#include "mlir/Conversion/Passes.h.inc"
+} // namespace mlir
 
 using namespace mlir;
 
 namespace {
 /// A pass converting MLIR Func operations into the SPIR-V dialect.
 class ConvertFuncToSPIRVPass
-    : public ConvertFuncToSPIRVBase<ConvertFuncToSPIRVPass> {
+    : public impl::ConvertFuncToSPIRVBase<ConvertFuncToSPIRVPass> {
   void runOnOperation() override;
 };
 } // namespace
@@ -34,7 +39,7 @@ void ConvertFuncToSPIRVPass::runOnOperation() {
   std::unique_ptr<ConversionTarget> target =
       SPIRVConversionTarget::get(targetAttr);
 
-  SPIRVTypeConverter::Options options;
+  SPIRVConversionOptions options;
   options.emulateNon32BitScalarTypes = this->emulateNon32BitScalarTypes;
   SPIRVTypeConverter typeConverter(targetAttr, options);
 

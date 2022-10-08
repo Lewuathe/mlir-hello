@@ -5977,7 +5977,7 @@ void InitializationSequence::InitializeFrom(Sema &S,
        !Context.hasSameUnqualifiedType(SourceType, DestType))) {
 
     llvm::SmallVector<Expr *> InitArgs;
-    for (auto Arg : Args) {
+    for (auto *Arg : Args) {
       if (Arg->getType()->isExtVectorType()) {
         const auto *VTy = Arg->getType()->castAs<ExtVectorType>();
         unsigned Elm = VTy->getNumElements();
@@ -9882,6 +9882,7 @@ static void DiagnoseNarrowingInInitList(Sema &S,
     SCS = &ICS.UserDefined.After;
     break;
   case ImplicitConversionSequence::AmbiguousConversion:
+  case ImplicitConversionSequence::StaticObjectArgumentConversion:
   case ImplicitConversionSequence::EllipsisConversion:
   case ImplicitConversionSequence::BadConversion:
     return;

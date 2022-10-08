@@ -28,6 +28,9 @@ class AffineForOp;
 /// producer-consumer and sibling fusion.
 enum FusionMode { Greedy, ProducerConsumer, Sibling };
 
+#define GEN_PASS_DECL
+#include "mlir/Dialect/Affine/Passes.h.inc"
+
 /// Creates a simplification pass for affine structures (maps and sets). In
 /// addition, this pass also normalizes memrefs to have the trivial (identity)
 /// layout map.

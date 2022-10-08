@@ -14,29 +14,55 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/CodeGen/ExpandLargeDivRem.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Utils/IntegerDivision.h"
 
 using namespace llvm;
 
 static cl::opt<unsigned>
-    ExpandDivRemBits("expand-div-rem-bits", cl::Hidden, cl::init(128),
+    ExpandDivRemBits("expand-div-rem-bits", cl::Hidden,
+                     cl::init(llvm::IntegerType::MAX_INT_BITS),
                      cl::desc("div and rem instructions on integers with "
                               "more than <N> bits are expanded."));
 
-static bool runImpl(Function &F) {
+static bool isConstantPowerOfTwo(llvm::Value *V, bool SignedOp) {
+  auto *C = dyn_cast<ConstantInt>(V);
+  if (!C)
+    return false;
+
+  APInt Val = C->getValue();
+  if (SignedOp && Val.isNegative())
+    Val = -Val;
+  return Val.isPowerOf2();
+}
+
+static bool isSigned(unsigned int Opcode) {
+  return Opcode == Instruction::SDiv || Opcode == Instruction::SRem;
+}
+
+static bool runImpl(Function &F, const TargetLowering &TLI) {
   SmallVector<BinaryOperator *, 4> Replace;
   bool Modified = false;
+
+  unsigned MaxLegalDivRemBitWidth = TLI.getMaxDivRemBitWidthSupported();
+  if (ExpandDivRemBits != llvm::IntegerType::MAX_INT_BITS)
+    MaxLegalDivRemBitWidth = ExpandDivRemBits;
+
+  if (MaxLegalDivRemBitWidth >= llvm::IntegerType::MAX_INT_BITS)
+    return false;
 
   for (auto &I : instructions(F)) {
     switch (I.getOpcode()) {
@@ -46,7 +72,11 @@ static bool runImpl(Function &F) {
     case Instruction::SRem: {
       // TODO: This doesn't handle vectors.
       auto *IntTy = dyn_cast<IntegerType>(I.getType());
-      if (!IntTy || IntTy->getIntegerBitWidth() <= ExpandDivRemBits)
+      if (!IntTy || IntTy->getIntegerBitWidth() <= MaxLegalDivRemBitWidth)
+        continue;
+
+      // The backend has peephole optimizations for powers of two.
+      if (isConstantPowerOfTwo(I.getOperand(1), isSigned(I.getOpcode())))
         continue;
 
       Replace.push_back(&cast<BinaryOperator>(I));
@@ -75,16 +105,6 @@ static bool runImpl(Function &F) {
   return Modified;
 }
 
-PreservedAnalyses ExpandLargeDivRemPass::run(Function &F,
-                                             FunctionAnalysisManager &AM) {
-  bool Changed = runImpl(F);
-
-  if (Changed)
-    return PreservedAnalyses::none();
-
-  return PreservedAnalyses::all();
-}
-
 class ExpandLargeDivRemLegacyPass : public FunctionPass {
 public:
   static char ID;
@@ -93,9 +113,14 @@ public:
     initializeExpandLargeDivRemLegacyPassPass(*PassRegistry::getPassRegistry());
   }
 
-  bool runOnFunction(Function &F) override { return runImpl(F); }
+  bool runOnFunction(Function &F) override {
+    auto *TM = &getAnalysis<TargetPassConfig>().getTM<TargetMachine>();
+    auto *TLI = TM->getSubtargetImpl(F)->getTargetLowering();
+    return runImpl(F, *TLI);
+  }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<TargetPassConfig>();
     AU.addPreserved<AAResultsWrapperPass>();
     AU.addPreserved<GlobalsAAWrapperPass>();
   }

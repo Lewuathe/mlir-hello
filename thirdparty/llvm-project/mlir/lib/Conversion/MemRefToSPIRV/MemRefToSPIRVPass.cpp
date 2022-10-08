@@ -11,17 +11,22 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Conversion/MemRefToSPIRV/MemRefToSPIRVPass.h"
-#include "../PassDetail.h"
+
 #include "mlir/Conversion/MemRefToSPIRV/MemRefToSPIRV.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVDialect.h"
 #include "mlir/Dialect/SPIRV/Transforms/SPIRVConversion.h"
+
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTMEMREFTOSPIRV
+#include "mlir/Conversion/Passes.h.inc"
+} // namespace mlir
 
 using namespace mlir;
 
 namespace {
 /// A pass converting MLIR MemRef operations into the SPIR-V dialect.
 class ConvertMemRefToSPIRVPass
-    : public ConvertMemRefToSPIRVBase<ConvertMemRefToSPIRVPass> {
+    : public impl::ConvertMemRefToSPIRVBase<ConvertMemRefToSPIRVPass> {
   void runOnOperation() override;
 };
 } // namespace
@@ -34,7 +39,7 @@ void ConvertMemRefToSPIRVPass::runOnOperation() {
   std::unique_ptr<ConversionTarget> target =
       SPIRVConversionTarget::get(targetAttr);
 
-  SPIRVTypeConverter::Options options;
+  SPIRVConversionOptions options;
   options.boolNumBits = this->boolNumBits;
   SPIRVTypeConverter typeConverter(targetAttr, options);
 

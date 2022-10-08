@@ -44,6 +44,18 @@ DEFAULT_FEATURES = [
           when=lambda cfg: hasCompileFlag(cfg, '-Wuser-defined-warnings'),
           actions=[AddCompileFlag('-Wuser-defined-warnings')]),
 
+  # Tests to validate whether the compiler has a way to set the maximum number
+  # of steps during constant evaluation. Since the flag differs per compiler
+  # store the "valid" flag as a feature. This allows passing the proper compile
+  # flag to the compiler:
+  # // ADDITIONAL_COMPILE_FLAGS(has-fconstexpr-steps): -fconstexpr-steps=12345678
+  # // ADDITIONAL_COMPILE_FLAGS(has-fconstexpr-ops-limit): -fconstexpr-ops-limit=12345678
+  Feature(name='has-fconstexpr-steps',
+          when=lambda cfg: hasCompileFlag(cfg, '-fconstexpr-steps=1')),
+
+  Feature(name='has-fconstexpr-ops-limit',
+          when=lambda cfg: hasCompileFlag(cfg, '-fconstexpr-ops-limit=1')),
+
   Feature(name='has-fblocks',                   when=lambda cfg: hasCompileFlag(cfg, '-fblocks')),
   Feature(name='-fsized-deallocation',          when=lambda cfg: hasCompileFlag(cfg, '-fsized-deallocation')),
   Feature(name='-faligned-allocation',          when=lambda cfg: hasCompileFlag(cfg, '-faligned-allocation')),
@@ -99,7 +111,7 @@ DEFAULT_FEATURES = [
   # Check for a Windows UCRT bug (fixed in UCRT/Windows 10.0.19041.0).
   # https://developercommunity.visualstudio.com/t/printf-formatting-with-g-outputs-too/1660837
   Feature(name='win32-broken-printf-g-precision',
-          when=lambda cfg: not '_LIBCPP_HAS_NO_LOCALIZATION' in compilerMacros(cfg) and '_WIN32' in compilerMacros(cfg) and not programSucceeds(cfg, """
+          when=lambda cfg: '_WIN32' in compilerMacros(cfg) and not programSucceeds(cfg, """
             #include <stdio.h>
             #include <string.h>
             int main(int, char**) {

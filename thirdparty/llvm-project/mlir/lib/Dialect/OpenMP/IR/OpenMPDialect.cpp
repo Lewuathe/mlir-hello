@@ -21,7 +21,6 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include <cstddef>
 
@@ -664,7 +663,7 @@ LogicalResult ReductionOp::verify() {
                             "reduction clause interface";
   while (op) {
     for (const auto &var :
-         cast<ReductionClauseInterface>(op).getReductionVars())
+         cast<ReductionClauseInterface>(op).getAllReductionVars())
       if (var == accumulator())
         return success();
     op = op->getParentWithTrait<ReductionClauseInterface::Trait>();
@@ -690,12 +689,12 @@ LogicalResult TaskGroupOp::verify() {
 //===----------------------------------------------------------------------===//
 // TaskLoopOp
 //===----------------------------------------------------------------------===//
-SmallVector<Value> TaskLoopOp::getReductionVars() {
-  SmallVector<Value> all_reduction_nvars(in_reduction_vars().begin(),
-                                         in_reduction_vars().end());
-  all_reduction_nvars.insert(all_reduction_nvars.end(),
-                             reduction_vars().begin(), reduction_vars().end());
-  return all_reduction_nvars;
+SmallVector<Value> TaskLoopOp::getAllReductionVars() {
+  SmallVector<Value> allReductionNvars(in_reduction_vars().begin(),
+                                       in_reduction_vars().end());
+  allReductionNvars.insert(allReductionNvars.end(), reduction_vars().begin(),
+                           reduction_vars().end());
+  return allReductionNvars;
 }
 
 LogicalResult TaskLoopOp::verify() {
@@ -707,7 +706,7 @@ LogicalResult TaskLoopOp::verify() {
           verifyReductionVarList(*this, in_reductions(), in_reduction_vars())))
     return failure();
 
-  if (reduction_vars().size() > 0 && nogroup())
+  if (!reduction_vars().empty() && nogroup())
     return emitError("if a reduction clause is present on the taskloop "
                      "directive, the nogroup clause must not be specified");
   for (auto var : reduction_vars()) {

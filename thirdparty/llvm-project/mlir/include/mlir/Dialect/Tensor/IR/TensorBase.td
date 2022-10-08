@@ -47,11 +47,9 @@ def Tensor_Dialect : Dialect {
 
   let hasConstantMaterializer = 1;
   let dependentDialects = [
-    "arith::ArithmeticDialect",
+    "arith::ArithDialect",
     "complex::ComplexDialect",
   ];
-
-  let emitAccessorPrefix = kEmitAccessorPrefix_Prefixed;
 }
 
 #endif // TENSOR_BASE

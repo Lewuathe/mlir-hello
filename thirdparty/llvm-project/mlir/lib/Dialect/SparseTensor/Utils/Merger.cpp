@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/SparseTensor/Utils/Merger.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SparseTensor/IR/SparseTensor.h"
@@ -263,9 +263,11 @@ BitVector Merger::simplifyCond(unsigned s0, unsigned p0) {
   }
   // Now apply the two basic rules.
   BitVector simple = latPoints[p0].bits;
-  bool reset = isSingleton && hasAnyDimOf(simple, kSparse);
+  bool reset = isSingleton && hasAnySparse(simple);
   for (unsigned b = 0, be = simple.size(); b < be; b++) {
-    if (simple[b] && !isDim(b, kSparse)) {
+    if (simple[b] &&
+        (!isDimLevelType(b, DimLvlType::kCompressed) &&
+         !isDimLevelType(b, DimLvlType::kSingleton))) {
       if (reset)
         simple.reset(b);
       reset = true;
@@ -290,14 +292,7 @@ bool Merger::latGT(unsigned i, unsigned j) const {
 bool Merger::onlyDenseDiff(unsigned i, unsigned j) {
   BitVector tmp = latPoints[j].bits;
   tmp ^= latPoints[i].bits;
-  return !hasAnyDimOf(tmp, kSparse);
-}
-
-bool Merger::hasAnyDimOf(const BitVector &bits, Dim d) const {
-  for (unsigned b = 0, be = bits.size(); b < be; b++)
-    if (bits[b] && isDim(b, d))
-      return true;
-  return false;
+  return !hasAnySparse(tmp);
 }
 
 bool Merger::isSingleCondition(unsigned t, unsigned e) const {
@@ -381,6 +376,14 @@ bool Merger::isSingleCondition(unsigned t, unsigned e) const {
     return false;
   }
   llvm_unreachable("unexpected kind");
+}
+
+bool Merger::hasAnySparse(const BitVector &bits) const {
+  for (unsigned b = 0, be = bits.size(); b < be; b++)
+    if (bits[b] && (isDimLevelType(b, DimLvlType::kCompressed) ||
+                    isDimLevelType(b, DimLvlType::kSingleton)))
+      return true;
+  return false;
 }
 
 #ifndef NDEBUG
@@ -591,18 +594,23 @@ void Merger::dumpBits(const BitVector &bits) const {
     if (bits[b]) {
       unsigned t = tensor(b);
       unsigned i = index(b);
+      DimLevelFormat f = dims[t][i];
       llvm::dbgs() << " i_" << t << "_" << i << "_";
-      switch (dims[t][i]) {
-      case kSparse:
-        llvm::dbgs() << "S";
-        break;
-      case kDense:
+      switch (f.levelType) {
+      case DimLvlType::kDense:
         llvm::dbgs() << "D";
         break;
-      case kUndef:
+      case DimLvlType::kCompressed:
+        llvm::dbgs() << "C";
+        break;
+      case DimLvlType::kSingleton:
+        llvm::dbgs() << "S";
+        break;
+      case DimLvlType::kUndef:
         llvm::dbgs() << "U";
         break;
       }
+      llvm::dbgs() << "[O=" << f.isOrdered << ",U=" << f.isUnique << "]";
     }
   }
 }
@@ -847,7 +855,7 @@ Type Merger::inferType(unsigned e, Value src) {
 
 /// Ensures that sparse compiler can generate code for expression.
 static bool isAdmissableBranchExp(Operation *op, Block *block, Value v) {
-  // Arguments are always admissable.
+  // Arguments are always admissible.
   if (auto arg = v.dyn_cast<BlockArgument>())
     return true;
   // Accept index anywhere.
@@ -855,11 +863,10 @@ static bool isAdmissableBranchExp(Operation *op, Block *block, Value v) {
   if (isa<linalg::IndexOp>(def))
     return true;
   // Operation defined outside branch.
-  if (def->getBlock() != block) {
+  if (def->getBlock() != block)
     return def->getBlock() != op->getBlock(); // invariant?
-  }
   // Operation defined within branch. Anything is accepted,
-  // as long as all subexpressions are admissable.
+  // as long as all subexpressions are admissible.
   for (unsigned i = 0, n = def->getNumOperands(); i < n; i++)
     if (!isAdmissableBranchExp(op, block, def->getOperand(i)))
       return false;
@@ -1038,7 +1045,6 @@ Optional<unsigned> Merger::buildTensorExp(linalg::GenericOp op, Value v) {
     if (x.has_value() && y.has_value() && z.has_value()) {
       unsigned e0 = x.value();
       unsigned e1 = y.value();
-      // unsigned e2 = z.getValue();
       if (auto redop = dyn_cast<sparse_tensor::ReduceOp>(def)) {
         if (isAdmissableBranch(redop, redop.getRegion()))
           return addExp(kReduce, e0, e1, Value(), def);

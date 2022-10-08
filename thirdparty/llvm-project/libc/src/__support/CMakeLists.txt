@@ -7,6 +7,12 @@ add_header_library(
 )
 
 add_header_library(
+  builtin_wrappers
+  HDRS
+    builtin_wrappers.h
+)
+
+add_header_library(
   common
   HDRS
     architectures.h
@@ -61,8 +67,22 @@ add_header_library(
     .uint128
     libc.include.errno
     libc.src.__support.CPP.limits
-    libc.src.__support.FPUtil.fputil
+    libc.src.__support.FPUtil.fp_bits
+    libc.src.__support.builtin_wrappers
     libc.src.errno.errno
+)
+
+
+add_object_library(
+  error_to_string
+  HDRS
+    error_to_string.h
+  SRCS
+    error_to_string.cpp
+  DEPENDS
+  libc.include.errno
+  libc.src.__support.CPP.string_view
+  libc.src.__support.CPP.stringstream
 )
 
 add_header_library(

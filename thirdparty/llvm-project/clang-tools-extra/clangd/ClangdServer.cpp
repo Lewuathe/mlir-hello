@@ -177,6 +177,7 @@ ClangdServer::ClangdServer(const GlobalCompilationDatabase &CDB,
       DynamicIdx(Opts.BuildDynamicSymbolIndex ? new FileIndex() : nullptr),
       ClangTidyProvider(Opts.ClangTidyProvider),
       UseDirtyHeaders(Opts.UseDirtyHeaders),
+      LineFoldingOnly(Opts.LineFoldingOnly),
       PreambleParseForwardingFunctions(Opts.PreambleParseForwardingFunctions),
       WorkspaceRoot(Opts.WorkspaceRoot),
       Transient(Opts.ImplicitCancellation ? TUScheduler::InvalidateOnUpdate
@@ -855,8 +856,9 @@ void ClangdServer::foldingRanges(llvm::StringRef File,
     return CB(llvm::make_error<LSPError>(
         "trying to compute folding ranges for non-added document",
         ErrorCode::InvalidParams));
-  auto Action = [CB = std::move(CB), Code = std::move(*Code)]() mutable {
-    CB(clangd::getFoldingRanges(Code));
+  auto Action = [LineFoldingOnly = LineFoldingOnly, CB = std::move(CB),
+                 Code = std::move(*Code)]() mutable {
+    CB(clangd::getFoldingRanges(Code, LineFoldingOnly));
   };
   // We want to make sure folding ranges are always available for all the open
   // files, hence prefer runQuick to not wait for operations on other files.
@@ -1020,6 +1022,12 @@ llvm::StringMap<TUScheduler::FileStats> ClangdServer::fileStats() const {
 ClangdServer::blockUntilIdleForTest(llvm::Optional<double> TimeoutSeconds) {
   // Order is important here: we don't want to block on A and then B,
   // if B might schedule work on A.
+
+#if defined(__has_feature) &&                                                  \
+    (__has_feature(address_sanitizer) || __has_feature(hwaddress_sanitizer) || \
+     __has_feature(memory_sanitizer) || __has_feature(thread_sanitizer))
+  (*TimeoutSeconds) *= 10;
+#endif
 
   // Nothing else can schedule work on TUScheduler, because it's not threadsafe
   // and we're blocking the main thread.

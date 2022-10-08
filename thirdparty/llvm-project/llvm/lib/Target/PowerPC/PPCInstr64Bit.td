@@ -573,14 +573,16 @@ def MTCTR8 : XFXForm_7_ext<31, 467, 9, (outs), (ins g8rc:$rS),
                            "mtctr $rS", IIC_SprMTSPR>,
              PPC970_DGroup_First, PPC970_Unit_FXU;
 }
-let hasSideEffects = 1, Defs = [CTR8] in {
+// MTCTR[8|]loop must be inside a loop-preheader, duplicating
+// the loop-preheader block will break this assumption.
+let hasSideEffects = 1, isNotDuplicable = 1, Defs = [CTR8] in {
 let Pattern = [(int_set_loop_iterations i64:$rS)] in
 def MTCTR8loop : XFXForm_7_ext<31, 467, 9, (outs), (ins g8rc:$rS),
                                "mtctr $rS", IIC_SprMTSPR>,
                  PPC970_DGroup_First, PPC970_Unit_FXU;
 }
 
-let hasSideEffects = 1, hasNoSchedulingInfo = 1, Uses = [CTR8], Defs = [CTR8] in
+let hasSideEffects = 1, hasNoSchedulingInfo = 1, isNotDuplicable = 1, Uses = [CTR8], Defs = [CTR8] in
 def DecreaseCTR8loop : PPCEmitTimePseudo<(outs crbitrc:$rT), (ins i64imm:$stride),
                                         "#DecreaseCTR8loop", [(set i1:$rT, (int_loop_decrement (i64 imm:$stride)))]>;
 
@@ -1971,9 +1973,6 @@ def SLBSYNC : XForm_0<31, 338, (outs), (ins), "slbsync", IIC_SprSLBSYNC, []>;
 def : Pat<(int_ppc_stdcx ForceXForm:$dst, g8rc:$A),
           (STDCX g8rc:$A, ForceXForm:$dst)>;
 
-// trapd
-def : Pat<(int_ppc_trapd g8rc:$A),
-          (TDI 24, $A, 0)>;
 def : Pat<(i64 (int_ppc_mfspr timm:$SPR)),
           (MFSPR8 $SPR)>;
 def : Pat<(int_ppc_mtspr timm:$SPR, g8rc:$RT),

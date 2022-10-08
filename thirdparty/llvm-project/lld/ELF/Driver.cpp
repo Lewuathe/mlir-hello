@@ -118,6 +118,8 @@ bool elf::link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS,
   script = std::make_unique<LinkerScript>();
   symtab = std::make_unique<SymbolTable>();
 
+  symAux.emplace_back();
+
   partitions.clear();
   partitions.emplace_back();
 
@@ -947,15 +949,21 @@ template <class ELFT> static void readCallGraphsFromObjectFiles() {
   }
 }
 
-static bool getCompressDebugSections(opt::InputArgList &args) {
+static DebugCompressionType getCompressDebugSections(opt::InputArgList &args) {
   StringRef s = args.getLastArgValue(OPT_compress_debug_sections, "none");
-  if (s == "none")
-    return false;
-  if (s != "zlib")
+  if (s == "zlib") {
+    if (!compression::zlib::isAvailable())
+      error("--compress-debug-sections: zlib is not available");
+    return DebugCompressionType::Zlib;
+  }
+  if (s == "zstd") {
+    if (!compression::zstd::isAvailable())
+      error("--compress-debug-sections: zstd is not available");
+    return DebugCompressionType::Zstd;
+  }
+  if (s != "none")
     error("unknown --compress-debug-sections value: " + s);
-  if (!compression::zlib::isAvailable())
-    error("--compress-debug-sections: zlib is not available");
-  return true;
+  return DebugCompressionType::None;
 }
 
 static StringRef getAliasSpelling(opt::Arg *arg) {
@@ -1341,8 +1349,10 @@ static void readConfigs(opt::InputArgList &args) {
   config->passPlugins = args::getStrings(args, OPT_load_pass_plugins);
 
   // Parse -mllvm options.
-  for (auto *arg : args.filtered(OPT_mllvm))
+  for (auto *arg : args.filtered(OPT_mllvm)) {
     parseClangOption(arg->getValue(), arg->getSpelling());
+    config->mllvmOpts.emplace_back(arg->getValue());
+  }
 
   // --threads= takes a positive integer and provides the default value for
   // --thinlto-jobs=.
@@ -1357,6 +1367,7 @@ static void readConfigs(opt::InputArgList &args) {
   }
   if (auto *arg = args.getLastArg(OPT_thinlto_jobs))
     config->thinLTOJobs = arg->getValue();
+  config->threadCount = parallel::strategy.compute_thread_count();
 
   if (config->ltoo > 3)
     error("invalid optimization level for LTO: " + Twine(config->ltoo));
@@ -1984,8 +1995,9 @@ static void replaceCommonSymbols() {
       auto *bss = make<BssSection>("COMMON", s->size, s->alignment);
       bss->file = s->file;
       inputSections.push_back(bss);
-      s->replace(Defined{s->file, StringRef(), s->binding, s->stOther, s->type,
-                         /*value=*/0, s->size, bss});
+      Defined(s->file, StringRef(), s->binding, s->stOther, s->type,
+              /*value=*/0, s->size, bss)
+          .overwrite(*s);
     }
   }
 }
@@ -2001,11 +2013,9 @@ static void demoteSharedAndLazySymbols() {
     if (!(s && !cast<SharedFile>(s->file)->isNeeded) && !sym->isLazy())
       continue;
 
-    bool used = sym->used;
     uint8_t binding = sym->isLazy() ? sym->binding : uint8_t(STB_WEAK);
-    sym->replace(
-        Undefined{nullptr, sym->getName(), binding, sym->stOther, sym->type});
-    sym->used = used;
+    Undefined(nullptr, sym->getName(), binding, sym->stOther, sym->type)
+        .overwrite(*sym);
     sym->versionId = VER_NDX_GLOBAL;
   }
 }
@@ -2261,9 +2271,14 @@ static void combineVersionedSymbol(Symbol &sym,
     map.try_emplace(&sym, sym2);
     // If both foo@v1 and foo@@v1 are defined and non-weak, report a
     // duplicate definition error.
-    if (sym.isDefined())
+    if (sym.isDefined()) {
       sym2->checkDuplicate(cast<Defined>(sym));
-    sym2->resolve(sym);
+      sym2->resolve(cast<Defined>(sym));
+    } else if (sym.isUndefined()) {
+      sym2->resolve(cast<Undefined>(sym));
+    } else {
+      sym2->resolve(cast<SharedSymbol>(sym));
+    }
     // Eliminate foo@v1 from the symbol table.
     sym.symbolKind = Symbol::PlaceholderKind;
     sym.isUsedInRegularObj = false;
@@ -2560,8 +2575,9 @@ void LinkerDriver::link(opt::InputArgList &args) {
                   [](BitcodeFile *file) { file->postParse(); });
   for (auto &it : ctx->nonPrevailingSyms) {
     Symbol &sym = *it.first;
-    sym.replace(Undefined{sym.file, sym.getName(), sym.binding, sym.stOther,
-                          sym.type, it.second});
+    Undefined(sym.file, sym.getName(), sym.binding, sym.stOther, sym.type,
+              it.second)
+        .overwrite(sym);
     cast<Undefined>(sym).nonPrevailing = true;
   }
   ctx->nonPrevailingSyms.clear();

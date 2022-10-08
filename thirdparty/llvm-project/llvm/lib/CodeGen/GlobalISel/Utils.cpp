@@ -1077,8 +1077,8 @@ Optional<APInt> llvm::getIConstantSplatVal(const Register Reg,
   return None;
 }
 
-Optional<APInt> getIConstantSplatVal(const MachineInstr &MI,
-                                     const MachineRegisterInfo &MRI) {
+Optional<APInt> llvm::getIConstantSplatVal(const MachineInstr &MI,
+                                           const MachineRegisterInfo &MRI) {
   return getIConstantSplatVal(MI.getOperand(0).getReg(), MRI);
 }
 
@@ -1274,6 +1274,18 @@ bool llvm::isConstTrueVal(const TargetLowering &TLI, int64_t Val, bool IsVector,
     return Val == 1;
   case TargetLowering::ZeroOrNegativeOneBooleanContent:
     return Val == -1;
+  }
+  llvm_unreachable("Invalid boolean contents");
+}
+
+bool llvm::isConstFalseVal(const TargetLowering &TLI, int64_t Val,
+                           bool IsVector, bool IsFP) {
+  switch (TLI.getBooleanContents(IsVector, IsFP)) {
+  case TargetLowering::UndefinedBooleanContent:
+    return ~Val & 0x1;
+  case TargetLowering::ZeroOrOneBooleanContent:
+  case TargetLowering::ZeroOrNegativeOneBooleanContent:
+    return Val == 0;
   }
   llvm_unreachable("Invalid boolean contents");
 }

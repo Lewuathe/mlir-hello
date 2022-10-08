@@ -166,7 +166,7 @@
 # define TEST_CONSTEXPR_CXX20
 #endif
 
-#if TEST_STD_VER > 20
+#if TEST_STD_VER >= 23
 #  define TEST_CONSTEXPR_CXX23 constexpr
 #else
 #  define TEST_CONSTEXPR_CXX23
@@ -389,6 +389,10 @@ inline void DoNotOptimize(Tp const& value) {
 
 #if defined(_LIBCPP_HAS_NO_FGETPOS_FSETPOS)
 #  define TEST_HAS_NO_FGETPOS_FSETPOS
+#endif
+
+#if defined(_LIBCPP_HAS_NO_C8RTOMB_MBRTOC8)
+#  define TEST_HAS_NO_C8RTOMB_MBRTOC8
 #endif
 
 #if defined(TEST_COMPILER_CLANG)

@@ -379,7 +379,7 @@ For example, the following `.mlir`:
 
 ```mlir
 module {
-  spv.module "Logical" "GLSL450" {
+  spirv.module "Logical" "GLSL450" {
     func @foo() {
       ...
     }
@@ -391,8 +391,8 @@ Has the nesting structure of:
 
 ```
 `builtin.module`
-  `spv.module`
-    `spv.func`
+  `spirv.module`
+    `spirv.func`
 ```
 
 Below is an example of constructing a pipeline that operates on the above
@@ -419,7 +419,7 @@ OpPassManager &nestedFunctionPM = nestedModulePM.nest<func::FuncOp>();
 nestedFunctionPM.addPass(std::make_unique<MyFunctionPass>());
 
 // Nest an op-agnostic pass manager. This will operate on any viable
-// operation, e.g. func.func, spv.func, spv.module, builtin.module, etc.
+// operation, e.g. func.func, spirv.func, spirv.module, builtin.module, etc.
 OpPassManager &nestedAnyPM = nestedModulePM.nestAny();
 nestedAnyPM.addPass(createCanonicalizePass());
 nestedAnyPM.addPass(createCSEPass());
@@ -810,7 +810,8 @@ def MyPass : Pass<"my-pass", "ModuleOp"> {
   }];
 
   // A constructor must be provided to specify how to create a default instance
-  // of MyPass.
+  // of MyPass. It can be skipped for this specific example, because both the
+  // constructor and the registration methods live in the same namespace.
   let constructor = "foo::createMyPass()";
 
   // Specify any options.
@@ -828,12 +829,10 @@ def MyPass : Pass<"my-pass", "ModuleOp"> {
 }
 ```
 
-Using the `gen-pass-decls` and `gen-pass-defs` generators, we can generate most
-of the boilerplate above automatically.
-
-The `gen-pass-decls` generator takes as an input a `-name` parameter, that
+Using the `gen-pass-decls` generator, we can generate most of the boilerplate
+above automatically. This generator takes as an input a `-name` parameter, that
 provides a tag for the group of passes that are being generated. This generator
-produces code with two purposes:
+produces code with multiple purposes:
 
 The first is to register the declared passes with the global registry. For
 each pass, the generator produces a `registerPassName` where
@@ -842,27 +841,33 @@ generates a `registerGroupPasses`, where `Group` is the tag provided via the
 `-name` input parameter, that registers all of the passes present.
 
 ```c++
-// gen-pass-decls -name="Example"
+// Tablegen options: -gen-pass-decls -name="Example"
 
+// Passes.h
+
+namespace foo {
 #define GEN_PASS_REGISTRATION
 #include "Passes.h.inc"
+} // namespace foo
 
 void registerMyPasses() {
   // Register all of the passes.
-  registerExamplePasses();
+  foo::registerExamplePasses();
+  
+  // Or
 
   // Register `MyPass` specifically.
-  registerMyPass();
+  foo::registerMyPass();
 }
 ```
 
 The second is to provide a way to configure the pass options. These classes are
 named in the form of `MyPassOptions`, where `MyPass` is the name of the pass
-definition in tablegen. The configurable parameters reflect the options
-declared in the tablegen file. Differently from the registration hooks, these
-classes can be enabled on a per-pass basis by defining the
-`GEN_PASS_DECL_PASSNAME` macro, where `PASSNAME` is the uppercase version of
-the name specified in tablegen.
+definition in tablegen. The configurable parameters reflect the options declared
+in the tablegen file. These declarations can be enabled for the whole group of
+passes by defining the `GEN_PASS_DECL` macro, or on a per-pass basis by defining
+`GEN_PASS_DECL_PASSNAME` where `PASSNAME` is the uppercase version of the name
+specified in tablegen.
 
 ```c++
 // .h.inc
@@ -895,35 +900,33 @@ std::unique_ptr<::mlir::Pass> createMyPass(const MyPassOptions &options);
 #endif // GEN_PASS_DECL_MYPASS
 ```
 
-The `gen-pass-defs` generator produces the definitions to be used for the pass
-implementation.
-
-It generates a base class for each of the passes, containing most of the boiler
-plate related to pass definitions. These classes are named in the form of
-`MyPassBase`, where `MyPass` is the name of the pass definition in tablegen. We
-can update the original C++ pass definition as so:
+The last purpose of this generator is to emit a base class for each of the
+passes, containing most of the boiler plate related to pass definitions. These
+classes are named in the form of `MyPassBase` and are declared inside the
+`impl` namespace, where `MyPass` is the name of the pass definition in
+tablegen. We can update the original C++ pass definition as so:
 
 ```c++
+// MyPass.cpp
+
 /// Include the generated base pass class definitions.
+namespace foo {
 #define GEN_PASS_DEF_MYPASS
-#include "Passes.cpp.inc"
+#include "Passes.h.inc"
+}
 
 /// Define the main class as deriving from the generated base class.
-struct MyPass : MyPassBase<MyPass> {
-  /// The explicit constructor is no longer explicitly necessary when defining
-  /// pass options and statistics, the base class takes care of that
-  /// automatically.
-  ...
+struct MyPass : foo::impl::MyPassBase<MyPass> {
+  using MyPassBase::MyPassBase;
 
   /// The definitions of the options and statistics are now generated within
   /// the base class, but are accessible in the same way.
 };
 ```
 
-Similarly to the previous generator, the definitions can be enabled on a
-per-pass basis by defining the appropriate preprocessor `GEN_PASS_DEF_PASSNAME`
-macro, with `PASSNAME` equal to the uppercase version of the name of the pass
-definition in tablegen.
+These definitions can be enabled on a per-pass basis by defining the appropriate
+preprocessor `GEN_PASS_DEF_PASSNAME` macro, with `PASSNAME` equal to the
+uppercase version of the name of the pass definition in tablegen.
 If the `constructor` field has not been specified in tablegen, then the default
 constructors are also defined and expect the name of the actual pass class to
 be equal to the name defined in tablegen.

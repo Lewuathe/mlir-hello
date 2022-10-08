@@ -65,6 +65,7 @@ static constexpr CategorySet ComplexType{TypeCategory::Complex};
 static constexpr CategorySet CharType{TypeCategory::Character};
 static constexpr CategorySet LogicalType{TypeCategory::Logical};
 static constexpr CategorySet IntOrRealType{IntType | RealType};
+static constexpr CategorySet IntOrRealOrCharType{IntType | RealType | CharType};
 static constexpr CategorySet FloatingType{RealType | ComplexType};
 static constexpr CategorySet NumericType{IntType | RealType | ComplexType};
 static constexpr CategorySet RelatableType{IntType | RealType | CharType};
@@ -90,6 +91,7 @@ ENUM_CLASS(KindCode, none, defaultIntegerKind,
     addressable, // for PRESENT(), &c.; anything (incl. procedure) but BOZ
     nullPointerType, // for ASSOCIATED(NULL())
     exactKind, // a single explicit exactKindValue
+    atomicIntKind, // atomic_int_kind from iso_fortran_env
 )
 
 struct TypePattern {
@@ -121,6 +123,8 @@ static constexpr TypePattern SubscriptInt{IntType, KindCode::subscript};
 static constexpr TypePattern AnyInt{IntType, KindCode::any};
 static constexpr TypePattern AnyReal{RealType, KindCode::any};
 static constexpr TypePattern AnyIntOrReal{IntOrRealType, KindCode::any};
+static constexpr TypePattern AnyIntOrRealOrChar{
+    IntOrRealOrCharType, KindCode::any};
 static constexpr TypePattern AnyComplex{ComplexType, KindCode::any};
 static constexpr TypePattern AnyFloating{FloatingType, KindCode::any};
 static constexpr TypePattern AnyNumeric{NumericType, KindCode::any};
@@ -173,6 +177,8 @@ static constexpr TypePattern KINDComplex{ComplexType, KindCode::effectiveKind};
 static constexpr TypePattern KINDChar{CharType, KindCode::effectiveKind};
 static constexpr TypePattern KINDLogical{LogicalType, KindCode::effectiveKind};
 
+static constexpr TypePattern AtomicInt{IntType, KindCode::atomicIntKind};
+
 // The default rank pattern for dummy arguments and function results is
 // "elemental".
 ENUM_CLASS(Rank,
@@ -183,12 +189,14 @@ ENUM_CLASS(Rank,
     matrix,
     array, // not scalar, rank is known and greater than zero
     coarray, // rank is known and can be scalar; has nonzero corank
+    atom, // is scalar and has nonzero corank or is coindexed
     known, // rank is known and can be scalar
     anyOrAssumedRank, // rank can be unknown; assumed-type TYPE(*) allowed
     conformable, // scalar, or array of same rank & shape as "array" argument
     reduceOperation, // a pure function with constraints for REDUCE
     dimReduced, // scalar if no DIM= argument, else rank(array)-1
     dimRemovedOrScalar, // rank(array)-1 (less DIM) or scalar
+    scalarIfDim, // scalar if DIM= argument is present, else rank one array
     locReduced, // vector(1:rank) if no DIM= argument, else rank(array)-1
     rankPlus1, // rank(known)+1
     shaped, // rank is length of SHAPE vector
@@ -517,6 +525,9 @@ static const IntrinsicInterface genericIntrinsicFunction[]{
         KINDInt, Rank::scalar, IntrinsicClass::inquiryFunction},
     {"lbound", {{"array", AnyData, Rank::anyOrAssumedRank}, SizeDefaultKIND},
         KINDInt, Rank::vector, IntrinsicClass::inquiryFunction},
+    {"lcobound",
+        {{"coarray", AnyData, Rank::coarray}, OptionalDIM, SizeDefaultKIND},
+        KINDInt, Rank::scalarIfDim, IntrinsicClass::inquiryFunction},
     {"leadz", {{"i", AnyInt}}, DefaultInt},
     {"len", {{"string", AnyChar, Rank::anyOrAssumedRank}, DefaultingKIND},
         KINDInt, Rank::scalar, IntrinsicClass::inquiryFunction},
@@ -796,6 +807,9 @@ static const IntrinsicInterface genericIntrinsicFunction[]{
         KINDInt, Rank::scalar, IntrinsicClass::inquiryFunction},
     {"ubound", {{"array", AnyData, Rank::anyOrAssumedRank}, SizeDefaultKIND},
         KINDInt, Rank::vector, IntrinsicClass::inquiryFunction},
+    {"ucobound",
+        {{"coarray", AnyData, Rank::coarray}, OptionalDIM, SizeDefaultKIND},
+        KINDInt, Rank::scalarIfDim, IntrinsicClass::inquiryFunction},
     {"unpack",
         {{"vector", SameType, Rank::vector}, {"mask", AnyLogical, Rank::array},
             {"field", SameType, Rank::conformable}},
@@ -844,7 +858,7 @@ static const IntrinsicInterface genericIntrinsicFunction[]{
 };
 
 // TODO: Coarray intrinsic functions
-//   LCOBOUND, UCOBOUND, IMAGE_INDEX, COSHAPE
+//  IMAGE_INDEX, COSHAPE
 // TODO: Non-standard intrinsic functions
 //  LSHIFT, RSHIFT, SHIFT,
 //  COMPL, EQV, NEQV, INT8, JINT, JNINT, KNINT,
@@ -1077,6 +1091,56 @@ static const SpecificIntrinsicInterface specificIntrinsicFunction[]{
 
 static const IntrinsicInterface intrinsicSubroutine[]{
     {"abort", {}, {}, Rank::elemental, IntrinsicClass::impureSubroutine},
+    {"atomic_fetch_or",
+        {{"atom", AtomicInt, Rank::atom, Optionality::required,
+             common::Intent::InOut},
+            {"value", AnyInt, Rank::scalar, Optionality::required,
+                common::Intent::In},
+            {"old", AtomicInt, Rank::scalar, Optionality::required,
+                common::Intent::Out},
+            {"stat", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::Out}},
+        {}, Rank::elemental, IntrinsicClass::atomicSubroutine},
+    {"co_broadcast",
+        {{"a", AnyData, Rank::anyOrAssumedRank, Optionality::required,
+             common::Intent::InOut},
+            {"source_image", AnyInt, Rank::scalar, Optionality::required,
+                common::Intent::In},
+            {"stat", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::Out},
+            {"errmsg", DefaultChar, Rank::scalar, Optionality::optional,
+                common::Intent::InOut}},
+        {}, Rank::elemental, IntrinsicClass::collectiveSubroutine},
+    {"co_max",
+        {{"a", AnyIntOrRealOrChar, Rank::anyOrAssumedRank,
+             Optionality::required, common::Intent::InOut},
+            {"result_image", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::In},
+            {"stat", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::Out},
+            {"errmsg", DefaultChar, Rank::scalar, Optionality::optional,
+                common::Intent::InOut}},
+        {}, Rank::elemental, IntrinsicClass::collectiveSubroutine},
+    {"co_min",
+        {{"a", AnyIntOrRealOrChar, Rank::anyOrAssumedRank,
+             Optionality::required, common::Intent::InOut},
+            {"result_image", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::In},
+            {"stat", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::Out},
+            {"errmsg", DefaultChar, Rank::scalar, Optionality::optional,
+                common::Intent::InOut}},
+        {}, Rank::elemental, IntrinsicClass::collectiveSubroutine},
+    {"co_sum",
+        {{"a", AnyNumeric, Rank::anyOrAssumedRank, Optionality::required,
+             common::Intent::InOut},
+            {"result_image", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::In},
+            {"stat", AnyInt, Rank::scalar, Optionality::optional,
+                common::Intent::Out},
+            {"errmsg", DefaultChar, Rank::scalar, Optionality::optional,
+                common::Intent::InOut}},
+        {}, Rank::elemental, IntrinsicClass::collectiveSubroutine},
     {"cpu_time",
         {{"time", AnyReal, Rank::scalar, Optionality::required,
             common::Intent::Out}},
@@ -1179,7 +1243,7 @@ static const IntrinsicInterface intrinsicSubroutine[]{
 
 // TODO: Intrinsic subroutine EVENT_QUERY
 // TODO: Atomic intrinsic subroutines: ATOMIC_ADD &al.
-// TODO: Collective intrinsic subroutines: CO_BROADCAST &al.
+// TODO: Collective intrinsic subroutines: co_reduce
 
 // Finds a built-in derived type and returns it as a DynamicType.
 static DynamicType GetBuiltinDerivedType(
@@ -1200,6 +1264,33 @@ static DynamicType GetBuiltinDerivedType(
   const semantics::Scope &scope{DEREF(symbol.scope())};
   const semantics::DerivedTypeSpec &derived{DEREF(scope.derivedTypeSpec())};
   return DynamicType{derived};
+}
+
+static std::int64_t GetBuiltinKind(
+    const semantics::Scope *builtinsScope, const char *which) {
+  if (!builtinsScope) {
+    common::die("INTERNAL: The __fortran_builtins module was not found, and "
+                "the kind '%s' was required",
+        which);
+  }
+  auto iter{
+      builtinsScope->find(semantics::SourceName{which, std::strlen(which)})};
+  if (iter == builtinsScope->cend()) {
+    common::die(
+        "INTERNAL: The __fortran_builtins module does not define the kind '%s'",
+        which);
+  }
+  const semantics::Symbol &symbol{*iter->second};
+  const auto &details{
+      DEREF(symbol.detailsIf<semantics::ObjectEntityDetails>())};
+  if (const auto kind{ToInt64(details.init())}) {
+    return *kind;
+  } else {
+    common::die(
+        "INTERNAL: The __fortran_builtins module does not define the kind '%s'",
+        which);
+    return -1;
+  }
 }
 
 // Ensure that the keywords of arguments to MAX/MIN and their variants
@@ -1473,6 +1564,16 @@ std::optional<SpecificCall> IntrinsicInterface::Match(
     case KindCode::exactKind:
       argOk = type->kind() == d.typePattern.exactKindValue;
       break;
+    case KindCode::atomicIntKind:
+      argOk = type->kind() ==
+          GetBuiltinKind(builtinsScope, "__builtin_atomic_int_kind");
+      if (!argOk) {
+        messages.Say(arg->sourceLocation(),
+            "Actual argument for '%s=' must have kind=atomic_int_kind, but is '%s'"_err_en_US,
+            d.keyword, type->AsFortran());
+        return std::nullopt;
+      }
+      break;
     default:
       CRASH_NO_CASE;
     }
@@ -1556,6 +1657,15 @@ std::optional<SpecificCall> IntrinsicInterface::Match(
           return std::nullopt;
         }
         break;
+      case Rank::atom:
+        argOk = rank == 0 && (IsCoarray(*arg) || ExtractCoarrayRef(*arg));
+        if (!argOk) {
+          messages.Say(arg->sourceLocation(),
+              "'%s=' argument must be a scalar coarray or coindexed object for intrinsic '%s'"_err_en_US,
+              d.keyword, name);
+          return std::nullopt;
+        }
+        break;
       case Rank::known:
         if (!knownArg) {
           knownArg = arg;
@@ -1616,6 +1726,7 @@ std::optional<SpecificCall> IntrinsicInterface::Match(
         // The reduction function is validated in ApplySpecificChecks().
         argOk = true;
         break;
+      case Rank::scalarIfDim:
       case Rank::locReduced:
       case Rank::rankPlus1:
       case Rank::shaped:
@@ -1800,10 +1911,14 @@ std::optional<SpecificCall> IntrinsicInterface::Match(
     CHECK(shapeArgSize);
     resultRank = *shapeArgSize;
     break;
+  case Rank::scalarIfDim:
+    resultRank = hasDimArg ? 0 : 1;
+    break;
   case Rank::elementalOrBOZ:
   case Rank::shape:
   case Rank::array:
   case Rank::coarray:
+  case Rank::atom:
   case Rank::known:
   case Rank::anyOrAssumedRank:
   case Rank::reduceOperation:
@@ -2374,6 +2489,42 @@ static bool CheckForNonPositiveValues(FoldingContext &context,
   return ok;
 }
 
+static bool CheckDimAgainstCorank(SpecificCall &call, FoldingContext &context) {
+  bool ok{true};
+  if (const auto &coarrayArg{call.arguments[0]}) {
+    if (const auto &dimArg{call.arguments[1]}) {
+      if (const auto *symbol{
+              UnwrapWholeSymbolDataRef(coarrayArg->UnwrapExpr())}) {
+        const auto corank = symbol->Corank();
+        if (const auto dimNum{ToInt64(dimArg->UnwrapExpr())}) {
+          if (dimNum < 1 || dimNum > corank) {
+            ok = false;
+            context.messages().Say(dimArg->sourceLocation(),
+                "DIM=%jd dimension is out of range for coarray with corank %d"_err_en_US,
+                static_cast<std::intmax_t>(*dimNum), corank);
+          }
+        }
+      }
+    }
+  }
+  return ok;
+}
+
+static bool CheckForCoindexedObject(FoldingContext &context,
+    const std::optional<ActualArgument> &arg, const std::string &procName,
+    const std::string &argName) {
+  bool ok{true};
+  if (arg) {
+    if (ExtractCoarrayRef(arg->UnwrapExpr())) {
+      ok = false;
+      context.messages().Say(arg->sourceLocation(),
+          "'%s' argument to '%s' may not be a coindexed object"_err_en_US,
+          argName, procName);
+    }
+  }
+  return ok;
+}
+
 // Applies any semantic checks peculiar to an intrinsic.
 static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
   bool ok{true};
@@ -2392,6 +2543,16 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
     }
   } else if (name == "associated") {
     return CheckAssociated(call, context);
+  } else if (name == "atomic_fetch_or") {
+    return CheckForCoindexedObject(context, call.arguments[3], name, "stat");
+  } else if (name == "co_broadcast" || name == "co_max" || name == "co_min" ||
+      name == "co_sum") {
+    bool aOk{CheckForCoindexedObject(context, call.arguments[0], name, "a")};
+    bool statOk{
+        CheckForCoindexedObject(context, call.arguments[2], name, "stat")};
+    bool errmsgOk{
+        CheckForCoindexedObject(context, call.arguments[3], name, "errmsg")};
+    ok = aOk && statOk && errmsgOk;
   } else if (name == "image_status") {
     if (const auto &arg{call.arguments[0]}) {
       ok = CheckForNonPositiveValues(context, *arg, name, "image");
@@ -2414,6 +2575,8 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
         }
       }
     }
+  } else if (name == "lcobound") {
+    return CheckDimAgainstCorank(call, context);
   } else if (name == "loc") {
     const auto &arg{call.arguments[0]};
     ok =
@@ -2423,6 +2586,15 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
           arg ? arg->sourceLocation() : context.messages().at(),
           "Argument of LOC() must be an object or procedure"_err_en_US);
     }
+  } else if (name == "move_alloc") {
+    bool fromOk{
+        CheckForCoindexedObject(context, call.arguments[0], name, "from")};
+    bool toOk{CheckForCoindexedObject(context, call.arguments[1], name, "to")};
+    bool statOk{
+        CheckForCoindexedObject(context, call.arguments[2], name, "stat")};
+    bool errmsgOk{
+        CheckForCoindexedObject(context, call.arguments[3], name, "errmsg")};
+    ok = fromOk && toOk && statOk && errmsgOk;
   } else if (name == "present") {
     const auto &arg{call.arguments[0]};
     if (arg) {
@@ -2521,6 +2693,8 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
         }
       }
     }
+  } else if (name == "ucobound") {
+    return CheckDimAgainstCorank(call, context);
   }
   return ok;
 }
@@ -2577,6 +2751,7 @@ std::optional<SpecificCall> IntrinsicProcTable::Implementation::Probe(
     for (auto iter{subrRange.first}; iter != subrRange.second; ++iter) {
       if (auto specificCall{iter->second->Match(
               call, defaults_, arguments, context, builtinsScope_)}) {
+        ApplySpecificChecks(*specificCall, context);
         return specificCall;
       }
     }

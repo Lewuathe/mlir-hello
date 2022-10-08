@@ -270,6 +270,13 @@ def StringElementsAttrOp : TEST_Op<"string_elements_attr"> {
   );
 }
 
+def TypedAttrOp : TEST_Op<"typed_attr"> {
+  let arguments = (ins TypeAttr:$type, AnyAttr:$attr);
+  let assemblyFormat = [{
+    attr-dict $type `=` custom<AttrElideType>(ref($type), $attr)
+  }];
+}
+
 def DenseArrayAttrOp : TEST_Op<"dense_array_attr"> {
   let arguments = (ins
     DenseBoolArrayAttr:$i1attr,
@@ -788,6 +795,18 @@ def OIListAllowedLiteral : TEST_Op<"oilist_allowed_literal"> {
   let assemblyFormat = [{
     oilist( `foo` | `bar` ) `buzz` attr-dict
   }];
+}
+
+def TestEllipsisOp : TEST_Op<"ellipsis"> {
+  let arguments = (ins Variadic<AnyType>:$operands, UnitAttr:$variadic);
+  let assemblyFormat = [{
+    `(` $operands (`...` $variadic^)? `)` attr-dict `:` type($operands) `...`
+  }];
+}
+
+def ElseAnchorOp : TEST_Op<"else_anchor"> {
+  let arguments = (ins Optional<AnyType>:$a);
+  let assemblyFormat = "`(` (`?`) : (`` $a^ `:` type($a))? `)` attr-dict";
 }
 
 // This is used to test encoding of a string attribute into an SSA name of a
@@ -1892,6 +1911,12 @@ def PolyForOp : TEST_Op<"polyfor", [OpAsmOpInterface]> {
   let hasCustomAssemblyFormat = 1;
 }
 
+def TestAttrWithLoc : TEST_Op<"attr_with_loc"> {
+  let summary = "op's attribute has a location";
+  let arguments = (ins AnyAttr:$loc, AnyAttr:$value);
+  let assemblyFormat = "`(` $value `` custom<OptionalLoc>($loc) `)` attr-dict";
+}
+
 //===----------------------------------------------------------------------===//
 // Test OpAsmInterface.
 
@@ -2130,7 +2155,7 @@ def FormatInferVariadicTypeFromNonVariadic
               [SameOperandsAndResultType]> {
   let arguments = (ins Variadic<AnyType>:$args);
   let results = (outs AnyType:$result);
-  let assemblyFormat = "$args attr-dict `:` type($result)";
+  let assemblyFormat = "operands attr-dict `:` type($result)";
 }
 
 def FormatOptionalUnitAttr : TEST_Op<"format_optional_unit_attribute"> {
@@ -2465,6 +2490,17 @@ def FormatInferTypeVariadicOperandsOp
       return ::mlir::success();
     }
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// Test ArrayOfAttr
+//===----------------------------------------------------------------------===//
+
+// Embed the array attributes directly in the assembly format for a nice syntax.
+def ArrayOfAttrOp : TEST_Op<"array_of_attr_op"> {
+  let arguments = (ins TestArrayOfUglyAttrs:$a, TestArrayOfInts:$b,
+                       TestArrayOfEnums:$c);
+  let assemblyFormat = "`a` `=` $a `,` `b` `=` $b `,` `c` `=` $c attr-dict";
 }
 
 //===----------------------------------------------------------------------===//

@@ -186,6 +186,10 @@ static cl::opt<bool> EnablePostPGOLoopRotation(
     "enable-post-pgo-loop-rotation", cl::init(true), cl::Hidden,
     cl::desc("Run the loop rotation transformation after PGO instrumentation"));
 
+static cl::opt<bool> EnableGlobalAnalyses(
+    "enable-global-analyses", cl::init(true), cl::Hidden,
+    cl::desc("Enable inter-procedural analyses"));
+
 PipelineTuningOptions::PipelineTuningOptions() {
   LoopInterleaving = true;
   LoopVectorization = true;
@@ -1391,9 +1395,11 @@ PassBuilder::buildThinLTOPreLinkDefaultPipeline(OptimizationLevel Level) {
       PGOOpt->Action == PGOOptions::SampleUse)
     MPM.addPass(PseudoProbeUpdatePass());
 
-  // Handle OptimizerLastEPCallbacks added by clang on PreLink. Actual
-  // optimization is going to be done in PostLink stage, but clang can't
-  // add callbacks there in case of in-process ThinLTO called by linker.
+  // Handle Optimizer{Early,Last}EPCallbacks added by clang on PreLink. Actual
+  // optimization is going to be done in PostLink stage, but clang can't add
+  // callbacks there in case of in-process ThinLTO called by linker.
+  for (auto &C : OptimizerEarlyEPCallbacks)
+    C(MPM, Level);
   for (auto &C : OptimizerLastEPCallbacks)
     C(MPM, Level);
 
@@ -1893,7 +1899,8 @@ AAManager PassBuilder::buildDefaultAAPipeline() {
   // Because the `AAManager` is a function analysis and `GlobalsAA` is a module
   // analysis, all that the `AAManager` can do is query for any *cached*
   // results from `GlobalsAA` through a readonly proxy.
-  AA.registerModuleAnalysis<GlobalsAA>();
+  if (EnableGlobalAnalyses)
+    AA.registerModuleAnalysis<GlobalsAA>();
 
   // Add target-specific alias analyses.
   if (TM)

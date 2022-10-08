@@ -703,12 +703,14 @@ namespace llvm {
 
     // Conversions between float and half-float.
     CVTPS2PH,
+    CVTPS2PH_SAE,
     CVTPH2PS,
     CVTPH2PS_SAE,
 
     // Masked version of above.
     // SRC, RND, PASSTHRU, MASK
     MCVTPS2PH,
+    MCVTPS2PH_SAE,
 
     // Galois Field Arithmetic Instructions
     GF2P8AFFINEINVQB,
@@ -1453,11 +1455,11 @@ namespace llvm {
 
     bool supportKCFIBundles() const override { return true; }
 
-    bool hasStackProbeSymbol(MachineFunction &MF) const override;
-    bool hasInlineStackProbe(MachineFunction &MF) const override;
-    StringRef getStackProbeSymbolName(MachineFunction &MF) const override;
+    bool hasStackProbeSymbol(const MachineFunction &MF) const override;
+    bool hasInlineStackProbe(const MachineFunction &MF) const override;
+    StringRef getStackProbeSymbolName(const MachineFunction &MF) const override;
 
-    unsigned getStackProbeSize(MachineFunction &MF) const;
+    unsigned getStackProbeSize(const MachineFunction &MF) const;
 
     bool hasVectorBlend() const override { return true; }
 

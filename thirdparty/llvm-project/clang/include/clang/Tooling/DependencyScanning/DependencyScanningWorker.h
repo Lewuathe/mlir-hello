@@ -28,9 +28,19 @@ namespace dependencies {
 
 class DependencyScanningWorkerFilesystem;
 
+/// A command-line tool invocation that is part of building a TU.
+///
+/// \see FullDependencies::Commands.
+struct Command {
+  std::string Executable;
+  std::vector<std::string> Arguments;
+};
+
 class DependencyConsumer {
 public:
   virtual ~DependencyConsumer() {}
+
+  virtual void handleBuildCommand(Command Cmd) = 0;
 
   virtual void
   handleDependencyOutputOpts(const DependencyOutputOptions &Opts) = 0;
@@ -63,6 +73,13 @@ public:
   /// ModuleName isn't empty, this function reports the dependencies of module
   /// \p ModuleName.
   ///
+  /// \returns false if clang errors occurred (with diagnostics reported to
+  /// \c DiagConsumer), true otherwise.
+  bool computeDependencies(StringRef WorkingDirectory,
+                           const std::vector<std::string> &CommandLine,
+                           DependencyConsumer &DepConsumer,
+                           DiagnosticConsumer &DiagConsumer,
+                           llvm::Optional<StringRef> ModuleName = None);
   /// \returns A \c StringError with the diagnostic output if clang errors
   /// occurred, success otherwise.
   llvm::Error computeDependencies(StringRef WorkingDirectory,

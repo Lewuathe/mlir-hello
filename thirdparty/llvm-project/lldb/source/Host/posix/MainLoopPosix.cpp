@@ -11,6 +11,7 @@
 #include "lldb/Host/PosixApi.h"
 #include "lldb/Utility/Status.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/Support/Errno.h"
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
@@ -80,7 +81,7 @@ Status MainLoopPosix::RunImpl::Poll() {
     EV_SET(&in_events[i++], fd.first, EVFILT_READ, EV_ADD, 0, 0, 0);
 
   num_events = kevent(loop.m_kqueue, in_events.data(), in_events.size(),
-                      out_events, llvm::array_lengthof(out_events), nullptr);
+                      out_events, std::size(out_events), nullptr);
 
   if (num_events < 0) {
     if (errno == EINTR) {
@@ -222,6 +223,18 @@ void MainLoopPosix::RunImpl::ProcessEvents() {
 #endif
 
 MainLoopPosix::MainLoopPosix() {
+  Status error = m_trigger_pipe.CreateNew(/*child_process_inherit=*/false);
+  assert(error.Success());
+  const int trigger_pipe_fd = m_trigger_pipe.GetReadFileDescriptor();
+  m_read_fds.insert({trigger_pipe_fd, [trigger_pipe_fd](MainLoopBase &loop) {
+                       char c;
+                       ssize_t bytes_read = llvm::sys::RetryAfterSignal(
+                           -1, ::read, trigger_pipe_fd, &c, 1);
+                       assert(bytes_read == 1);
+                       UNUSED_IF_ASSERT_DISABLED(bytes_read);
+                       // NB: This implicitly causes another loop iteration
+                       // and therefore the execution of pending callbacks.
+                     }});
 #if HAVE_SYS_EVENT_H
   m_kqueue = kqueue();
   assert(m_kqueue >= 0);
@@ -232,6 +245,8 @@ MainLoopPosix::~MainLoopPosix() {
 #if HAVE_SYS_EVENT_H
   close(m_kqueue);
 #endif
+  m_read_fds.erase(m_trigger_pipe.GetReadFileDescriptor());
+  m_trigger_pipe.Close();
   assert(m_read_fds.size() == 0); 
   assert(m_signals.size() == 0);
 }
@@ -347,8 +362,9 @@ Status MainLoopPosix::Run() {
   RunImpl impl(*this);
 
   // run until termination or until we run out of things to listen to
-  while (!m_terminate_request && (!m_read_fds.empty() || !m_signals.empty())) {
-
+  // (m_read_fds will always contain m_trigger_pipe fd, so check for > 1)
+  while (!m_terminate_request &&
+         (m_read_fds.size() > 1 || !m_signals.empty())) {
     error = impl.Poll();
     if (error.Fail())
       return error;
@@ -376,4 +392,13 @@ void MainLoopPosix::ProcessSignal(int signo) {
     for (auto &x : callbacks_to_run)
       x(*this); // Do the work
   }
+}
+
+void MainLoopPosix::TriggerPendingCallbacks() {
+  char c = '.';
+  size_t bytes_written;
+  Status error = m_trigger_pipe.Write(&c, 1, bytes_written);
+  assert(error.Success());
+  UNUSED_IF_ASSERT_DISABLED(error);
+  assert(bytes_written == 1);
 }

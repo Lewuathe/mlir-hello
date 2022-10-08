@@ -8,6 +8,7 @@
 
 #include "UseEqualsDefaultCheck.h"
 #include "../utils/LexerUtils.h"
+#include "../utils/Matchers.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Lex/Lexer.h"
@@ -217,17 +218,20 @@ void UseEqualsDefaultCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 }
 
 void UseEqualsDefaultCheck::registerMatchers(MatchFinder *Finder) {
-  // Skip unions since constructors with empty bodies behave differently
-  // in comparison with structs/classes.
+  // Skip unions/union-like classes since their constructors behave differently
+  // when defaulted vs. empty.
+  auto IsUnionLikeClass = recordDecl(
+      anyOf(isUnion(),
+            has(fieldDecl(isImplicit(), hasType(cxxRecordDecl(isUnion()))))));
 
   // Destructor.
-  Finder->addMatcher(cxxDestructorDecl(unless(hasParent(recordDecl(isUnion()))),
-                                       isDefinition())
-                         .bind(SpecialFunction),
-                     this);
+  Finder->addMatcher(
+      cxxDestructorDecl(unless(hasParent(IsUnionLikeClass)), isDefinition())
+          .bind(SpecialFunction),
+      this);
   Finder->addMatcher(
       cxxConstructorDecl(
-          unless(hasParent(recordDecl(isUnion()))), isDefinition(),
+          unless(hasParent(IsUnionLikeClass)), isDefinition(),
           anyOf(
               // Default constructor.
               allOf(unless(hasAnyConstructorInitializer(isWritten())),
@@ -242,12 +246,17 @@ void UseEqualsDefaultCheck::registerMatchers(MatchFinder *Finder) {
       this);
   // Copy-assignment operator.
   Finder->addMatcher(
-      cxxMethodDecl(unless(hasParent(recordDecl(isUnion()))), isDefinition(),
+      cxxMethodDecl(unless(hasParent(IsUnionLikeClass)), isDefinition(),
                     isCopyAssignmentOperator(),
                     // isCopyAssignmentOperator() allows the parameter to be
                     // passed by value, and in this case it cannot be
                     // defaulted.
-                    hasParameter(0, hasType(lValueReferenceType())))
+                    hasParameter(0, hasType(lValueReferenceType())),
+                    // isCopyAssignmentOperator() allows non lvalue reference
+                    // return types, and in this case it cannot be defaulted.
+                    returns(qualType(hasCanonicalType(
+                        allOf(lValueReferenceType(pointee(type())),
+                              unless(matchers::isReferenceToConst()))))))
           .bind(SpecialFunction),
       this);
 }

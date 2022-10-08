@@ -19,7 +19,6 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/STLArrayExtras.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/identity.h"
@@ -57,8 +56,8 @@ template <typename RangeT>
 using IterOfRange = decltype(std::begin(std::declval<RangeT &>()));
 
 template <typename RangeT>
-using ValueOfRange = typename std::remove_reference<decltype(
-    *std::begin(std::declval<RangeT &>()))>::type;
+using ValueOfRange =
+    std::remove_reference_t<decltype(*std::begin(std::declval<RangeT &>()))>;
 
 } // end namespace detail
 
@@ -67,13 +66,11 @@ using ValueOfRange = typename std::remove_reference<decltype(
 //===----------------------------------------------------------------------===//
 
 template <typename T> struct make_const_ptr {
-  using type =
-      typename std::add_pointer<typename std::add_const<T>::type>::type;
+  using type = std::add_pointer_t<std::add_const_t<T>>;
 };
 
 template <typename T> struct make_const_ref {
-  using type = typename std::add_lvalue_reference<
-      typename std::add_const<T>::type>::type;
+  using type = std::add_lvalue_reference_t<std::add_const_t<T>>;
 };
 
 namespace detail {
@@ -114,7 +111,7 @@ struct function_traits<ReturnType (ClassType::*)(Args...) const, false> {
 
   /// The type of an argument to this function.
   template <size_t Index>
-  using arg_t = typename std::tuple_element<Index, std::tuple<Args...>>::type;
+  using arg_t = std::tuple_element_t<Index, std::tuple<Args...>>;
 };
 /// Overload for class function types.
 template <typename ClassType, typename ReturnType, typename... Args>
@@ -131,7 +128,7 @@ struct function_traits<ReturnType (*)(Args...), false> {
 
   /// The type of an argument to this function.
   template <size_t i>
-  using arg_t = typename std::tuple_element<i, std::tuple<Args...>>::type;
+  using arg_t = std::tuple_element_t<i, std::tuple<Args...>>;
 };
 template <typename ReturnType, typename... Args>
 struct function_traits<ReturnType (*const)(Args...), false>
@@ -255,6 +252,7 @@ void adl_swap(T &&lhs, T &&rhs) noexcept(
 
 /// Test whether \p RangeOrContainer is empty. Similar to C++17 std::empty.
 template <typename T>
+LLVM_DEPRECATED("Use x.empty() instead", "empty")
 constexpr bool empty(const T &RangeOrContainer) {
   return adl_begin(RangeOrContainer) == adl_end(RangeOrContainer);
 }
@@ -361,8 +359,7 @@ public:
 
 /// Metafunction to determine if T& or T has a member called rbegin().
 template <typename Ty>
-struct has_rbegin : has_rbegin_impl<typename std::remove_reference<Ty>::type> {
-};
+struct has_rbegin : has_rbegin_impl<std::remove_reference_t<Ty>> {};
 
 // Returns an iterator_range over the given container which iterates in reverse.
 template <typename ContainerTy> auto reverse(ContainerTy &&C) {
@@ -394,9 +391,9 @@ class filter_iterator_base
     : public iterator_adaptor_base<
           filter_iterator_base<WrappedIteratorT, PredicateT, IterTag>,
           WrappedIteratorT,
-          typename std::common_type<
-              IterTag, typename std::iterator_traits<
-                           WrappedIteratorT>::iterator_category>::type> {
+          std::common_type_t<IterTag,
+                             typename std::iterator_traits<
+                                 WrappedIteratorT>::iterator_category>> {
   using BaseT = typename filter_iterator_base::iterator_adaptor_base;
 
 protected:
@@ -621,13 +618,14 @@ template<typename... Iters> struct ZipTupleType {
 
 template <typename ZipType, typename... Iters>
 using zip_traits = iterator_facade_base<
-    ZipType, typename std::common_type<std::bidirectional_iterator_tag,
-                                       typename std::iterator_traits<
-                                           Iters>::iterator_category...>::type,
+    ZipType,
+    std::common_type_t<
+        std::bidirectional_iterator_tag,
+        typename std::iterator_traits<Iters>::iterator_category...>,
     // ^ TODO: Implement random access methods.
     typename ZipTupleType<Iters...>::type,
-    typename std::iterator_traits<typename std::tuple_element<
-        0, std::tuple<Iters...>>::type>::difference_type,
+    typename std::iterator_traits<
+        std::tuple_element_t<0, std::tuple<Iters...>>>::difference_type,
     // ^ FIXME: This follows boost::make_zip_iterator's assumption that all
     // inner iterators have the same difference_type. It would fail if, for
     // instance, the second field's difference_type were non-numeric while the
@@ -786,9 +784,8 @@ auto deref_or_none(const Iter &I, const Iter &End) -> llvm::Optional<
 }
 
 template <typename Iter> struct ZipLongestItemType {
-  using type =
-      llvm::Optional<typename std::remove_const<typename std::remove_reference<
-          decltype(*std::declval<Iter>())>::type>::type>;
+  using type = llvm::Optional<std::remove_const_t<
+      std::remove_reference_t<decltype(*std::declval<Iter>())>>>;
 };
 
 template <typename... Iters> struct ZipLongestTupleType {
@@ -803,8 +800,8 @@ class zip_longest_iterator
               std::forward_iterator_tag,
               typename std::iterator_traits<Iters>::iterator_category...>::type,
           typename ZipLongestTupleType<Iters...>::type,
-          typename std::iterator_traits<typename std::tuple_element<
-              0, std::tuple<Iters...>>::type>::difference_type,
+          typename std::iterator_traits<
+              std::tuple_element_t<0, std::tuple<Iters...>>>::difference_type,
           typename ZipLongestTupleType<Iters...>::type *,
           typename ZipLongestTupleType<Iters...>::type> {
 public:
@@ -1794,24 +1791,6 @@ template <typename T> bool all_equal(std::initializer_list<T> Values) {
   return all_equal<std::initializer_list<T>>(std::move(Values));
 }
 
-/// Returns true if Range consists of the same value repeated multiple times.
-template <typename R>
-LLVM_DEPRECATED(
-    "Use 'all_equal(Range)' or '!empty(Range) && all_equal(Range)' instead.",
-    "all_equal")
-bool is_splat(R &&Range) {
-  return !llvm::empty(Range) && all_equal(Range);
-}
-
-/// Returns true if Values consists of the same value repeated multiple times.
-template <typename T>
-LLVM_DEPRECATED(
-    "Use 'all_equal(Values)' or '!empty(Values) && all_equal(Values)' instead.",
-    "all_equal")
-bool is_splat(std::initializer_list<T> Values) {
-  return is_splat<std::initializer_list<T>>(std::move(Values));
-}
-
 /// Provide a container algorithm similar to C++ Library Fundamentals v2's
 /// `erase_if` which is equivalent to:
 ///
@@ -1879,9 +1858,9 @@ void replace(Container &Cont, typename Container::iterator ContIt,
 /// \endcode
 template <typename ForwardIterator, typename UnaryFunctor,
           typename NullaryFunctor,
-          typename = typename std::enable_if<
+          typename = std::enable_if_t<
               !std::is_constructible<StringRef, UnaryFunctor>::value &&
-              !std::is_constructible<StringRef, NullaryFunctor>::value>::type>
+              !std::is_constructible<StringRef, NullaryFunctor>::value>>
 inline void interleave(ForwardIterator begin, ForwardIterator end,
                        UnaryFunctor each_fn, NullaryFunctor between_fn) {
   if (begin == end)
@@ -1895,9 +1874,9 @@ inline void interleave(ForwardIterator begin, ForwardIterator end,
 }
 
 template <typename Container, typename UnaryFunctor, typename NullaryFunctor,
-          typename = typename std::enable_if<
+          typename = std::enable_if_t<
               !std::is_constructible<StringRef, UnaryFunctor>::value &&
-              !std::is_constructible<StringRef, NullaryFunctor>::value>::type>
+              !std::is_constructible<StringRef, NullaryFunctor>::value>>
 inline void interleave(const Container &c, UnaryFunctor each_fn,
                        NullaryFunctor between_fn) {
   interleave(c.begin(), c.end(), each_fn, between_fn);
