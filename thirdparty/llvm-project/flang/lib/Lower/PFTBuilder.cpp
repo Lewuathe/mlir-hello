@@ -900,12 +900,22 @@ private:
           },
           [&](const parser::SelectRankStmt &s) {
             insertConstructName(s, parentConstruct);
+            lastConstructStmtEvaluation = &eval;
           },
-          [&](const parser::SelectRankCaseStmt &) { eval.isNewBlock = true; },
+          [&](const parser::SelectRankCaseStmt &) {
+            eval.isNewBlock = true;
+            lastConstructStmtEvaluation->controlSuccessor = &eval;
+            lastConstructStmtEvaluation = &eval;
+          },
           [&](const parser::SelectTypeStmt &s) {
             insertConstructName(s, parentConstruct);
+            lastConstructStmtEvaluation = &eval;
           },
-          [&](const parser::TypeGuardStmt &) { eval.isNewBlock = true; },
+          [&](const parser::TypeGuardStmt &) {
+            eval.isNewBlock = true;
+            lastConstructStmtEvaluation->controlSuccessor = &eval;
+            lastConstructStmtEvaluation = &eval;
+          },
 
           // Constructs - set (unstructured) construct exit targets
           [&](const parser::AssociateConstruct &) { setConstructExit(eval); },
@@ -1324,6 +1334,13 @@ struct SymbolDependenceDepth {
       const Fortran::semantics::Symbol *aggregateSym = nullptr;
       bool isGlobal = false;
       const semantics::Symbol &first = *aggregate.front();
+      // Skip aggregates related to common blocks as they will be handled by
+      // instantiateCommon and the aggregate store information will not be used.
+      // Additionally, the AggregateStoreKeys for common block related aggregate
+      // stores can collide with non common block ones, potentially resulting in
+      // incorrect stores being used.
+      if (lower::definedInCommonBlock(first))
+        continue;
       std::size_t start = first.offset();
       std::size_t end = first.offset() + first.size();
       const Fortran::semantics::Symbol *namingSym = nullptr;

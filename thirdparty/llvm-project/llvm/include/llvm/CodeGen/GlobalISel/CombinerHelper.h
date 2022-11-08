@@ -113,12 +113,14 @@ protected:
   GISelChangeObserver &Observer;
   GISelKnownBits *KB;
   MachineDominatorTree *MDT;
+  bool IsPreLegalize;
   const LegalizerInfo *LI;
   const RegisterBankInfo *RBI;
   const TargetRegisterInfo *TRI;
 
 public:
   CombinerHelper(GISelChangeObserver &Observer, MachineIRBuilder &B,
+                 bool IsPreLegalize,
                  GISelKnownBits *KB = nullptr,
                  MachineDominatorTree *MDT = nullptr,
                  const LegalizerInfo *LI = nullptr);
@@ -694,6 +696,9 @@ public:
   ///           (fma fneg(x), fneg(y), z) -> (fma x, y, z)
   bool matchRedundantNegOperands(MachineInstr &MI, BuildFnTy &MatchInfo);
 
+  bool matchFsubToFneg(MachineInstr &MI, Register &MatchInfo);
+  void applyFsubToFneg(MachineInstr &MI, Register &MatchInfo);
+
   bool canCombineFMadOrFMA(MachineInstr &MI, bool &AllowFusionGlobally,
                            bool &HasFMAD, bool &Aggressive,
                            bool CanReassociate = false);
@@ -751,9 +756,29 @@ public:
   /// Transform G_ADD(G_SUB(y, x), x) to y.
   bool matchAddSubSameReg(MachineInstr &MI, Register &Src);
 
+  bool matchBuildVectorIdentityFold(MachineInstr &MI, Register &MatchInfo);
+  bool matchTruncBuildVectorFold(MachineInstr &MI, Register &MatchInfo);
+  bool matchTruncLshrBuildVectorFold(MachineInstr &MI, Register &MatchInfo);
+
+  /// Transform:
+  ///   (x + y) - y -> x
+  ///   (x + y) - x -> y
+  ///   x - (y + x) -> 0 - y
+  ///   x - (x + z) -> 0 - z
+  bool matchSubAddSameReg(MachineInstr &MI, BuildFnTy &MatchInfo);
+
   /// \returns true if it is possible to simplify a select instruction \p MI
   /// to a min/max instruction of some sort.
   bool matchSimplifySelectToMinMax(MachineInstr &MI, BuildFnTy &MatchInfo);
+
+  /// Transform:
+  ///   (X + Y) == X -> Y == 0
+  ///   (X - Y) == X -> Y == 0
+  ///   (X ^ Y) == X -> Y == 0
+  ///   (X + Y) != X -> Y != 0
+  ///   (X - Y) != X -> Y != 0
+  ///   (X ^ Y) != X -> Y != 0
+  bool matchRedundantBinOpInEquality(MachineInstr &MI, BuildFnTy &MatchInfo);
 
 private:
   /// Given a non-indexed load or store instruction \p MI, find an offset that

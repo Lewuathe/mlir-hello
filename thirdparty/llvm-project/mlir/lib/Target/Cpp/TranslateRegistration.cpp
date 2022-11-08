@@ -33,10 +33,10 @@ void registerToCppTranslation() {
       llvm::cl::init(false));
 
   TranslateFromMLIRRegistration reg(
-      "mlir-to-cpp",
-      [](ModuleOp module, raw_ostream &output) {
+      "mlir-to-cpp", "translate from mlir to cpp",
+      [](Operation *op, raw_ostream &output) {
         return emitc::translateToCpp(
-            module, output,
+            op, output,
             /*declareVariablesAtTop=*/declareVariablesAtTop);
       },
       [](DialectRegistry &registry) {

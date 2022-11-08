@@ -39,7 +39,7 @@ namespace {
 /// baseBuffer, baseOffset, baseSizes, baseStrides =
 ///     extract_strided_metadata(memref)
 /// strides#i = baseStrides#i * subSizes#i
-/// offset = baseOffset + sum(subOffset#i * strides#i)
+/// offset = baseOffset + sum(subOffset#i * baseStrides#i)
 /// sizes = subSizes
 /// \endverbatim
 ///
@@ -59,16 +59,12 @@ public:
     // Build a plain extract_strided_metadata(memref) from
     // extract_strided_metadata(subview(memref)).
     Location origLoc = op.getLoc();
-    IndexType indexType = rewriter.getIndexType();
     Value source = subview.getSource();
     auto sourceType = source.getType().cast<MemRefType>();
     unsigned sourceRank = sourceType.getRank();
-    SmallVector<Type> sizeStrideTypes(sourceRank, indexType);
 
     auto newExtractStridedMetadata =
-        rewriter.create<memref::ExtractStridedMetadataOp>(
-            origLoc, op.getBaseBuffer().getType(), indexType, sizeStrideTypes,
-            sizeStrideTypes, source);
+        rewriter.create<memref::ExtractStridedMetadataOp>(origLoc, source);
 
     SmallVector<int64_t> sourceStrides;
     int64_t sourceOffset;
@@ -87,8 +83,8 @@ public:
     auto origStrides = newExtractStridedMetadata.getStrides();
 
     // Hold the affine symbols and values for the computation of the offset.
-    SmallVector<OpFoldResult> values(3 * sourceRank + 1);
-    SmallVector<AffineExpr> symbols(3 * sourceRank + 1);
+    SmallVector<OpFoldResult> values(2 * sourceRank + 1);
+    SmallVector<AffineExpr> symbols(2 * sourceRank + 1);
 
     detail::bindSymbolsList(rewriter.getContext(), symbols);
     AffineExpr expr = symbols.front();
@@ -109,14 +105,11 @@ public:
           rewriter, origLoc, s0 * s1, {subStrides[i], origStride}));
 
       // Build up the computation of the offset.
-      unsigned baseIdxForDim = 1 + 3 * i;
+      unsigned baseIdxForDim = 1 + 2 * i;
       unsigned subOffsetForDim = baseIdxForDim;
-      unsigned subStrideForDim = baseIdxForDim + 1;
-      unsigned origStrideForDim = baseIdxForDim + 2;
-      expr = expr + symbols[subOffsetForDim] * symbols[subStrideForDim] *
-                        symbols[origStrideForDim];
+      unsigned origStrideForDim = baseIdxForDim + 1;
+      expr = expr + symbols[subOffsetForDim] * symbols[origStrideForDim];
       values[subOffsetForDim] = subOffsets[i];
-      values[subStrideForDim] = subStrides[i];
       values[origStrideForDim] = origStride;
     }
 
@@ -173,6 +166,11 @@ public:
 /// \p origSizes hold the sizes of the source shape as values.
 /// This is used to compute the new sizes in cases of dynamic shapes.
 ///
+/// sizes#i =
+///     baseSizes#groupId / product(expandShapeSizes#j,
+///                                  for j in group excluding reassIdx#i)
+/// Where reassIdx#i is the reassociation index at index i in \p groupId.
+///
 /// \post result.size() == expandShape.getReassociationIndices()[groupId].size()
 ///
 /// TODO: Move this utility function directly within ExpandShapeOp. For now,
@@ -224,6 +222,18 @@ getExpandedSizes(memref::ExpandShapeOp expandShape, OpBuilder &builder,
 /// of the source shape as values.
 /// This is used to compute the strides in cases of dynamic shapes and/or
 /// dynamic stride for this reassociation group.
+///
+/// strides#i =
+///     origStrides#reassDim * product(expandShapeSizes#j, for j in
+///                                    reassIdx#i+1..reassIdx#i+group.size-1)
+///
+/// Where reassIdx#i is the reassociation index for at index i in \p groupId
+/// and expandShapeSizes#j is either:
+/// - The constant size at dimension j, derived directly from the result type of
+///   the expand_shape op, or
+/// - An affine expression: baseSizes#reassDim / product of all constant sizes
+///   in expandShapeSizes. (Remember expandShapeSizes has at most one dynamic
+///   element.)
 ///
 /// \post result.size() == expandShape.getReassociationIndices()[groupId].size()
 ///
@@ -315,57 +325,166 @@ SmallVector<OpFoldResult> getExpandedStrides(memref::ExpandShapeOp expandShape,
   return expandedStrides;
 }
 
+/// Produce an OpFoldResult object with \p builder at \p loc representing
+/// `prod(valueOrConstant#i, for i in {indices})`,
+/// where valueOrConstant#i is maybeConstant[i] when \p isDymamic is false,
+/// values[i] otherwise.
+///
+/// \pre for all index in indices: index < values.size()
+/// \pre for all index in indices: index < maybeConstants.size()
+static OpFoldResult
+getProductOfValues(ArrayRef<int64_t> indices, OpBuilder &builder, Location loc,
+                   ArrayRef<int64_t> maybeConstants,
+                   ArrayRef<OpFoldResult> values,
+                   llvm::function_ref<bool(int64_t)> isDynamic) {
+  AffineExpr productOfValues = builder.getAffineConstantExpr(1);
+  SmallVector<OpFoldResult> inputValues;
+  unsigned numberOfSymbols = 0;
+  unsigned groupSize = indices.size();
+  for (unsigned i = 0; i < groupSize; ++i) {
+    productOfValues =
+        productOfValues * builder.getAffineSymbolExpr(numberOfSymbols++);
+    unsigned srcIdx = indices[i];
+    int64_t maybeConstant = maybeConstants[srcIdx];
+
+    inputValues.push_back(isDynamic(maybeConstant)
+                              ? values[srcIdx]
+                              : builder.getIndexAttr(maybeConstant));
+  }
+
+  return makeComposedFoldedAffineApply(builder, loc, productOfValues,
+                                       inputValues);
+}
+
+/// Compute the collapsed size of the given \p collpaseShape for the
+/// \p groupId-th reassociation group.
+/// \p origSizes hold the sizes of the source shape as values.
+/// This is used to compute the new sizes in cases of dynamic shapes.
+///
+/// Conceptually this helper function computes:
+/// `prod(origSizes#i, for i in {ressociationGroup[groupId]})`.
+///
+/// \post result.size() == 1, in other words, each group collapse to one
+/// dimension.
+///
+/// TODO: Move this utility function directly within CollapseShapeOp. For now,
+/// this is not possible because this function uses the Affine dialect and the
+/// MemRef dialect cannot depend on the Affine dialect.
+static SmallVector<OpFoldResult>
+getCollapsedSize(memref::CollapseShapeOp collapseShape, OpBuilder &builder,
+                 ArrayRef<OpFoldResult> origSizes, unsigned groupId) {
+  SmallVector<OpFoldResult> collapsedSize;
+
+  MemRefType collapseShapeType = collapseShape.getResultType();
+
+  uint64_t size = collapseShapeType.getDimSize(groupId);
+  if (!ShapedType::isDynamic(size)) {
+    collapsedSize.push_back(builder.getIndexAttr(size));
+    return collapsedSize;
+  }
+
+  // We are dealing with a dynamic size.
+  // Build the affine expr of the product of the original sizes involved in that
+  // group.
+  Value source = collapseShape.getSrc();
+  auto sourceType = source.getType().cast<MemRefType>();
+
+  SmallVector<int64_t, 2> reassocGroup =
+      collapseShape.getReassociationIndices()[groupId];
+
+  collapsedSize.push_back(getProductOfValues(
+      reassocGroup, builder, collapseShape.getLoc(), sourceType.getShape(),
+      origSizes, ShapedType::isDynamic));
+
+  return collapsedSize;
+}
+
+/// Compute the collapsed stride of the given \p collpaseShape for the
+/// \p groupId-th reassociation group.
+/// \p origStrides and \p origSizes hold respectively the strides and sizes
+/// of the source shape as values.
+/// This is used to compute the strides in cases of dynamic shapes and/or
+/// dynamic stride for this reassociation group.
+///
+/// Conceptually this helper function returns the stride of the inner most
+/// dimension of that group in the original shape.
+///
+/// \post result.size() == 1, in other words, each group collapse to one
+/// dimension.
+static SmallVector<OpFoldResult>
+getCollapsedStride(memref::CollapseShapeOp collapseShape, OpBuilder &builder,
+                   ArrayRef<OpFoldResult> origSizes,
+                   ArrayRef<OpFoldResult> origStrides, unsigned groupId) {
+  SmallVector<int64_t, 2> reassocGroup =
+      collapseShape.getReassociationIndices()[groupId];
+  assert(!reassocGroup.empty() &&
+         "Reassociation group should have at least one dimension");
+
+  Value source = collapseShape.getSrc();
+  auto sourceType = source.getType().cast<MemRefType>();
+
+  SmallVector<int64_t> strides;
+  int64_t offset;
+  bool hasKnownStridesAndOffset =
+      succeeded(getStridesAndOffset(sourceType, strides, offset));
+  (void)hasKnownStridesAndOffset;
+  assert(hasKnownStridesAndOffset &&
+         "getStridesAndOffset must work on valid collapse_shape");
+
+  SmallVector<OpFoldResult> collapsedStride;
+  int64_t innerMostDimForGroup = reassocGroup.back();
+  int64_t innerMostStrideForGroup = strides[innerMostDimForGroup];
+  collapsedStride.push_back(
+      ShapedType::isDynamicStrideOrOffset(innerMostStrideForGroup)
+          ? origStrides[innerMostDimForGroup]
+          : builder.getIndexAttr(innerMostStrideForGroup));
+
+  return collapsedStride;
+}
 /// Replace `baseBuffer, offset, sizes, strides =
-///              extract_strided_metadata(expand_shape(memref))`
+///              extract_strided_metadata(reshapeLike(memref))`
 /// With
 ///
 /// \verbatim
 /// baseBuffer, offset, baseSizes, baseStrides =
 ///     extract_strided_metadata(memref)
-/// sizes#reassIdx =
-///     baseSizes#reassDim / product(expandShapeSizes#j,
-///                                  for j in group excluding reassIdx)
-/// strides#reassIdx =
-///     baseStrides#reassDim * product(expandShapeSizes#j, for j in
-///                                    reassIdx+1..reassIdx+group.size-1)
+/// sizes = getReshapedSizes(reshapeLike)
+/// strides = getReshapedStrides(reshapeLike)
 /// \endverbatim
 ///
-/// Where reassIdx is a reassociation index for the group at reassDim
-/// and expandShapeSizes#j is either:
-/// - The constant size at dimension j, derived directly from the result type of
-///   the expand_shape op, or
-/// - An affine expression: baseSizes#reassDim / product of all constant sizes
-///   in expandShapeSizes. (Remember expandShapeSizes has at most one dynamic
-///   element.)
 ///
 /// Notice that `baseBuffer` and `offset` are unchanged.
 ///
 /// In other words, get rid of the expand_shape in that expression and
 /// materialize its effects on the sizes and the strides using affine apply.
-struct ExtractStridedMetadataOpExpandShapeFolder
+template <typename ReassociativeReshapeLikeOp,
+          SmallVector<OpFoldResult> (*getReshapedSizes)(
+              ReassociativeReshapeLikeOp, OpBuilder &,
+              ArrayRef<OpFoldResult> /*origSizes*/, unsigned /*groupId*/),
+          SmallVector<OpFoldResult> (*getReshapedStrides)(
+              ReassociativeReshapeLikeOp, OpBuilder &,
+              ArrayRef<OpFoldResult> /*origSizes*/,
+              ArrayRef<OpFoldResult> /*origStrides*/, unsigned /*groupId*/)>
+struct ExtractStridedMetadataOpReshapeFolder
     : public OpRewritePattern<memref::ExtractStridedMetadataOp> {
 public:
   using OpRewritePattern<memref::ExtractStridedMetadataOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(memref::ExtractStridedMetadataOp op,
                                 PatternRewriter &rewriter) const override {
-    auto expandShape = op.getSource().getDefiningOp<memref::ExpandShapeOp>();
-    if (!expandShape)
+    auto reshape = op.getSource().getDefiningOp<ReassociativeReshapeLikeOp>();
+    if (!reshape)
       return failure();
 
     // Build a plain extract_strided_metadata(memref) from
-    // extract_strided_metadata(expand_shape(memref)).
+    // extract_strided_metadata(reassociative_reshape_like(memref)).
     Location origLoc = op.getLoc();
-    IndexType indexType = rewriter.getIndexType();
-    Value source = expandShape.getSrc();
+    Value source = reshape.getSrc();
     auto sourceType = source.getType().cast<MemRefType>();
     unsigned sourceRank = sourceType.getRank();
-    SmallVector<Type> sizeStrideTypes(sourceRank, indexType);
 
     auto newExtractStridedMetadata =
-        rewriter.create<memref::ExtractStridedMetadataOp>(
-            origLoc, op.getBaseBuffer().getType(), indexType, sizeStrideTypes,
-            sizeStrideTypes, source);
+        rewriter.create<memref::ExtractStridedMetadataOp>(origLoc, source);
 
     // Collect statically known information.
     SmallVector<int64_t> strides;
@@ -374,13 +493,13 @@ public:
         succeeded(getStridesAndOffset(sourceType, strides, offset));
     (void)hasKnownStridesAndOffset;
     assert(hasKnownStridesAndOffset &&
-           "getStridesAndOffset must work on valid expand_shape");
-    MemRefType expandShapeType = expandShape.getResultType();
-    unsigned expandShapeRank = expandShapeType.getRank();
+           "getStridesAndOffset must work on valid reassociative_reshape_like");
+    MemRefType reshapeType = reshape.getResultType();
+    unsigned reshapeRank = reshapeType.getRank();
 
     // The result value will start with the base_buffer and offset.
     unsigned baseIdxInResult = 2;
-    SmallVector<OpFoldResult> results(baseIdxInResult + expandShapeRank * 2);
+    SmallVector<OpFoldResult> results(baseIdxInResult + reshapeRank * 2);
     results[0] = newExtractStridedMetadata.getBaseBuffer();
     results[1] = ShapedType::isDynamicStrideOrOffset(offset)
                      ? getAsOpFoldResult(newExtractStridedMetadata.getOffset())
@@ -390,7 +509,7 @@ public:
     if (sourceRank == 0) {
       Value constantOne = getValueOrCreateConstantIndexOp(
           rewriter, origLoc, rewriter.getIndexAttr(1));
-      SmallVector<Value> resultValues(baseIdxInResult + expandShapeRank * 2,
+      SmallVector<Value> resultValues(baseIdxInResult + reshapeRank * 2,
                                       constantOne);
       for (unsigned i = 0; i < baseIdxInResult; ++i)
         resultValues[i] =
@@ -399,92 +518,35 @@ public:
       return success();
     }
 
-    // Compute the expanded strides and sizes from the base strides and sizes.
+    // Compute the reshaped strides and sizes from the base strides and sizes.
     SmallVector<OpFoldResult> origSizes =
         getAsOpFoldResult(newExtractStridedMetadata.getSizes());
     SmallVector<OpFoldResult> origStrides =
         getAsOpFoldResult(newExtractStridedMetadata.getStrides());
-    unsigned idx = 0, endIdx = expandShape.getReassociationIndices().size();
+    unsigned idx = 0, endIdx = reshape.getReassociationIndices().size();
     for (; idx != endIdx; ++idx) {
-      SmallVector<OpFoldResult> expandedSizes =
-          getExpandedSizes(expandShape, rewriter, origSizes, /*groupId=*/idx);
-      SmallVector<OpFoldResult> expandedStrides = getExpandedStrides(
-          expandShape, rewriter, origSizes, origStrides, /*groupId=*/idx);
+      SmallVector<OpFoldResult> reshapedSizes =
+          getReshapedSizes(reshape, rewriter, origSizes, /*groupId=*/idx);
+      SmallVector<OpFoldResult> reshapedStrides = getReshapedStrides(
+          reshape, rewriter, origSizes, origStrides, /*groupId=*/idx);
 
-      unsigned groupSize = expandShape.getReassociationIndices()[idx].size();
+      unsigned groupSize = reshapedSizes.size();
       const unsigned sizeStartIdx = baseIdxInResult;
-      const unsigned strideStartIdx = sizeStartIdx + expandShapeRank;
+      const unsigned strideStartIdx = sizeStartIdx + reshapeRank;
       for (unsigned i = 0; i < groupSize; ++i) {
-        results[sizeStartIdx + i] = expandedSizes[i];
-        results[strideStartIdx + i] = expandedStrides[i];
+        results[sizeStartIdx + i] = reshapedSizes[i];
+        results[strideStartIdx + i] = reshapedStrides[i];
       }
       baseIdxInResult += groupSize;
     }
-    assert(idx == sourceRank &&
+    assert(((isa<memref::ExpandShapeOp>(reshape) && idx == sourceRank) ||
+            (isa<memref::CollapseShapeOp>(reshape) && idx == reshapeRank)) &&
            "We should have visited all the input dimensions");
-    assert(baseIdxInResult == expandShapeRank + 2 &&
+    assert(baseIdxInResult == reshapeRank + 2 &&
            "We should have populated all the values");
     rewriter.replaceOp(
         op, getValueOrCreateConstantIndexOp(rewriter, origLoc, results));
     return success();
-  }
-};
-
-/// Helper function to perform the replacement of all constant uses of `values`
-/// by a materialized constant extracted from `maybeConstants`.
-/// `values` and `maybeConstants` are expected to have the same size.
-template <typename Container>
-bool replaceConstantUsesOf(PatternRewriter &rewriter, Location loc,
-                           Container values, ArrayRef<int64_t> maybeConstants,
-                           llvm::function_ref<bool(int64_t)> isDynamic) {
-  assert(values.size() == maybeConstants.size() &&
-         " expected values and maybeConstants of the same size");
-  bool atLeastOneReplacement = false;
-  for (auto [maybeConstant, result] : llvm::zip(maybeConstants, values)) {
-    // Don't materialize a constant if there are no uses: this would indice
-    // infinite loops in the driver.
-    if (isDynamic(maybeConstant) || result.use_empty())
-      continue;
-    Value constantVal =
-        rewriter.create<arith::ConstantIndexOp>(loc, maybeConstant);
-    for (Operation *op : llvm::make_early_inc_range(result.getUsers())) {
-      rewriter.startRootUpdate(op);
-      // updateRootInplace: lambda cannot capture structured bindings in C++17
-      // yet.
-      op->replaceUsesOfWith(result, constantVal);
-      rewriter.finalizeRootUpdate(op);
-      atLeastOneReplacement = true;
-    }
-  }
-  return atLeastOneReplacement;
-}
-
-// Forward propagate all constants information from an ExtractStridedMetadataOp.
-struct ForwardStaticMetadata
-    : public OpRewritePattern<memref::ExtractStridedMetadataOp> {
-  using OpRewritePattern<memref::ExtractStridedMetadataOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(memref::ExtractStridedMetadataOp metadataOp,
-                                PatternRewriter &rewriter) const override {
-    auto memrefType = metadataOp.getSource().getType().cast<MemRefType>();
-    SmallVector<int64_t> strides;
-    int64_t offset;
-    LogicalResult res = getStridesAndOffset(memrefType, strides, offset);
-    (void)res;
-    assert(succeeded(res) && "must be a strided memref type");
-
-    bool atLeastOneReplacement = replaceConstantUsesOf(
-        rewriter, metadataOp.getLoc(),
-        ArrayRef<TypedValue<IndexType>>(metadataOp.getOffset()),
-        ArrayRef<int64_t>(offset), ShapedType::isDynamicStrideOrOffset);
-    atLeastOneReplacement |= replaceConstantUsesOf(
-        rewriter, metadataOp.getLoc(), metadataOp.getSizes(),
-        memrefType.getShape(), ShapedType::isDynamic);
-    atLeastOneReplacement |= replaceConstantUsesOf(
-        rewriter, metadataOp.getLoc(), metadataOp.getStrides(), strides,
-        ShapedType::isDynamicStrideOrOffset);
-
-    return success(atLeastOneReplacement);
   }
 };
 
@@ -590,8 +652,36 @@ class RewriteExtractAlignedPointerAsIndexOfViewLikeOp
     if (!viewLikeOp)
       return rewriter.notifyMatchFailure(extractOp, "not a ViewLike source");
     rewriter.updateRootInPlace(extractOp, [&]() {
-      extractOp.sourceMutable().assign(viewLikeOp.getViewSource());
+      extractOp.getSourceMutable().assign(viewLikeOp.getViewSource());
     });
+    return success();
+  }
+};
+
+/// Replace `base, offset =
+///            extract_strided_metadata(extract_strided_metadata(src)#0)`
+/// With
+/// ```
+/// base, ... = extract_strided_metadata(src)
+/// offset = 0
+/// ```
+class ExtractStridedMetadataOpExtractStridedMetadataFolder
+    : public OpRewritePattern<memref::ExtractStridedMetadataOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult
+  matchAndRewrite(memref::ExtractStridedMetadataOp extractStridedMetadataOp,
+                  PatternRewriter &rewriter) const override {
+    auto sourceExtractStridedMetadataOp =
+        extractStridedMetadataOp.getSource()
+            .getDefiningOp<memref::ExtractStridedMetadataOp>();
+    if (!sourceExtractStridedMetadataOp)
+      return failure();
+    Location loc = extractStridedMetadataOp.getLoc();
+    rewriter.replaceOp(extractStridedMetadataOp,
+                       {sourceExtractStridedMetadataOp.getBaseBuffer(),
+                        getValueOrCreateConstantIndexOp(
+                            rewriter, loc, rewriter.getIndexAttr(0))});
     return success();
   }
 };
@@ -599,12 +689,17 @@ class RewriteExtractAlignedPointerAsIndexOfViewLikeOp
 
 void memref::populateSimplifyExtractStridedMetadataOpPatterns(
     RewritePatternSet &patterns) {
-  patterns.add<ExtractStridedMetadataOpSubviewFolder,
-               ExtractStridedMetadataOpExpandShapeFolder, ForwardStaticMetadata,
-               ExtractStridedMetadataOpAllocFolder<memref::AllocOp>,
-               ExtractStridedMetadataOpAllocFolder<memref::AllocaOp>,
-               RewriteExtractAlignedPointerAsIndexOfViewLikeOp>(
-      patterns.getContext());
+  patterns
+      .add<ExtractStridedMetadataOpSubviewFolder,
+           ExtractStridedMetadataOpReshapeFolder<
+               memref::ExpandShapeOp, getExpandedSizes, getExpandedStrides>,
+           ExtractStridedMetadataOpReshapeFolder<
+               memref::CollapseShapeOp, getCollapsedSize, getCollapsedStride>,
+           ExtractStridedMetadataOpAllocFolder<memref::AllocOp>,
+           ExtractStridedMetadataOpAllocFolder<memref::AllocaOp>,
+           RewriteExtractAlignedPointerAsIndexOfViewLikeOp,
+           ExtractStridedMetadataOpExtractStridedMetadataFolder>(
+          patterns.getContext());
 }
 
 //===----------------------------------------------------------------------===//

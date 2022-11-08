@@ -126,12 +126,6 @@ if config.has_plugins and config.llvm_plugin_ext:
 if config.clang_default_pie_on_linux:
     config.available_features.add('default-pie-on-linux')
 
-if config.clang_enable_opaque_pointers:
-    config.available_features.add('enable-opaque-pointers')
-
-if config.clang_default_std_cxx != '':
-    config.available_features.add('default-std-cxx')
-
 # Set available features we allow tests to conditionalize on.
 #
 if config.clang_default_cxx_stdlib != '':
@@ -183,7 +177,7 @@ if re.match(r'.*-(windows-msvc)$', config.target_triple):
     config.available_features.add('ms-sdk')
 
 # [PR8833] LLP64-incompatible tests
-if not re.match(r'^x86_64.*-(windows-msvc|windows-gnu)$', config.target_triple):
+if not re.match(r'^(aarch64|x86_64).*-(windows-msvc|windows-gnu)$', config.target_triple):
     config.available_features.add('LP64')
 
 # Tests that are specific to the Apple Silicon macOS.
@@ -284,3 +278,8 @@ elif platform.system() == 'AIX':
 
 if 'system-aix' in config.available_features:
         config.substitutions.append(('llvm-nm', 'env OBJECT_MODE=any llvm-nm'))
+
+# It is not realistically possible to account for all options that could
+# possibly be present in system and user configuration files, so disable
+# default configs for the test runs.
+config.environment["CLANG_NO_DEFAULT_CONFIG"] = "1"

@@ -21,6 +21,7 @@
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LiveVariables.h"
+#include "llvm/CodeGen/MachineCombinerPattern.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -1125,6 +1126,127 @@ RISCVInstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
   return None;
 }
 
+void RISCVInstrInfo::setSpecialOperandAttr(MachineInstr &OldMI1,
+                                           MachineInstr &OldMI2,
+                                           MachineInstr &NewMI1,
+                                           MachineInstr &NewMI2) const {
+  uint16_t IntersectedFlags = OldMI1.getFlags() & OldMI2.getFlags();
+  NewMI1.setFlags(IntersectedFlags);
+  NewMI2.setFlags(IntersectedFlags);
+}
+
+void RISCVInstrInfo::finalizeInsInstrs(
+    MachineInstr &Root, MachineCombinerPattern &P,
+    SmallVectorImpl<MachineInstr *> &InsInstrs) const {
+  int16_t FrmOpIdx =
+      RISCV::getNamedOperandIdx(Root.getOpcode(), RISCV::OpName::frm);
+  if (FrmOpIdx < 0) {
+    assert(all_of(InsInstrs,
+                  [](MachineInstr *MI) {
+                    return RISCV::getNamedOperandIdx(MI->getOpcode(),
+                                                     RISCV::OpName::frm) < 0;
+                  }) &&
+           "New instructions require FRM whereas the old one does not have it");
+    return;
+  }
+
+  const MachineOperand &FRM = Root.getOperand(FrmOpIdx);
+  MachineFunction &MF = *Root.getMF();
+
+  for (auto *NewMI : InsInstrs) {
+    assert(static_cast<unsigned>(RISCV::getNamedOperandIdx(
+               NewMI->getOpcode(), RISCV::OpName::frm)) ==
+               NewMI->getNumOperands() &&
+           "Instruction has unexpected number of operands");
+    MachineInstrBuilder MIB(MF, NewMI);
+    MIB.add(FRM);
+    if (FRM.getImm() == RISCVFPRndMode::DYN)
+      MIB.addUse(RISCV::FRM, RegState::Implicit);
+  }
+}
+
+static bool isFADD(unsigned Opc) {
+  switch (Opc) {
+  default:
+    return false;
+  case RISCV::FADD_H:
+  case RISCV::FADD_S:
+  case RISCV::FADD_D:
+    return true;
+  }
+}
+
+static bool isFMUL(unsigned Opc) {
+  switch (Opc) {
+  default:
+    return false;
+  case RISCV::FMUL_H:
+  case RISCV::FMUL_S:
+  case RISCV::FMUL_D:
+    return true;
+  }
+}
+
+static bool isAssociativeAndCommutativeFPOpcode(unsigned Opc) {
+  return isFADD(Opc) || isFMUL(Opc);
+}
+
+static bool canReassociate(MachineInstr &Root, MachineOperand &MO) {
+  if (!MO.isReg() || !Register::isVirtualRegister(MO.getReg()))
+    return false;
+  MachineRegisterInfo &MRI = Root.getMF()->getRegInfo();
+  MachineInstr *MI = MRI.getVRegDef(MO.getReg());
+  if (!MI || !MRI.hasOneNonDBGUse(MO.getReg()))
+    return false;
+
+  if (MI->getOpcode() != Root.getOpcode())
+    return false;
+
+  if (!Root.getFlag(MachineInstr::MIFlag::FmReassoc) ||
+      !Root.getFlag(MachineInstr::MIFlag::FmNsz) ||
+      !MI->getFlag(MachineInstr::MIFlag::FmReassoc) ||
+      !MI->getFlag(MachineInstr::MIFlag::FmNsz))
+    return false;
+
+  return RISCV::hasEqualFRM(Root, *MI);
+}
+
+static bool
+getFPReassocPatterns(MachineInstr &Root,
+                     SmallVectorImpl<MachineCombinerPattern> &Patterns) {
+  bool Added = false;
+  if (canReassociate(Root, Root.getOperand(1))) {
+    Patterns.push_back(MachineCombinerPattern::REASSOC_AX_BY);
+    Patterns.push_back(MachineCombinerPattern::REASSOC_XA_BY);
+    Added = true;
+  }
+  if (canReassociate(Root, Root.getOperand(2))) {
+    Patterns.push_back(MachineCombinerPattern::REASSOC_AX_YB);
+    Patterns.push_back(MachineCombinerPattern::REASSOC_XA_YB);
+    Added = true;
+  }
+  return Added;
+}
+
+static bool getFPPatterns(MachineInstr &Root,
+                          SmallVectorImpl<MachineCombinerPattern> &Patterns) {
+  unsigned Opc = Root.getOpcode();
+  if (isAssociativeAndCommutativeFPOpcode(Opc))
+    return getFPReassocPatterns(Root, Patterns);
+  return false;
+}
+
+bool RISCVInstrInfo::getMachineCombinerPatterns(
+    MachineInstr &Root, SmallVectorImpl<MachineCombinerPattern> &Patterns,
+    bool DoRegPressureReduce) const {
+
+  if (getFPPatterns(Root, Patterns))
+    return true;
+
+  return TargetInstrInfo::getMachineCombinerPatterns(Root, Patterns,
+                                                     DoRegPressureReduce);
+}
+
 bool RISCVInstrInfo::verifyInstruction(const MachineInstr &MI,
                                        StringRef &ErrInfo) const {
   MCInstrDesc const &Desc = MI.getDesc();
@@ -1264,6 +1386,15 @@ bool RISCVInstrInfo::verifyInstruction(const MachineInstr &MI,
     }
     if (!RISCVII::hasVLOp(TSFlags)) {
       ErrInfo = "policy operand w/o VL operand?";
+      return false;
+    }
+
+    // VecPolicy operands can only exist on instructions with passthru/merge
+    // arguments. Note that not all arguments with passthru have vec policy
+    // operands- some instructions have implicit policies.
+    unsigned UseOpIdx;
+    if (!MI.isRegTiedToUseOperand(0, &UseOpIdx)) {
+      ErrInfo = "policy operand w/o tied operand?";
       return false;
     }
   }
@@ -1607,6 +1738,9 @@ bool RISCVInstrInfo::findCommutedOpIndices(const MachineInstr &MI,
     return false;
 
   switch (MI.getOpcode()) {
+  case RISCV::PseudoCCMOVGPR:
+    // Operands 4 and 5 are commutable.
+    return fixCommutedOpIndices(SrcOpIdx1, SrcOpIdx2, 4, 5);
   case CASE_VFMA_SPLATS(FMADD):
   case CASE_VFMA_SPLATS(FMSUB):
   case CASE_VFMA_SPLATS(FMACC):
@@ -1752,6 +1886,15 @@ MachineInstr *RISCVInstrInfo::commuteInstructionImpl(MachineInstr &MI,
   };
 
   switch (MI.getOpcode()) {
+  case RISCV::PseudoCCMOVGPR: {
+    // CCMOV can be commuted by inverting the condition.
+    auto CC = static_cast<RISCVCC::CondCode>(MI.getOperand(3).getImm());
+    CC = RISCVCC::getOppositeBranchCondition(CC);
+    auto &WorkingMI = cloneIfNew(MI);
+    WorkingMI.getOperand(3).setImm(CC);
+    return TargetInstrInfo::commuteInstructionImpl(WorkingMI, /*NewMI*/ false,
+                                                   OpIdx1, OpIdx2);
+  }
   case CASE_VFMA_SPLATS(FMACC):
   case CASE_VFMA_SPLATS(FMADD):
   case CASE_VFMA_SPLATS(FMSAC):
@@ -1953,12 +2096,12 @@ MachineInstr *RISCVInstrInfo::convertToThreeAddress(MachineInstr &MI,
 #undef CASE_WIDEOP_OPCODE_LMULS
 #undef CASE_WIDEOP_OPCODE_COMMON
 
-Register RISCVInstrInfo::getVLENFactoredAmount(MachineFunction &MF,
-                                               MachineBasicBlock &MBB,
-                                               MachineBasicBlock::iterator II,
-                                               const DebugLoc &DL,
-                                               int64_t Amount,
-                                               MachineInstr::MIFlag Flag) const {
+void RISCVInstrInfo::getVLENFactoredAmount(MachineFunction &MF,
+                                           MachineBasicBlock &MBB,
+                                           MachineBasicBlock::iterator II,
+                                           const DebugLoc &DL, Register DestReg,
+                                           int64_t Amount,
+                                           MachineInstr::MIFlag Flag) const {
   assert(Amount > 0 && "There is no need to get VLEN scaled value.");
   assert(Amount % 8 == 0 &&
          "Reserve the stack by the multiple of one vector size.");
@@ -1966,17 +2109,15 @@ Register RISCVInstrInfo::getVLENFactoredAmount(MachineFunction &MF,
   MachineRegisterInfo &MRI = MF.getRegInfo();
   int64_t NumOfVReg = Amount / 8;
 
-  Register VL = MRI.createVirtualRegister(&RISCV::GPRRegClass);
-  BuildMI(MBB, II, DL, get(RISCV::PseudoReadVLENB), VL)
-    .setMIFlag(Flag);
+  BuildMI(MBB, II, DL, get(RISCV::PseudoReadVLENB), DestReg).setMIFlag(Flag);
   assert(isInt<32>(NumOfVReg) &&
          "Expect the number of vector registers within 32-bits.");
   if (isPowerOf2_32(NumOfVReg)) {
     uint32_t ShiftAmount = Log2_32(NumOfVReg);
     if (ShiftAmount == 0)
-      return VL;
-    BuildMI(MBB, II, DL, get(RISCV::SLLI), VL)
-        .addReg(VL, RegState::Kill)
+      return;
+    BuildMI(MBB, II, DL, get(RISCV::SLLI), DestReg)
+        .addReg(DestReg, RegState::Kill)
         .addImm(ShiftAmount)
         .setMIFlag(Flag);
   } else if (STI.hasStdExtZba() &&
@@ -1999,35 +2140,35 @@ Register RISCVInstrInfo::getVLENFactoredAmount(MachineFunction &MF,
       llvm_unreachable("Unexpected number of vregs");
     }
     if (ShiftAmount)
-      BuildMI(MBB, II, DL, get(RISCV::SLLI), VL)
-          .addReg(VL, RegState::Kill)
+      BuildMI(MBB, II, DL, get(RISCV::SLLI), DestReg)
+          .addReg(DestReg, RegState::Kill)
           .addImm(ShiftAmount)
           .setMIFlag(Flag);
-    BuildMI(MBB, II, DL, get(Opc), VL)
-        .addReg(VL, RegState::Kill)
-        .addReg(VL)
+    BuildMI(MBB, II, DL, get(Opc), DestReg)
+        .addReg(DestReg, RegState::Kill)
+        .addReg(DestReg)
         .setMIFlag(Flag);
   } else if (isPowerOf2_32(NumOfVReg - 1)) {
     Register ScaledRegister = MRI.createVirtualRegister(&RISCV::GPRRegClass);
     uint32_t ShiftAmount = Log2_32(NumOfVReg - 1);
     BuildMI(MBB, II, DL, get(RISCV::SLLI), ScaledRegister)
-        .addReg(VL)
+        .addReg(DestReg)
         .addImm(ShiftAmount)
         .setMIFlag(Flag);
-    BuildMI(MBB, II, DL, get(RISCV::ADD), VL)
+    BuildMI(MBB, II, DL, get(RISCV::ADD), DestReg)
         .addReg(ScaledRegister, RegState::Kill)
-        .addReg(VL, RegState::Kill)
+        .addReg(DestReg, RegState::Kill)
         .setMIFlag(Flag);
   } else if (isPowerOf2_32(NumOfVReg + 1)) {
     Register ScaledRegister = MRI.createVirtualRegister(&RISCV::GPRRegClass);
     uint32_t ShiftAmount = Log2_32(NumOfVReg + 1);
     BuildMI(MBB, II, DL, get(RISCV::SLLI), ScaledRegister)
-        .addReg(VL)
+        .addReg(DestReg)
         .addImm(ShiftAmount)
         .setMIFlag(Flag);
-    BuildMI(MBB, II, DL, get(RISCV::SUB), VL)
+    BuildMI(MBB, II, DL, get(RISCV::SUB), DestReg)
         .addReg(ScaledRegister, RegState::Kill)
-        .addReg(VL, RegState::Kill)
+        .addReg(DestReg, RegState::Kill)
         .setMIFlag(Flag);
   } else {
     Register N = MRI.createVirtualRegister(&RISCV::GPRRegClass);
@@ -2037,13 +2178,11 @@ Register RISCVInstrInfo::getVLENFactoredAmount(MachineFunction &MF,
           MF.getFunction(),
           "M- or Zmmul-extension must be enabled to calculate the vscaled size/"
           "offset."});
-    BuildMI(MBB, II, DL, get(RISCV::MUL), VL)
-        .addReg(VL, RegState::Kill)
+    BuildMI(MBB, II, DL, get(RISCV::MUL), DestReg)
+        .addReg(DestReg, RegState::Kill)
         .addReg(N, RegState::Kill)
         .setMIFlag(Flag);
   }
-
-  return VL;
 }
 
 // Returns true if this is the sext.w pattern, addiw rd, rs1, 0.
@@ -2146,4 +2285,16 @@ RISCV::isRVVSpillForZvlsseg(unsigned Opcode) {
 bool RISCV::isFaultFirstLoad(const MachineInstr &MI) {
   return MI.getNumExplicitDefs() == 2 && MI.modifiesRegister(RISCV::VL) &&
          !MI.isInlineAsm();
+}
+
+bool RISCV::hasEqualFRM(const MachineInstr &MI1, const MachineInstr &MI2) {
+  int16_t MI1FrmOpIdx =
+      RISCV::getNamedOperandIdx(MI1.getOpcode(), RISCV::OpName::frm);
+  int16_t MI2FrmOpIdx =
+      RISCV::getNamedOperandIdx(MI2.getOpcode(), RISCV::OpName::frm);
+  if (MI1FrmOpIdx < 0 || MI2FrmOpIdx < 0)
+    return false;
+  MachineOperand FrmOp1 = MI1.getOperand(MI1FrmOpIdx);
+  MachineOperand FrmOp2 = MI2.getOperand(MI2FrmOpIdx);
+  return FrmOp1.getImm() == FrmOp2.getImm();
 }

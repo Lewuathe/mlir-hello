@@ -128,7 +128,22 @@ struct RewriteExtractSliceFromCollapseShapeBase
       return rewriter.notifyMatchFailure(
           op, "producer is not a tensor.collapse_shape op");
 
-    // Materialize the output shape values of the slice operation.a
+    // Try to simplify the collapse shape using a rank-reducing slice, if
+    // possible.
+    FailureOr<Operation *> simplifiedCollapseShapeResult =
+        tensor::simplifyCollapseShapeWithRankReducingExtractSlice(collapseOp,
+                                                                  rewriter);
+    if (succeeded(simplifiedCollapseShapeResult)) {
+      auto newCollapseOp =
+          dyn_cast<tensor::CollapseShapeOp>(*simplifiedCollapseShapeResult);
+      // The collapse shape op might have been simplified away, so we can just
+      // return.
+      if (!newCollapseOp)
+        return success();
+      collapseOp = newCollapseOp;
+    }
+
+    // Materialize the output shape values of the slice operation.
     ReifiedRankedShapedTypeDims reifiedShapes;
     if (failed(op.reifyResultShapes(rewriter, reifiedShapes)))
       return rewriter.notifyMatchFailure(op, "failed to reify result shapes");
@@ -136,8 +151,8 @@ struct RewriteExtractSliceFromCollapseShapeBase
     // Create the destination tensor using the above values.
     Type elementType = op.getSourceType().getElementType();
     SmallVector<OpFoldResult> outputShape = getAsOpFoldResult(reifiedShapes[0]);
-    Value dest = rewriter.create<linalg::InitTensorOp>(
-        op->getLoc(), outputShape, elementType);
+    Value dest = rewriter.create<tensor::EmptyOp>(op->getLoc(), outputShape,
+                                                  elementType);
 
     // Calculate the parameters for the tile loop nest.
     FailureOr<tensor::ExtractSliceFromCollapseHelper> params =
