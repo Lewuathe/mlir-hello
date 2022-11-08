@@ -4,7 +4,7 @@
 include "HelloDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-def ConstantOp : Hello_Op<"constant", [NoSideEffect]> {
+def ConstantOp : Hello_Op<"constant", [Pure]> {
   let summary = "constant";
   let description = [{
     Constant operation turns a literal into an SSA value. The data is attached
@@ -29,7 +29,7 @@ def ConstantOp : Hello_Op<"constant", [NoSideEffect]> {
   let results = (outs F64Tensor);
 }
 
-def PrintOp : Hello_Op<"print", [NoSideEffect]> {
+def PrintOp : Hello_Op<"print", [Pure]> {
     let summary = "print operation";
     let description = [{
         The "print" builtin operation prints a given input tensor, and produces
