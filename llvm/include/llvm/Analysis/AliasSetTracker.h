@@ -209,7 +209,7 @@ public:
   bool isForwardingAliasSet() const { return Forward; }
 
   /// Merge the specified alias set into this alias set.
-  void mergeSetIn(AliasSet &AS, AliasSetTracker &AST);
+  void mergeSetIn(AliasSet &AS, AliasSetTracker &AST, BatchAAResults &BatchAA);
 
   // Alias Set iteration - Allow access to all of the pointers which are part of
   // this alias set.
@@ -311,7 +311,7 @@ public:
   /// If the specified pointer "may" (or must) alias one of the members in the
   /// set return the appropriate AliasResult. Otherwise return NoAlias.
   AliasResult aliasesPointer(const Value *Ptr, LocationSize Size,
-                             const AAMDNodes &AAInfo, AAResults &AA) const;
+                             const AAMDNodes &AAInfo, BatchAAResults &AA) const;
   bool aliasesUnknownInst(const Instruction *Inst, BatchAAResults &AA) const;
 };
 

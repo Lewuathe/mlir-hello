@@ -856,6 +856,13 @@ void VectorLegalizer::Expand(SDNode *Node, SmallVectorImpl<SDValue> &Results) {
       return;
     }
     break;
+  case ISD::USHLSAT:
+  case ISD::SSHLSAT:
+    if (SDValue Expanded = TLI.expandShlSat(Node, DAG)) {
+      Results.push_back(Expanded);
+      return;
+    }
+    break;
   case ISD::FP_TO_SINT_SAT:
   case ISD::FP_TO_UINT_SAT:
     // Expand the fpsosisat if it is scalable to prevent it from unrolling below.
@@ -963,10 +970,7 @@ SDValue VectorLegalizer::ExpandSELECT(SDNode *Node) {
                        DAG.getConstant(0, DL, BitTy));
 
   // Broadcast the mask so that the entire vector is all one or all zero.
-  if (VT.isFixedLengthVector())
-    Mask = DAG.getSplatBuildVector(MaskTy, DL, Mask);
-  else
-    Mask = DAG.getSplatVector(MaskTy, DL, Mask);
+  Mask = DAG.getSplat(MaskTy, DL, Mask);
 
   // Bitcast the operands to be the same type as the mask.
   // This is needed when we select between FP types because
@@ -1309,8 +1313,7 @@ SDValue VectorLegalizer::ExpandVP_MERGE(SDNode *Node) {
     return DAG.UnrollVectorOp(Node);
 
   SDValue StepVec = DAG.getStepVector(DL, EVLVecVT);
-  SDValue SplatEVL = IsFixedLen ? DAG.getSplatBuildVector(EVLVecVT, DL, EVL)
-                                : DAG.getSplatVector(EVLVecVT, DL, EVL);
+  SDValue SplatEVL = DAG.getSplat(EVLVecVT, DL, EVL);
   SDValue EVLMask =
       DAG.getSetCC(DL, MaskVT, StepVec, SplatEVL, ISD::CondCode::SETULT);
 

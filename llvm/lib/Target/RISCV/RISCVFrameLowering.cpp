@@ -381,7 +381,8 @@ void RISCVFrameLowering::adjustStackForRVV(MachineFunction &MF,
   }
   // 1. Multiply the number of v-slots to the length of registers
   Register FactorRegister =
-      TII->getVLENFactoredAmount(MF, MBB, MBBI, DL, Amount, Flag);
+      MF.getRegInfo().createVirtualRegister(&RISCV::GPRRegClass);
+  TII->getVLENFactoredAmount(MF, MBB, MBBI, DL, FactorRegister, Amount, Flag);
   // 2. SP = SP - RVV stack size
   BuildMI(MBB, MBBI, DL, TII->get(Opc), SPReg)
       .addReg(SPReg)
@@ -514,6 +515,8 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
     if (STI.isRegisterReservedByUser(FPReg))
       MF.getFunction().getContext().diagnose(DiagnosticInfoUnsupported{
           MF.getFunction(), "Frame pointer required, but has been reserved."});
+    // The frame pointer does need to be reserved from register allocation.
+    assert(MF.getRegInfo().isReserved(FPReg) && "FP not reserved");
 
     adjustReg(MBB, MBBI, DL, FPReg, SPReg,
               RealStackSize - RVFI->getVarArgsSaveSize(),

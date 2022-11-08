@@ -21,6 +21,7 @@
 #include "lld/Common/Memory.h"
 #include "lld/Common/Strings.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Demangle/Demangle.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -28,7 +29,7 @@ using namespace llvm::ELF;
 using namespace lld;
 using namespace lld::elf;
 
-std::unique_ptr<SymbolTable> elf::symtab;
+SymbolTable elf::symtab;
 
 void SymbolTable::wrap(Symbol *sym, Symbol *real, Symbol *wrap) {
   // Redirect __real_foo to the original foo and foo to the original __wrap_foo.
@@ -145,13 +146,12 @@ StringMap<SmallVector<Symbol *, 0>> &SymbolTable::getDemangledSyms() {
         StringRef name = sym->getName();
         size_t pos = name.find('@');
         if (pos == std::string::npos)
-          demangled = demangle(name, config->demangle);
+          demangled = demangle(name.str());
         else if (pos + 1 == name.size() || name[pos + 1] == '@')
-          demangled = demangle(name.substr(0, pos), config->demangle);
+          demangled = demangle(name.substr(0, pos).str());
         else
-          demangled = (demangle(name.substr(0, pos), config->demangle) +
-                       name.substr(pos))
-                          .str();
+          demangled =
+              (demangle(name.substr(0, pos).str()) + name.substr(pos)).str();
         (*demangledSyms)[demangled].push_back(sym);
       }
   }

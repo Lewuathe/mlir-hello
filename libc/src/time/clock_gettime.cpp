@@ -1,5 +1,4 @@
-//===---------- Linux implementation of the POSIX clock_gettime function
-//--------===//
+//===---------- Linux implementation of the POSIX clock_gettime function --===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -21,8 +20,8 @@ namespace __llvm_libc {
 LLVM_LIBC_FUNCTION(int, clock_gettime,
                    (clockid_t clockid, struct timespec *tp)) {
   long ret_val =
-      __llvm_libc::syscall(SYS_clock_gettime, static_cast<long>(clockid),
-                           reinterpret_cast<long>(tp));
+      __llvm_libc::syscall_impl(SYS_clock_gettime, static_cast<long>(clockid),
+                                reinterpret_cast<long>(tp));
   // A negative return value indicates an error with the magnitude of the
   // value being the error code.
   if (ret_val < 0) {
