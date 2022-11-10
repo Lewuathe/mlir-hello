@@ -106,7 +106,7 @@ static llvm::Type *getVAListElementType(CodeGenFunction &CGF) {
 }
 
 bool ABIInfo::isPromotableIntegerTypeForABI(QualType Ty) const {
-  if (Ty->isPromotableIntegerType())
+  if (getContext().isPromotableIntegerType(Ty))
     return true;
 
   if (const auto *EIT = Ty->getAs<BitIntType>())
@@ -322,13 +322,17 @@ static llvm::Value *emitRoundPointerUpToAlignment(CodeGenFunction &CGF,
 ///   leaving one or more empty slots behind as padding.  If this
 ///   is false, the returned address might be less-aligned than
 ///   DirectAlign.
+/// \param ForceRightAdjust - Default is false. On big-endian platform and
+///   if the argument is smaller than a slot, set this flag will force
+///   right-adjust the argument in its slot irrespective of the type.
 static Address emitVoidPtrDirectVAArg(CodeGenFunction &CGF,
                                       Address VAListAddr,
                                       llvm::Type *DirectTy,
                                       CharUnits DirectSize,
                                       CharUnits DirectAlign,
                                       CharUnits SlotSize,
-                                      bool AllowHigherAlign) {
+                                      bool AllowHigherAlign,
+                                      bool ForceRightAdjust = false) {
   // Cast the element type to i8* if necessary.  Some platforms define
   // va_list as a struct containing an i8* instead of just an i8*.
   if (VAListAddr.getElementType() != CGF.Int8PtrTy)
@@ -354,7 +358,7 @@ static Address emitVoidPtrDirectVAArg(CodeGenFunction &CGF,
   // If the argument is smaller than a slot, and this is a big-endian
   // target, the argument will be right-adjusted in its slot.
   if (DirectSize < SlotSize && CGF.CGM.getDataLayout().isBigEndian() &&
-      !DirectTy->isStructTy()) {
+      (!DirectTy->isStructTy() || ForceRightAdjust)) {
     Addr = CGF.Builder.CreateConstInBoundsByteGEP(Addr, SlotSize - DirectSize);
   }
 
@@ -375,11 +379,15 @@ static Address emitVoidPtrDirectVAArg(CodeGenFunction &CGF,
 ///   an argument type with an alignment greater than the slot size
 ///   will be emitted on a higher-alignment address, potentially
 ///   leaving one or more empty slots behind as padding.
+/// \param ForceRightAdjust - Default is false. On big-endian platform and
+///   if the argument is smaller than a slot, set this flag will force
+///   right-adjust the argument in its slot irrespective of the type.
 static Address emitVoidPtrVAArg(CodeGenFunction &CGF, Address VAListAddr,
                                 QualType ValueTy, bool IsIndirect,
                                 TypeInfoChars ValueInfo,
                                 CharUnits SlotSizeAndAlign,
-                                bool AllowHigherAlign) {
+                                bool AllowHigherAlign,
+                                bool ForceRightAdjust = false) {
   // The size and alignment of the value that was passed directly.
   CharUnits DirectSize, DirectAlign;
   if (IsIndirect) {
@@ -395,9 +403,9 @@ static Address emitVoidPtrVAArg(CodeGenFunction &CGF, Address VAListAddr,
   if (IsIndirect)
     DirectTy = DirectTy->getPointerTo(0);
 
-  Address Addr =
-      emitVoidPtrDirectVAArg(CGF, VAListAddr, DirectTy, DirectSize, DirectAlign,
-                             SlotSizeAndAlign, AllowHigherAlign);
+  Address Addr = emitVoidPtrDirectVAArg(CGF, VAListAddr, DirectTy, DirectSize,
+                                        DirectAlign, SlotSizeAndAlign,
+                                        AllowHigherAlign, ForceRightAdjust);
 
   if (IsIndirect) {
     Addr = Address(CGF.Builder.CreateLoad(Addr), ElementTy, ValueInfo.Align);
@@ -4580,7 +4588,7 @@ bool AIXABIInfo::isPromotableTypeForABI(QualType Ty) const {
     Ty = EnumTy->getDecl()->getIntegerType();
 
   // Promotable integer types are required to be promoted by the ABI.
-  if (Ty->isPromotableIntegerType())
+  if (getContext().isPromotableIntegerType(Ty))
     return true;
 
   if (!Is64Bit)
@@ -5451,8 +5459,21 @@ Address PPC64_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   }
 
   // Otherwise, just use the general rule.
-  return emitVoidPtrVAArg(CGF, VAListAddr, Ty, /*Indirect*/ false,
-                          TypeInfo, SlotSize, /*AllowHigher*/ true);
+  //
+  // The PPC64 ABI passes some arguments in integer registers, even to variadic
+  // functions. To allow va_list to use the simple "void*" representation,
+  // variadic calls allocate space in the argument area for the integer argument
+  // registers, and variadic functions spill their integer argument registers to
+  // this area in their prologues. When aggregates smaller than a register are
+  // passed this way, they are passed in the least significant bits of the
+  // register, which means that after spilling on big-endian targets they will
+  // be right-aligned in their argument slot. This is uncommon; for a variety of
+  // reasons, other big-endian targets don't end up right-aligning aggregate
+  // types this way, and so right-alignment only applies to fundamental types.
+  // So on PPC64, we must force the use of right-alignment even for aggregates.
+  return emitVoidPtrVAArg(CGF, VAListAddr, Ty, /*Indirect*/ false, TypeInfo,
+                          SlotSize, /*AllowHigher*/ true,
+                          /*ForceRightAdjust*/ true);
 }
 
 bool
@@ -5577,14 +5598,15 @@ public:
     if (TA == nullptr)
       return;
 
-    ParsedTargetAttr Attr = TA->parse();
+    ParsedTargetAttr Attr =
+        CGM.getTarget().parseTargetAttr(TA->getFeaturesStr());
     if (Attr.BranchProtection.empty())
       return;
 
     TargetInfo::BranchProtectionInfo BPI;
     StringRef Error;
-    (void)CGM.getTarget().validateBranchProtection(
-        Attr.BranchProtection, Attr.Architecture, BPI, Error);
+    (void)CGM.getTarget().validateBranchProtection(Attr.BranchProtection,
+                                                   Attr.CPU, BPI, Error);
     assert(Error.empty());
 
     auto *Fn = cast<llvm::Function>(GV);
@@ -6405,13 +6427,13 @@ public:
     auto *Fn = cast<llvm::Function>(GV);
 
     if (const auto *TA = FD->getAttr<TargetAttr>()) {
-      ParsedTargetAttr Attr = TA->parse();
+      ParsedTargetAttr Attr =
+          CGM.getTarget().parseTargetAttr(TA->getFeaturesStr());
       if (!Attr.BranchProtection.empty()) {
         TargetInfo::BranchProtectionInfo BPI;
         StringRef DiagMsg;
-        StringRef Arch = Attr.Architecture.empty()
-                             ? CGM.getTarget().getTargetOpts().CPU
-                             : Attr.Architecture;
+        StringRef Arch =
+            Attr.CPU.empty() ? CGM.getTarget().getTargetOpts().CPU : Attr.CPU;
         if (!CGM.getTarget().validateBranchProtection(Attr.BranchProtection,
                                                       Arch, BPI, DiagMsg)) {
           CGM.getDiags().Report(
@@ -6434,11 +6456,11 @@ public:
         // If the Branch Protection attribute is missing, validate the target
         // Architecture attribute against Branch Protection command line
         // settings.
-        if (!CGM.getTarget().isBranchProtectionSupportedArch(Attr.Architecture))
+        if (!CGM.getTarget().isBranchProtectionSupportedArch(Attr.CPU))
           CGM.getDiags().Report(
               D->getLocation(),
               diag::warn_target_unsupported_branch_protection_attribute)
-              << Attr.Architecture;
+              << Attr.CPU;
       }
     }
 
@@ -7844,7 +7866,7 @@ void MSP430TargetCodeGenInfo::setTargetAttributes(
 namespace {
 class MipsABIInfo : public ABIInfo {
   bool IsO32;
-  unsigned MinABIStackAlignInBytes, StackAlignInBytes;
+  const unsigned MinABIStackAlignInBytes, StackAlignInBytes;
   void CoerceToIntArgs(uint64_t TySize,
                        SmallVectorImpl<llvm::Type *> &ArgList) const;
   llvm::Type* HandleAggregates(QualType Ty, uint64_t TySize) const;
@@ -8021,8 +8043,8 @@ MipsABIInfo::classifyArgumentType(QualType Ty, uint64_t &Offset) const {
   uint64_t TySize = getContext().getTypeSize(Ty);
   uint64_t Align = getContext().getTypeAlign(Ty) / 8;
 
-  Align = std::min(std::max(Align, (uint64_t)MinABIStackAlignInBytes),
-                   (uint64_t)StackAlignInBytes);
+  Align = std::clamp(Align, (uint64_t)MinABIStackAlignInBytes,
+                     (uint64_t)StackAlignInBytes);
   unsigned CurrOffset = llvm::alignTo(Offset, Align);
   Offset = CurrOffset + llvm::alignTo(TySize, Align * 8) / 8;
 
@@ -9422,8 +9444,12 @@ void AMDGPUTargetCodeGenInfo::setTargetAttributes(
 
   const bool IsHIPKernel =
       M.getLangOpts().HIP && FD && FD->hasAttr<CUDAGlobalAttr>();
+  const bool IsOpenMPkernel =
+      M.getLangOpts().OpenMPIsDevice &&
+      (F->getCallingConv() == llvm::CallingConv::AMDGPU_KERNEL);
 
-  if (IsHIPKernel)
+  // TODO: This should be moved to language specific attributes instead.
+  if (IsHIPKernel || IsOpenMPkernel)
     F->addFnAttr("uniform-work-group-size", "true");
 
   if (M.getContext().getTargetInfo().allowAMDGPUUnsafeFPAtomics())

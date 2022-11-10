@@ -1543,10 +1543,14 @@ void TextNodeDumper::VisitUnresolvedUsingType(const UnresolvedUsingType *T) {
 
 void TextNodeDumper::VisitUsingType(const UsingType *T) {
   dumpDeclRef(T->getFoundDecl());
+  if (!T->typeMatchesDecl())
+    OS << " divergent";
 }
 
 void TextNodeDumper::VisitTypedefType(const TypedefType *T) {
   dumpDeclRef(T->getDecl());
+  if (!T->typeMatchesDecl())
+    OS << " divergent";
 }
 
 void TextNodeDumper::VisitUnaryTransformType(const UnaryTransformType *T) {
@@ -1572,8 +1576,16 @@ void TextNodeDumper::VisitTemplateTypeParmType(const TemplateTypeParmType *T) {
 
 void TextNodeDumper::VisitSubstTemplateTypeParmType(
     const SubstTemplateTypeParmType *T) {
+  dumpDeclRef(T->getAssociatedDecl());
+  VisitTemplateTypeParmDecl(T->getReplacedParameter());
   if (auto PackIndex = T->getPackIndex())
     OS << " pack_index " << *PackIndex;
+}
+
+void TextNodeDumper::VisitSubstTemplateTypeParmPackType(
+    const SubstTemplateTypeParmPackType *T) {
+  dumpDeclRef(T->getAssociatedDecl());
+  VisitTemplateTypeParmDecl(T->getReplacedParameter());
 }
 
 void TextNodeDumper::VisitAutoType(const AutoType *T) {

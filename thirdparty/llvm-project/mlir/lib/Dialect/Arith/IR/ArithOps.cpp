@@ -19,6 +19,7 @@
 
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
 using namespace mlir::arith;
@@ -1261,8 +1262,7 @@ OpFoldResult arith::FPToSIOp::fold(ArrayRef<Attribute> operands) {
 // IndexCastOp
 //===----------------------------------------------------------------------===//
 
-bool arith::IndexCastOp::areCastCompatible(TypeRange inputs,
-                                           TypeRange outputs) {
+static bool areIndexCastCompatible(TypeRange inputs, TypeRange outputs) {
   if (!areValidCastInputsAndOutputs(inputs, outputs))
     return false;
 
@@ -1273,6 +1273,11 @@ bool arith::IndexCastOp::areCastCompatible(TypeRange inputs,
 
   return (srcType.isIndex() && dstType.isSignlessInteger()) ||
          (srcType.isSignlessInteger() && dstType.isIndex());
+}
+
+bool arith::IndexCastOp::areCastCompatible(TypeRange inputs,
+                                           TypeRange outputs) {
+  return areIndexCastCompatible(inputs, outputs);
 }
 
 OpFoldResult arith::IndexCastOp::fold(ArrayRef<Attribute> operands) {
@@ -1288,6 +1293,30 @@ OpFoldResult arith::IndexCastOp::fold(ArrayRef<Attribute> operands) {
 void arith::IndexCastOp::getCanonicalizationPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
   patterns.add<IndexCastOfIndexCast, IndexCastOfExtSI>(context);
+}
+
+//===----------------------------------------------------------------------===//
+// IndexCastUIOp
+//===----------------------------------------------------------------------===//
+
+bool arith::IndexCastUIOp::areCastCompatible(TypeRange inputs,
+                                             TypeRange outputs) {
+  return areIndexCastCompatible(inputs, outputs);
+}
+
+OpFoldResult arith::IndexCastUIOp::fold(ArrayRef<Attribute> operands) {
+  // index_castui(constant) -> constant
+  // A little hack because we go through int. Otherwise, the size of the
+  // constant might need to change.
+  if (auto value = operands[0].dyn_cast_or_null<IntegerAttr>())
+    return IntegerAttr::get(getType(), value.getValue().getZExtValue());
+
+  return {};
+}
+
+void arith::IndexCastUIOp::getCanonicalizationPatterns(
+    RewritePatternSet &patterns, MLIRContext *context) {
+  patterns.add<IndexCastUIOfIndexCastUI, IndexCastUIOfExtUI>(context);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1416,6 +1445,16 @@ static Attribute getBoolAttribute(Type type, MLIRContext *ctx, bool value) {
   return DenseElementsAttr::get(shapedType, boolAttr);
 }
 
+static Optional<int64_t> getIntegerWidth(Type t) {
+  if (auto intType = t.dyn_cast<IntegerType>()) {
+    return intType.getWidth();
+  }
+  if (auto vectorIntType = t.dyn_cast<VectorType>()) {
+    return vectorIntType.getElementType().cast<IntegerType>().getWidth();
+  }
+  return llvm::None;
+}
+
 OpFoldResult arith::CmpIOp::fold(ArrayRef<Attribute> operands) {
   assert(operands.size() == 2 && "cmpi takes two operands");
 
@@ -1428,13 +1467,17 @@ OpFoldResult arith::CmpIOp::fold(ArrayRef<Attribute> operands) {
   if (matchPattern(getRhs(), m_Zero())) {
     if (auto extOp = getLhs().getDefiningOp<ExtSIOp>()) {
       // extsi(%x : i1 -> iN) != 0  ->  %x
-      if (extOp.getOperand().getType().cast<IntegerType>().getWidth() == 1 &&
+      Optional<int64_t> integerWidth =
+          getIntegerWidth(extOp.getOperand().getType());
+      if (integerWidth && integerWidth.value() == 1 &&
           getPredicate() == arith::CmpIPredicate::ne)
         return extOp.getOperand();
     }
     if (auto extOp = getLhs().getDefiningOp<ExtUIOp>()) {
       // extui(%x : i1 -> iN) != 0  ->  %x
-      if (extOp.getOperand().getType().cast<IntegerType>().getWidth() == 1 &&
+      Optional<int64_t> integerWidth =
+          getIntegerWidth(extOp.getOperand().getType());
+      if (integerWidth && integerWidth.value() == 1 &&
           getPredicate() == arith::CmpIPredicate::ne)
         return extOp.getOperand();
     }
@@ -1453,7 +1496,7 @@ OpFoldResult arith::CmpIOp::fold(ArrayRef<Attribute> operands) {
     Pred origPred = getPredicate();
     for (auto pred : invPreds) {
       if (origPred == pred.first) {
-        setPredicateAttr(CmpIPredicateAttr::get(getContext(), pred.second));
+        setPredicate(pred.second);
         Value lhs = getLhs();
         Value rhs = getRhs();
         getLhsMutable().assign(rhs);

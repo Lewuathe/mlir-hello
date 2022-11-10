@@ -15,7 +15,7 @@
 #include "Target.h"
 #include "Writer.h"
 #include "lld/Common/ErrorHandler.h"
-#include "lld/Common/Strings.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/Support/Compiler.h"
 #include <cstring>
 
@@ -43,9 +43,16 @@ LLVM_ATTRIBUTE_UNUSED static inline void assertSymbols() {
   AssertSymbol<LazyObject>();
 }
 
+// Returns a symbol for an error message.
+static std::string maybeDemangleSymbol(StringRef symName) {
+  if (elf::config->demangle)
+    return demangle(symName.str());
+  return symName.str();
+}
+
 std::string lld::toString(const elf::Symbol &sym) {
   StringRef name = sym.getName();
-  std::string ret = demangle(name, config->demangle);
+  std::string ret = maybeDemangleSymbol(name);
 
   const char *suffix = sym.getVersionSuffix();
   if (*suffix == '@')
@@ -304,7 +311,7 @@ void elf::printTraceSymbol(const Symbol &sym, StringRef name) {
 
 static void recordWhyExtract(const InputFile *reference,
                              const InputFile &extracted, const Symbol &sym) {
-  ctx->whyExtractRecords.emplace_back(toString(reference), &extracted, sym);
+  ctx.whyExtractRecords.emplace_back(toString(reference), &extracted, sym);
 }
 
 void elf::maybeWarnUnorderableSymbol(const Symbol *sym) {
@@ -477,8 +484,8 @@ void Symbol::resolve(const Undefined &other) {
     // definition. this->file needs to be saved because in the case of LTO it
     // may be reset to nullptr or be replaced with a file named lto.tmp.
     if (backref && !isWeak())
-      ctx->backwardReferences.try_emplace(this,
-                                          std::make_pair(other.file, file));
+      ctx.backwardReferences.try_emplace(this,
+                                         std::make_pair(other.file, file));
     return;
   }
 
@@ -622,7 +629,7 @@ void Symbol::resolve(const LazyObject &other) {
   // should be extracted as the canonical definition instead.
   if (LLVM_UNLIKELY(isCommon()) && elf::config->fortranCommon &&
       other.file->shouldExtractForCommon(getName())) {
-    ctx->backwardReferences.erase(this);
+    ctx.backwardReferences.erase(this);
     other.overwrite(*this);
     other.extract();
     return;
@@ -631,7 +638,7 @@ void Symbol::resolve(const LazyObject &other) {
   if (!isUndefined()) {
     // See the comment in resolveUndefined().
     if (isDefined())
-      ctx->backwardReferences.erase(this);
+      ctx.backwardReferences.erase(this);
     return;
   }
 

@@ -85,6 +85,8 @@ static cl::opt<std::string> PassPipeline(
     cl::desc(
         "A textual description of the pass pipeline. To have analysis passes "
         "available before a certain pass, add 'require<foo-analysis>'."));
+static cl::alias PassPipeline2("p", cl::aliasopt(PassPipeline),
+                                   cl::desc("Alias for -passes"));
 
 static cl::opt<bool> PrintPasses("print-passes",
                                  cl::desc("Print available passes that can be "
@@ -455,7 +457,8 @@ static bool shouldPinPassToLegacyPM(StringRef Pass) {
       "replace-with-veclib",  "jmc-instrument",
       "dot-regions",          "dot-regions-only",
       "view-regions",         "view-regions-only",
-      "select-optimize",      "expand-large-div-rem"};
+      "select-optimize",      "expand-large-div-rem",
+      "structurizecfg",       "fix-irreducible"};
   for (const auto &P : PassNamePrefix)
     if (Pass.startswith(P))
       return true;
@@ -493,14 +496,12 @@ int main(int argc, char **argv) {
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
   initializeCore(Registry);
   initializeScalarOpts(Registry);
-  initializeObjCARCOpts(Registry);
   initializeVectorization(Registry);
   initializeIPO(Registry);
   initializeAnalysis(Registry);
   initializeTransformUtils(Registry);
   initializeInstCombine(Registry);
   initializeAggressiveInstCombine(Registry);
-  initializeInstrumentation(Registry);
   initializeTarget(Registry);
   // For codegen passes, only passes that do IR to IR transformation are
   // supported.

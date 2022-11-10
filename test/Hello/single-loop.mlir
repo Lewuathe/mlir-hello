@@ -7,12 +7,12 @@
 // CHECK:     %{{.*}} = arith.constant 2 : index
 // CHECK:     %{{.*}} = arith.constant 1 : index
 // CHECK:     cf.br ^bb1(%{{.*}} : index)
-// CHECK:   ^bb1(%1: index):  // 2 preds: ^bb0, ^bb2
-// CHECK:     %2 = arith.cmpi slt, %1, %c2 : index
+// CHECK:   ^bb1(%{{.*}}: index):  // 2 preds: ^bb0, ^bb2
+// CHECK:     %{{.*}} = arith.cmpi slt, %{{.*}}, %c2 : index
 // CHECK:     cf.cond_br %{{.*}}, ^bb2, ^bb3
 // CHECK:   ^bb2:  // pred: ^bb1
-// CHECK:     %3 = memref.load %0[%{{.*}}] : memref<3xf32>
-// CHECK:     %4 = arith.addi %{{.*}}, %{{.*}} : index
+// CHECK:     %{{.*}} = memref.load %{{.*}}[%{{.*}}] : memref<3xf32>
+// CHECK:     %{{.*}} = arith.addi %{{.*}}, %{{.*}} : index
 // CHECK:     cf.br ^bb1(%{{.*}} : index)
 // CHECK:   ^bb3:  // pred: ^bb1
 // CHECK:     return

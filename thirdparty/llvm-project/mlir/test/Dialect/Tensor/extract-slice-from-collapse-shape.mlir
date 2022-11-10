@@ -14,7 +14,7 @@ func.func @extract_slice_static(%input: tensor<3x5x7x11xf32>) -> tensor<20x11xf3
 // CHECK-DAG: %[[c3:.+]] = arith.constant 3 : index
 // CHECK-DAG: %[[c5:.+]] = arith.constant 5 : index
 // CHECK-DAG: %[[c7:.+]] = arith.constant 7 : index
-// CHECK-DAG: %[[init:.+]] = linalg.init_tensor [20, 11] :
+// CHECK-DAG: %[[init:.+]] = tensor.empty() : tensor<20x11xf32>
 // CHECK-DAG: %[[tile:.+]] = scf.for %[[iv:.+]] = %[[c0]] to %[[c20]] step %[[c1]] iter_args(%[[iterArg:.+]] = %[[init]])
 //     CHECK:   %[[multiIndex:.+]]:3 = affine.delinearize_index %[[iv]] into (%[[c3]], %[[c5]], %[[c7]]
 //     CHECK:   %[[slice:.+]] = tensor.extract_slice %[[arg0]][%[[multiIndex]]#0, %[[multiIndex]]#1, %[[multiIndex]]#2, 0] [1, 1, 1, 11] [1, 1, 1, 1] : 
@@ -28,7 +28,7 @@ func.func @extract_slice_static(%input: tensor<3x5x7x11xf32>) -> tensor<20x11xf3
 // FOREACH-DAG: %[[c3:.+]] = arith.constant 3 : index
 // FOREACH-DAG: %[[c5:.+]] = arith.constant 5 : index
 // FOREACH-DAG: %[[c7:.+]] = arith.constant 7 : index
-// FOREACH-DAG: %[[init:.+]] = linalg.init_tensor [20, 11] :
+// FOREACH-DAG: %[[init:.+]] = tensor.empty() : tensor<20x11xf32>
 //     FOREACH: %[[tile:.+]] = scf.foreach_thread (%[[iv:.+]]) in (%[[c20]]) shared_outs(%[[dest:.+]] = %[[init]])
 //     FOREACH:   %[[multiIndex:.+]]:3 = affine.delinearize_index %[[iv]] into (%[[c3]], %[[c5]], %[[c7]]
 //     FOREACH:   %[[slice:.+]] = tensor.extract_slice %[[arg0]][%[[multiIndex]]#0, %[[multiIndex]]#1, %[[multiIndex]]#2, 0] [1, 1, 1, 11] [1, 1, 1, 1] : 
@@ -54,7 +54,7 @@ func.func @extract_slice_static_strided(%input: tensor<3x5x7x11xf32>) -> tensor<
 // CHECK-DAG: %[[c3:.+]] = arith.constant 3 : index
 // CHECK-DAG: %[[c5:.+]] = arith.constant 5 : index
 // CHECK-DAG: %[[c7:.+]] = arith.constant 7 : index
-//     CHECK: %[[init:.+]] = linalg.init_tensor [10, 5] :
+//     CHECK: %[[init:.+]] = tensor.empty() : tensor<10x5xf32>
 //     CHECK: %[[tile:.+]] = scf.for %[[iv:.+]] = %[[c0]] to %[[c10]] step %[[c1]] iter_args(%[[iterArg:.+]] = %[[init]])
 //     CHECK:   %[[inputIv:.+]] = affine.apply #[[$map0]](%[[iv]])
 //     CHECK:   %[[multiIndex:.+]]:3 = affine.delinearize_index %[[inputIv]] into (%[[c3]], %[[c5]], %[[c7]]
@@ -80,7 +80,7 @@ func.func @extract_slice_dynamic(%input: tensor<3x?x?x11xf32>, %offt: index, %si
 // CHECK-DAG:   %[[c1:.+]] = arith.constant 1 : index
 // CHECK-DAG:   %[[c2:.+]] = arith.constant 2 : index
 // CHECK-DAG:   %[[c3:.+]] = arith.constant 3 : index
-//     CHECK:   %[[init:.+]] = linalg.init_tensor [%[[sz]], 5] : tensor<?x5xf32>
+//     CHECK:   %[[init:.+]] = tensor.empty(%[[sz]]) : tensor<?x5xf32>
 // CHECK-DAG:   %[[d1:.+]] = tensor.dim %arg0, %[[c1]] : tensor<3x?x?x11xf32>
 // CHECK-DAG:   %[[d2:.+]] = tensor.dim %arg0, %[[c2]] : tensor<3x?x?x11xf32>
 //     CHECK:   %[[tile:.+]] = scf.for %[[iv:.+]] = %[[c0]] to %[[sz]] step %[[c1]] iter_args(%[[iterArg:.+]] = %[[init]])
@@ -109,7 +109,7 @@ func.func @extract_slice_dynamic_multidim(%input: tensor<3x?x?x11x?xf32>, %offt0
 // CHECK-DAG: %[[c3:.+]] = arith.constant 3 : index
 // CHECK-DAG: %[[c4:.+]] = arith.constant 4 : index
 // CHECK-DAG: %[[c11:.+]] = arith.constant 11 : index
-//     CHECK: %[[init:.+]] = linalg.init_tensor [%[[sz1]], %[[sz2]]] : tensor<?x?xf32>
+//     CHECK: %[[init:.+]] = tensor.empty(%[[sz1]], %[[sz2]]) : tensor<?x?xf32>
 // CHECK-DAG: %[[d1:.+]] = tensor.dim %[[arg0]], %[[c1]] : 
 // CHECK-DAG: %[[d2:.+]] = tensor.dim %[[arg0]], %[[c2]] : 
 // CHECK-DAG: %[[d4:.+]] = tensor.dim %[[arg0]], %[[c4]] :
@@ -133,7 +133,7 @@ func.func @extract_slice_dynamic_multidim(%input: tensor<3x?x?x11x?xf32>, %offt0
 // FOREACH-DAG: %[[c3:.+]] = arith.constant 3 : index
 // FOREACH-DAG: %[[c4:.+]] = arith.constant 4 : index
 // FOREACH-DAG: %[[c11:.+]] = arith.constant 11 : index
-//     FOREACH:     %[[init:.+]] = linalg.init_tensor [%[[sz1]], %[[sz2]]] : tensor<?x?xf32>
+//     FOREACH:     %[[init:.+]] = tensor.empty(%[[sz1]], %[[sz2]]) : tensor<?x?xf32>
 // FOREACH-DAG:     %[[d1:.+]] = tensor.dim %[[arg0]], %[[c1]] : 
 // FOREACH-DAG:     %[[d2:.+]] = tensor.dim %[[arg0]], %[[c2]] : 
 // FOREACH-DAG:     %[[d4:.+]] = tensor.dim %[[arg0]], %[[c4]] :
@@ -170,10 +170,72 @@ func.func @no_sliced_linearized_dims(%input: tensor<30x11x100xf32>, %offt: index
   %collapsed = tensor.collapse_shape %input [[0, 1], [2]] : tensor<30x11x100xf32> into tensor<330x100xf32>
   %slice = tensor.extract_slice %collapsed [0, %offt] [330, %size] [1, 1] : tensor<330x100xf32> to tensor<330x?xf32>
   // CHECK-NOT: scf.for  
-  // CHECK: %[[init:.+]] = linalg.init_tensor [330, %[[arg2]]]
+  // CHECK: %[[init:.+]] = tensor.empty(%[[arg2]])
   // CHECK: %[[e:.+]] = tensor.extract_slice %[[arg0]][0, 0, %[[arg1]]] [30, 11, %[[arg2]]] [1, 1, 1]
   // CHECK: %[[c:.+]] = tensor.collapse_shape %[[e]] {{\[}}[0, 1], [2]]
   // CHECK: %[[res:.+]] = tensor.insert_slice %[[c]] into %[[init]]
   // CHECK: return %[[res]]
   return %slice : tensor<330x?xf32>
+}
+
+// -----
+
+// The below tests verify that a dimension which is the result of collapsing at
+// most one non-unit dim is handled properly.
+
+// CHECK: @collapse_and_slice_unit_dim(%[[arg0:.+]]: tensor<{{.*}}>, %[[arg1:.+]]: index, %[[arg2:.+]]: index
+func.func @collapse_and_slice_unit_dim(%input: tensor<1x11x100xf32>, %offt: index, %size: index) -> tensor<?x100xf32> {
+  %collapsed = tensor.collapse_shape %input [[0, 1], [2]] : tensor<1x11x100xf32> into tensor<11x100xf32>
+  %slice = tensor.extract_slice %collapsed [%offt, 0] [%size, 100] [1, 1] : tensor<11x100xf32> to tensor<?x100xf32>
+  // CHECK-NOT: scf.for
+  // CHECK: %[[e:.+]] = tensor.extract_slice %[[arg0]][0, 0, 0] [1, 11, 100] [1, 1, 1]
+  // CHECK-SAME:           tensor<1x11x100xf32> to tensor<11x100xf32>
+  // CHECK: %[[e1:.+]] = tensor.extract_slice %[[e]][%[[arg1]], 0] [%[[arg2]], 100] [1, 1]
+  // CHECK-SAME:           tensor<11x100xf32> to tensor<?x100xf32>    
+  return %slice : tensor<?x100xf32>
+}
+
+// CHECK: @collapse_and_slice_multiple_unit_dim_dynamic(%[[arg0:.+]]: tensor<{{.*}}>, %[[arg1:.+]]: index, %[[arg2:.+]]: index
+func.func @collapse_and_slice_multiple_unit_dim_dynamic(%input: tensor<1x?x1x100xf32>, %offt: index, %size: index) -> tensor<?x100xf32> {
+  %collapsed = tensor.collapse_shape %input [[0, 1, 2], [3]] : tensor<1x?x1x100xf32> into tensor<?x100xf32>
+  %slice = tensor.extract_slice %collapsed [%offt, 0] [%size, 100] [1, 1] : tensor<?x100xf32> to tensor<?x100xf32>
+  // CHECK-NOT: scf.for
+  // CHECK: %[[c1:.+]] = arith.constant 1 : index
+  // CHECK: %[[dim:.+]] = tensor.dim %[[arg0]], %[[c1]] : 
+  // CHECK: %[[e:.+]] = tensor.extract_slice %[[arg0]][0, 0, 0, 0] [1, %[[dim]], 1, 100] [1, 1, 1, 1]
+  // CHECK-SAME:           tensor<1x?x1x100xf32> to tensor<?x100xf32>
+  // CHECK: %[[e1:.+]] = tensor.extract_slice %[[e]][%[[arg1]], 0] [%[[arg2]], 100] [1, 1]
+  // CHECK-SAME:           tensor<?x100xf32> to tensor<?x100xf32>  
+  return %slice : tensor<?x100xf32>
+}
+
+// CHECK: @collapse_and_slice_multiple_unit_dim_mixed(%[[arg0:.+]]: tensor<{{.*}}>, %[[arg1:.+]]: index, %[[arg2:.+]]: index
+func.func @collapse_and_slice_multiple_unit_dim_mixed(%input: tensor<1x?x1x100x10xf32>, %offt: index, %size: index) -> tensor<?x?xf32> {
+  %collapsed = tensor.collapse_shape %input [[0, 1, 2], [3, 4]] : tensor<1x?x1x100x10xf32> into tensor<?x1000xf32>
+  %slice = tensor.extract_slice %collapsed [%offt, %offt] [%size, %size] [1, 1] : tensor<?x1000xf32> to tensor<?x?xf32>
+  // CHECK-DAG: %[[c0]] = arith.constant 0 : index
+  // CHECK-DAG: %[[c1]] = arith.constant 1 : index
+  // CHECK: %[[dim:.+]] = tensor.dim %[[arg0]], %[[c1]]
+  // CHECK: %[[rank_reduced:.+]] = tensor.extract_slice %[[arg0]][0, 0, 0, 0, 0] [1, %[[dim]], 1, 100, 10] [1, 1, 1, 1, 1]
+  // CHECK: %[[empty:.+]] = tensor.empty
+  // CHECK: %[[result:.+]] = scf.for %[[iv:.+]] = %[[c0]] to %[[arg2]] step %[[c1]] iter_args(%[[ia:.+]] = %[[empty]])
+  // CHECK:     %[[idx:.+]] = affine.apply
+  // CHECK:     %[[multi_index:.+]] = affine.delinearize_index %[[idx]] into
+  // CHECK:     %[[collapsed:.+]] = tensor.collapse_shape
+  // CHECK:     %[[updated:.+]] = tensor.insert_slice
+  // CHECK:     scf.yield %[[updated]]
+  // CHECK: return %[[result]]
+  return %slice : tensor<?x?xf32>
+}
+
+// Edge case where all collapsed dims are unit dims. This pattern can't eliminate the collapse shape, 
+// that should be handled by `linalg-fold-unit-extent-dims`.
+
+// CHECK: @collapse_and_slice_multiple_all_unit_dim(%[[arg0:.+]]: tensor<{{.*}}>)
+func.func @collapse_and_slice_multiple_all_unit_dim(%input: tensor<1x1x1x100xf32>) -> tensor<1x100xf32> {
+  %collapsed = tensor.collapse_shape %input [[0, 1, 2], [3]] : tensor<1x1x1x100xf32> into tensor<1x100xf32>
+  %slice = tensor.extract_slice %collapsed [0, 0] [1, 100] [1, 1] : tensor<1x100xf32> to tensor<1x100xf32>  
+  return %slice : tensor<1x100xf32>  
+  // CHECK: %[[collapse:.+]] = tensor.collapse_shape %[[arg0]] {{\[}}[0, 1, 2], [3]] : tensor<1x1x1x100xf32> into tensor<1x100xf32>
+  // CHECK: return %[[collapse]]  
 }
