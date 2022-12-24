@@ -213,7 +213,7 @@ static void setLoopMetadata(Operation &opInst, llvm::Instruction &llvmInst,
 
       SmallVector<llvm::Metadata *> loopOptions;
       // Reserve operand 0 for loop id self reference.
-      auto dummy = llvm::MDNode::getTemporary(ctx, llvm::None);
+      auto dummy = llvm::MDNode::getTemporary(ctx, std::nullopt);
       loopOptions.push_back(dummy.get());
 
       auto loopAttr = attr.cast<DictionaryAttr>();
@@ -310,7 +310,7 @@ convertCallLLVMIntrinsicOp(CallIntrinsicOp &op, llvm::IRBuilderBase &builder,
         getOverloadedDeclaration(op, id, module, moduleTranslation);
     if (failed(fnOrFailure))
       return failure();
-    fn = fnOrFailure.value();
+    fn = *fnOrFailure;
   } else {
     fn = llvm::Intrinsic::getDeclaration(module, id, {});
   }

@@ -56,7 +56,7 @@ using namespace mlir::LLVM::detail;
 static FailureOr<llvm::DataLayout>
 translateDataLayout(DataLayoutSpecInterface attribute,
                     const DataLayout &dataLayout,
-                    Optional<Location> loc = llvm::None) {
+                    Optional<Location> loc = std::nullopt) {
   if (!loc)
     loc = UnknownLoc::get(attribute.getContext());
 
@@ -687,7 +687,7 @@ LogicalResult ModuleTranslation::convertGlobals() {
 
     addRuntimePreemptionSpecifier(op.getDsoLocal(), var);
 
-    Optional<uint64_t> alignment = op.getAlignment();
+    std::optional<uint64_t> alignment = op.getAlignment();
     if (alignment.has_value())
       var->setAlignment(llvm::MaybeAlign(alignment.value()));
 
@@ -783,7 +783,7 @@ static LogicalResult checkedAddLLVMFnAttribute(Location loc,
 /// attribute and the second string beings its value. Note that even integer
 /// attributes are expected to have their values expressed as strings.
 static LogicalResult
-forwardPassthroughAttributes(Location loc, Optional<ArrayAttr> attributes,
+forwardPassthroughAttributes(Location loc, std::optional<ArrayAttr> attributes,
                              llvm::Function *llvmFunc) {
   if (!attributes)
     return success();
@@ -885,8 +885,31 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
     mapFunction(function.getName(), llvmFunc);
     addRuntimePreemptionSpecifier(function.getDsoLocal(), llvmFunc);
 
+    // Convert function attributes.
     if (function->getAttrOfType<UnitAttr>(LLVMDialect::getReadnoneAttrName()))
       llvmFunc->setDoesNotAccessMemory();
+
+    // Convert result attributes.
+    if (ArrayAttr allResultAttrs = function.getAllResultAttrs()) {
+      llvm::AttrBuilder retAttrs(llvmFunc->getContext());
+      DictionaryAttr resultAttrs = allResultAttrs[0].cast<DictionaryAttr>();
+      for (const NamedAttribute &attr : resultAttrs) {
+        StringAttr name = attr.getName();
+        if (name == LLVMDialect::getAlignAttrName()) {
+          auto alignAmount = attr.getValue().cast<IntegerAttr>();
+          retAttrs.addAlignmentAttr(llvm::Align(alignAmount.getInt()));
+        } else if (name == LLVMDialect::getNoAliasAttrName()) {
+          retAttrs.addAttribute(llvm::Attribute::NoAlias);
+        } else if (name == LLVMDialect::getNoUndefAttrName()) {
+          retAttrs.addAttribute(llvm::Attribute::NoUndef);
+        } else if (name == LLVMDialect::getSExtAttrName()) {
+          retAttrs.addAttribute(llvm::Attribute::SExt);
+        } else if (name == LLVMDialect::getZExtAttrName()) {
+          retAttrs.addAttribute(llvm::Attribute::ZExt);
+        }
+      }
+      llvmFunc->addRetAttrs(retAttrs);
+    }
 
     // Convert argument attributes.
     unsigned int argIdx = 0;
@@ -900,6 +923,13 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
           return function.emitError(
               "llvm.noalias attribute attached to LLVM non-pointer argument");
         llvmArg.addAttr(llvm::Attribute::AttrKind::NoAlias);
+      }
+      if (auto attr = function.getArgAttrOfType<UnitAttr>(
+              argIdx, LLVMDialect::getReadonlyAttrName())) {
+        if (!mlirArgTy.isa<LLVM::LLVMPointerType>())
+          return function.emitError(
+              "llvm.readonly attribute attached to LLVM non-pointer argument");
+        llvmArg.addAttr(llvm::Attribute::AttrKind::ReadOnly);
       }
 
       if (auto attr = function.getArgAttrOfType<IntegerAttr>(
@@ -1081,7 +1111,7 @@ LogicalResult ModuleTranslation::createAliasScopeMetadata() {
       llvm::LLVMContext &ctx = llvmModule->getContext();
       llvm::SmallVector<llvm::Metadata *, 2> operands;
       operands.push_back({}); // Placeholder for self-reference
-      if (Optional<StringRef> description = op.getDescription())
+      if (std::optional<StringRef> description = op.getDescription())
         operands.push_back(llvm::MDString::get(ctx, *description));
       llvm::MDNode *domain = llvm::MDNode::get(ctx, operands);
       domain->replaceOperandWith(0, domain); // Self-reference for uniqueness
@@ -1100,7 +1130,7 @@ LogicalResult ModuleTranslation::createAliasScopeMetadata() {
       llvm::SmallVector<llvm::Metadata *, 3> operands;
       operands.push_back({}); // Placeholder for self-reference
       operands.push_back(domain);
-      if (Optional<StringRef> description = op.getDescription())
+      if (std::optional<StringRef> description = op.getDescription())
         operands.push_back(llvm::MDString::get(ctx, *description));
       llvm::MDNode *scope = llvm::MDNode::get(ctx, operands);
       scope->replaceOperandWith(0, scope); // Self-reference for uniqueness

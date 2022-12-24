@@ -49,9 +49,7 @@ if(NOT LLVM_LIBC_FULL_BUILD)
 endif()
 
 add_subdirectory(dirent)
-# The signal API is currently disabled as signal.h is incorrect.
-# since assert uses the signal API, we disable assert also.
-# add_subdirectory(assert)
+add_subdirectory(assert)
 add_subdirectory(setjmp)
 add_subdirectory(signal)
 add_subdirectory(spawn)
@@ -105,8 +103,8 @@ add_integration_test(
     libc-api-test
   SRCS
     ${public_test}
-  LOADER
-    libc.loader.linux.crt1
+  STARTUP
+    libc.startup.linux.crt1
   DEPENDS
     ${api-test-entrypoints}
 )

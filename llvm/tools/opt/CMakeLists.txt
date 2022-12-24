@@ -14,6 +14,7 @@ set(LLVM_LINK_COMPONENTS
   Extensions
   IPO
   IRReader
+  IRPrinter
   InstCombine
   Instrumentation
   MC
@@ -22,6 +23,7 @@ set(LLVM_LINK_COMPONENTS
   ScalarOpts
   Support
   Target
+  TargetParser
   TransformUtils
   Vectorize
   Passes

@@ -13,7 +13,6 @@
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Host.h"
@@ -73,7 +72,7 @@ void riscv::getRISCVTargetFeatures(const Driver &D, const llvm::Triple &Triple,
       CPU = llvm::sys::getHostCPUName();
     if (!getRISCFeaturesFromMcpu(Triple, CPU, Features))
       D.Diag(clang::diag::err_drv_unsupported_option_argument)
-          << A->getOption().getName() << CPU;
+          << A->getSpelling() << CPU;
   }
 
   // Handle features corresponding to "-ffixed-X" options

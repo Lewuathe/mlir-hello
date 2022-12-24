@@ -41,7 +41,7 @@ enum {
 #include "Options.inc"
 #undef PREFIX
 
-static const llvm::opt::OptTable::Info InfoTable[] = {
+static constexpr llvm::opt::OptTable::Info InfoTable[] = {
 #define OPTION(X1, X2, ID, KIND, GROUP, ALIAS, X7, X8, X9, X10, X11, X12)      \
   {X1, X2, X10,         X11,         OPT_##ID, llvm::opt::Option::KIND##Class, \
    X9, X8, OPT_##GROUP, OPT_##ALIAS, X7,       X12},
@@ -94,14 +94,14 @@ MachineTypes getDefaultMachine() {
   return getMachine(Triple(sys::getDefaultTargetTriple()));
 }
 
-Optional<std::string> getPrefix(StringRef Argv0) {
+std::optional<std::string> getPrefix(StringRef Argv0) {
   StringRef ProgName = llvm::sys::path::stem(Argv0);
   // x86_64-w64-mingw32-dlltool -> x86_64-w64-mingw32
   // llvm-dlltool -> None
   // aarch64-w64-mingw32-llvm-dlltool-10.exe -> aarch64-w64-mingw32
   ProgName = ProgName.rtrim("0123456789.-");
   if (!ProgName.consume_back_insensitive("dlltool"))
-    return None;
+    return std::nullopt;
   ProgName.consume_back_insensitive("llvm-");
   ProgName.consume_back_insensitive("-");
   return ProgName.str();
@@ -149,7 +149,7 @@ int llvm::dlltoolDriverMain(llvm::ArrayRef<const char *> ArgsArr) {
   }
 
   COFF::MachineTypes Machine = getDefaultMachine();
-  if (Optional<std::string> Prefix = getPrefix(ArgsArr[0])) {
+  if (std::optional<std::string> Prefix = getPrefix(ArgsArr[0])) {
     Triple T(*Prefix);
     if (T.getArch() != Triple::UnknownArch)
       Machine = getMachine(T);

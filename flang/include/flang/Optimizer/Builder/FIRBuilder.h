@@ -18,6 +18,7 @@
 
 #include "flang/Common/MathOptionsBase.h"
 #include "flang/Optimizer/Dialect/FIROps.h"
+#include "flang/Optimizer/Dialect/FIROpsSupport.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
 #include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/IR/Builders.h"
@@ -182,6 +183,13 @@ public:
     return createTemporary(loc, type, name, {}, {}, attrs);
   }
 
+  /// Create a temporary on the heap.
+  mlir::Value
+  createHeapTemporary(mlir::Location loc, mlir::Type type,
+                      llvm::StringRef name = {}, mlir::ValueRange shape = {},
+                      mlir::ValueRange lenParams = {},
+                      llvm::ArrayRef<mlir::NamedAttribute> attrs = {});
+
   /// Create a global value.
   fir::GlobalOp createGlobal(mlir::Location loc, mlir::Type type,
                              llvm::StringRef name,
@@ -211,6 +219,11 @@ public:
     return createGlobal(loc, type, name, /*isConst=*/true, /*isTarget=*/false,
                         bodyBuilder, linkage);
   }
+
+  /// Create a fir::DispatchTable operation.
+  fir::DispatchTableOp createDispatchTableOp(mlir::Location loc,
+                                             llvm::StringRef name,
+                                             llvm::StringRef parentName);
 
   /// Convert a StringRef string into a fir::StringLitOp.
   fir::StringLitOp createStringLitOp(mlir::Location loc,
@@ -380,14 +393,14 @@ public:
   /// Create an IfOp with no "else" region, and no result values.
   /// Usage: genIfThen(loc, cdt).genThen(lambda).end();
   IfBuilder genIfThen(mlir::Location loc, mlir::Value cdt) {
-    auto op = create<fir::IfOp>(loc, llvm::None, cdt, false);
+    auto op = create<fir::IfOp>(loc, std::nullopt, cdt, false);
     return IfBuilder(op, *this);
   }
 
   /// Create an IfOp with an "else" region, and no result values.
   /// Usage: genIfThenElse(loc, cdt).genThen(lambda).genElse(lambda).end();
   IfBuilder genIfThenElse(mlir::Location loc, mlir::Value cdt) {
-    auto op = create<fir::IfOp>(loc, llvm::None, cdt, true);
+    auto op = create<fir::IfOp>(loc, std::nullopt, cdt, true);
     return IfBuilder(op, *this);
   }
 
@@ -414,18 +427,21 @@ public:
   /// config.
   void setFastMathFlags(Fortran::common::MathOptionsBase options);
 
+  /// Get current FastMathFlags value.
+  mlir::arith::FastMathFlags getFastMathFlags() const { return fastMathFlags; }
+
   /// Dump the current function. (debug)
   LLVM_DUMP_METHOD void dumpFunc();
-
-private:
-  /// Set attributes (e.g. FastMathAttr) to \p op operation
-  /// based on the current attributes setting.
-  void setCommonAttributes(mlir::Operation *op) const;
 
   /// FirOpBuilder hook for creating new operation.
   void notifyOperationInserted(mlir::Operation *op) override {
     setCommonAttributes(op);
   }
+
+private:
+  /// Set attributes (e.g. FastMathAttr) to \p op operation
+  /// based on the current attributes setting.
+  void setCommonAttributes(mlir::Operation *op) const;
 
   const KindMapping &kindMap;
 
@@ -577,9 +593,6 @@ mlir::Value genLenOfCharacter(fir::FirOpBuilder &builder, mlir::Location loc,
 /// for logical types).
 mlir::Value createZeroValue(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Type type);
-
-/// Unwrap integer constant from an mlir::Value.
-llvm::Optional<std::int64_t> getIntIfConstant(mlir::Value value);
 
 /// Get the integer constants of triplet and compute the extent.
 llvm::Optional<std::int64_t>

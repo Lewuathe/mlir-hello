@@ -682,6 +682,7 @@ public:
                   "[allocator.requirements] states that rebinding an allocator to the same type should result in the "
                   "original allocator");
 
+    // TODO: Implement iterator bounds checking without requiring the global database.
     typedef __wrap_iter<pointer>                         iterator;
     typedef __wrap_iter<const_pointer>                   const_iterator;
     typedef std::reverse_iterator<iterator>              reverse_iterator;
@@ -810,6 +811,14 @@ private:
             __set_long_size(__size);
         }
         std::__debug_db_insert_c(this);
+    }
+
+    _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 iterator __make_iterator(pointer __p) {
+        return iterator(this, __p);
+    }
+
+    _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 const_iterator __make_const_iterator(const_pointer __p) const {
+        return const_iterator(this, __p);
     }
 
 public:
@@ -1028,16 +1037,16 @@ public:
 
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
     iterator begin() _NOEXCEPT
-        {return iterator(this, __get_pointer());}
+        {return __make_iterator(__get_pointer());}
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
     const_iterator begin() const _NOEXCEPT
-        {return const_iterator(this, __get_pointer());}
+        {return __make_const_iterator(__get_pointer());}
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
     iterator end() _NOEXCEPT
-        {return iterator(this, __get_pointer() + size());}
+        {return __make_iterator(__get_pointer() + size());}
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
     const_iterator end() const _NOEXCEPT
-        {return const_iterator(this, __get_pointer() + size());}
+        {return __make_const_iterator(__get_pointer() + size());}
 
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
     reverse_iterator rbegin() _NOEXCEPT
@@ -1421,21 +1430,20 @@ public:
 
     _LIBCPP_CONSTEXPR_SINCE_CXX20 size_type copy(value_type* __s, size_type __n, size_type __pos = 0) const;
 
-    // TODO: Maybe don't pass in the allocator. See https://llvm.org/PR57190
 #if _LIBCPP_STD_VER <= 20
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
     basic_string substr(size_type __pos = 0, size_type __n = npos) const {
-      return basic_string(*this, __pos, __n, __alloc());
+      return basic_string(*this, __pos, __n);
     }
 #else
     _LIBCPP_HIDE_FROM_ABI constexpr
     basic_string substr(size_type __pos = 0, size_type __n = npos) const& {
-      return basic_string(*this, __pos, __n, __alloc());
+      return basic_string(*this, __pos, __n);
     }
 
     _LIBCPP_HIDE_FROM_ABI constexpr
     basic_string substr(size_type __pos = 0, size_type __n = npos) && {
-      return basic_string(std::move(*this), __pos, __n, __alloc());
+      return basic_string(std::move(*this), __pos, __n);
     }
 #endif
 
@@ -3472,7 +3480,7 @@ basic_string<_CharT, _Traits, _Allocator>::find(const value_type* __s,
                                                 size_type __n) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::find(): received nullptr");
-    return __str_find<value_type, size_type, traits_type, npos>
+    return std::__str_find<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, __n);
 }
 
@@ -3482,7 +3490,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find(const basic_string& __str,
                                                 size_type __pos) const _NOEXCEPT
 {
-    return __str_find<value_type, size_type, traits_type, npos>
+    return std::__str_find<value_type, size_type, traits_type, npos>
         (data(), size(), __str.data(), __pos, __str.size());
 }
 
@@ -3498,7 +3506,7 @@ basic_string<_CharT, _Traits, _Allocator>::find(const _Tp &__t,
                                                 size_type __pos) const _NOEXCEPT
 {
     __self_view __sv = __t;
-    return __str_find<value_type, size_type, traits_type, npos>
+    return std::__str_find<value_type, size_type, traits_type, npos>
         (data(), size(), __sv.data(), __pos, __sv.size());
 }
 
@@ -3509,7 +3517,7 @@ basic_string<_CharT, _Traits, _Allocator>::find(const value_type* __s,
                                                 size_type __pos) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__s != nullptr, "string::find(): received nullptr");
-    return __str_find<value_type, size_type, traits_type, npos>
+    return std::__str_find<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, traits_type::length(__s));
 }
 
@@ -3519,7 +3527,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find(value_type __c,
                                                 size_type __pos) const _NOEXCEPT
 {
-    return __str_find<value_type, size_type, traits_type, npos>
+    return std::__str_find<value_type, size_type, traits_type, npos>
         (data(), size(), __c, __pos);
 }
 
@@ -3533,7 +3541,7 @@ basic_string<_CharT, _Traits, _Allocator>::rfind(const value_type* __s,
                                                  size_type __n) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::rfind(): received nullptr");
-    return __str_rfind<value_type, size_type, traits_type, npos>
+    return std::__str_rfind<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, __n);
 }
 
@@ -3543,7 +3551,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::rfind(const basic_string& __str,
                                                  size_type __pos) const _NOEXCEPT
 {
-    return __str_rfind<value_type, size_type, traits_type, npos>
+    return std::__str_rfind<value_type, size_type, traits_type, npos>
         (data(), size(), __str.data(), __pos, __str.size());
 }
 
@@ -3559,7 +3567,7 @@ basic_string<_CharT, _Traits, _Allocator>::rfind(const _Tp& __t,
                                                 size_type __pos) const _NOEXCEPT
 {
     __self_view __sv = __t;
-    return __str_rfind<value_type, size_type, traits_type, npos>
+    return std::__str_rfind<value_type, size_type, traits_type, npos>
         (data(), size(), __sv.data(), __pos, __sv.size());
 }
 
@@ -3570,7 +3578,7 @@ basic_string<_CharT, _Traits, _Allocator>::rfind(const value_type* __s,
                                                  size_type __pos) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__s != nullptr, "string::rfind(): received nullptr");
-    return __str_rfind<value_type, size_type, traits_type, npos>
+    return std::__str_rfind<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, traits_type::length(__s));
 }
 
@@ -3580,7 +3588,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::rfind(value_type __c,
                                                  size_type __pos) const _NOEXCEPT
 {
-    return __str_rfind<value_type, size_type, traits_type, npos>
+    return std::__str_rfind<value_type, size_type, traits_type, npos>
         (data(), size(), __c, __pos);
 }
 
@@ -3594,7 +3602,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_of(const value_type* __s,
                                                          size_type __n) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::find_first_of(): received nullptr");
-    return __str_find_first_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, __n);
 }
 
@@ -3604,7 +3612,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find_first_of(const basic_string& __str,
                                                          size_type __pos) const _NOEXCEPT
 {
-    return __str_find_first_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_of<value_type, size_type, traits_type, npos>
         (data(), size(), __str.data(), __pos, __str.size());
 }
 
@@ -3620,7 +3628,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_of(const _Tp& __t,
                                                 size_type __pos) const _NOEXCEPT
 {
     __self_view __sv = __t;
-    return __str_find_first_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_of<value_type, size_type, traits_type, npos>
         (data(), size(), __sv.data(), __pos, __sv.size());
 }
 
@@ -3631,7 +3639,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_of(const value_type* __s,
                                                          size_type __pos) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__s != nullptr, "string::find_first_of(): received nullptr");
-    return __str_find_first_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, traits_type::length(__s));
 }
 
@@ -3654,7 +3662,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_of(const value_type* __s,
                                                         size_type __n) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::find_last_of(): received nullptr");
-    return __str_find_last_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, __n);
 }
 
@@ -3664,7 +3672,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find_last_of(const basic_string& __str,
                                                         size_type __pos) const _NOEXCEPT
 {
-    return __str_find_last_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_of<value_type, size_type, traits_type, npos>
         (data(), size(), __str.data(), __pos, __str.size());
 }
 
@@ -3680,7 +3688,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_of(const _Tp& __t,
                                                 size_type __pos) const _NOEXCEPT
 {
     __self_view __sv = __t;
-    return __str_find_last_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_of<value_type, size_type, traits_type, npos>
         (data(), size(), __sv.data(), __pos, __sv.size());
 }
 
@@ -3691,7 +3699,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_of(const value_type* __s,
                                                         size_type __pos) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__s != nullptr, "string::find_last_of(): received nullptr");
-    return __str_find_last_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, traits_type::length(__s));
 }
 
@@ -3714,7 +3722,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_not_of(const value_type* _
                                                              size_type __n) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::find_first_not_of(): received nullptr");
-    return __str_find_first_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, __n);
 }
 
@@ -3724,7 +3732,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find_first_not_of(const basic_string& __str,
                                                              size_type __pos) const _NOEXCEPT
 {
-    return __str_find_first_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __str.data(), __pos, __str.size());
 }
 
@@ -3740,7 +3748,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_not_of(const _Tp& __t,
                                                 size_type __pos) const _NOEXCEPT
 {
     __self_view __sv = __t;
-    return __str_find_first_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __sv.data(), __pos, __sv.size());
 }
 
@@ -3751,7 +3759,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_not_of(const value_type* _
                                                              size_type __pos) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__s != nullptr, "string::find_first_not_of(): received nullptr");
-    return __str_find_first_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, traits_type::length(__s));
 }
 
@@ -3761,7 +3769,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find_first_not_of(value_type __c,
                                                              size_type __pos) const _NOEXCEPT
 {
-    return __str_find_first_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_first_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __c, __pos);
 }
 
@@ -3775,7 +3783,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_not_of(const value_type* __
                                                             size_type __n) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::find_last_not_of(): received nullptr");
-    return __str_find_last_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, __n);
 }
 
@@ -3785,7 +3793,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find_last_not_of(const basic_string& __str,
                                                             size_type __pos) const _NOEXCEPT
 {
-    return __str_find_last_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __str.data(), __pos, __str.size());
 }
 
@@ -3801,7 +3809,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_not_of(const _Tp& __t,
                                                 size_type __pos) const _NOEXCEPT
 {
     __self_view __sv = __t;
-    return __str_find_last_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __sv.data(), __pos, __sv.size());
 }
 
@@ -3812,7 +3820,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_not_of(const value_type* __
                                                             size_type __pos) const _NOEXCEPT
 {
     _LIBCPP_ASSERT(__s != nullptr, "string::find_last_not_of(): received nullptr");
-    return __str_find_last_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __s, __pos, traits_type::length(__s));
 }
 
@@ -3822,7 +3830,7 @@ typename basic_string<_CharT, _Traits, _Allocator>::size_type
 basic_string<_CharT, _Traits, _Allocator>::find_last_not_of(value_type __c,
                                                             size_type __pos) const _NOEXCEPT
 {
-    return __str_find_last_not_of<value_type, size_type, traits_type, npos>
+    return std::__str_find_last_not_of<value_type, size_type, traits_type, npos>
         (data(), size(), __c, __pos);
 }
 
@@ -4441,7 +4449,7 @@ struct __string_hash : public __unary_function<basic_string<_CharT, char_traits<
 {
     size_t
     operator()(const basic_string<_CharT, char_traits<_CharT>, _Allocator>& __val) const _NOEXCEPT
-    { return __do_string_hash(__val.data(), __val.data() + __val.size()); }
+    { return std::__do_string_hash(__val.data(), __val.data() + __val.size()); }
 };
 
 template <class _Allocator>
