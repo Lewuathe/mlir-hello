@@ -29,6 +29,7 @@
 ! CHECK-NEXT: -fdefault-double-8     Set the default double precision kind to an 8 byte wide type
 ! CHECK-NEXT: -fdefault-integer-8    Set the default integer kind to an 8 byte wide type
 ! CHECK-NEXT: -fdefault-real-8       Set the default real kind to an 8 byte wide type
+! CHECK-NEXT: -ffast-math            Allow aggressive, lossy floating-point optimizations
 ! CHECK-NEXT: -ffixed-form           Process source files in fixed form
 ! CHECK-NEXT: -ffixed-line-length=<value>
 ! CHECK-NEXT: Use <value> as character line width in fixed mode
@@ -48,6 +49,7 @@
 ! CHECK-NEXT: -fno-signed-zeros      Allow optimizations that ignore the sign of floating point zeros
 ! CHECK-NEXT: -fopenacc              Enable OpenACC
 ! CHECK-NEXT: -fopenmp               Parse OpenMP pragmas and generate parallel code.
+! CHECK-NEXT: -fpass-plugin=<dsopath> Load pass plugin from a dynamic shared object file (only with new pass manager).
 ! CHECK-NEXT: -freciprocal-math      Allow division operations to be reassociated
 ! CHECK-NEXT: -fsyntax-only          Run the preprocessor, parser and semantic analysis stages
 ! CHECK-NEXT: -fxor-operator         Enable .XOR. as a synonym of .NEQV.
@@ -76,4 +78,3 @@
 
 ! Frontend driver -help-hidden is not supported
 ! ERROR-FLANG-FC1: error: unknown argument: '{{.*}}'
-

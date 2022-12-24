@@ -90,6 +90,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::Export:
   case Decl::ObjCPropertyImpl:
   case Decl::FileScopeAsm:
+  case Decl::TopLevelStmt:
   case Decl::Friend:
   case Decl::FriendTemplate:
   case Decl::Block:
@@ -757,7 +758,7 @@ void CodeGenFunction::EmitNullabilityCheck(LValue LHS, llvm::Value *RHS,
   if (!SanOpts.has(SanitizerKind::NullabilityAssign))
     return;
 
-  auto Nullability = LHS.getType()->getNullability(getContext());
+  auto Nullability = LHS.getType()->getNullability();
   if (!Nullability || *Nullability != NullabilityKind::NonNull)
     return;
 
@@ -2614,7 +2615,7 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
   // function satisfy their nullability preconditions. This makes it necessary
   // to emit null checks for args in the function body itself.
   if (requiresReturnValueNullabilityCheck()) {
-    auto Nullability = Ty->getNullability(getContext());
+    auto Nullability = Ty->getNullability();
     if (Nullability && *Nullability == NullabilityKind::NonNull) {
       SanitizerScope SanScope(this);
       RetValNullabilityPrecondition =
@@ -2713,5 +2714,5 @@ CodeGenModule::getOMPAllocateAlignment(const VarDecl *VD) {
           std::max<unsigned>(UserAlign, NaturalAlign.getQuantity()));
     }
   }
-  return llvm::None;
+  return std::nullopt;
 }

@@ -29,6 +29,7 @@
 ! HELP-NEXT: -fdefault-double-8     Set the default double precision kind to an 8 byte wide type
 ! HELP-NEXT: -fdefault-integer-8    Set the default integer kind to an 8 byte wide type
 ! HELP-NEXT: -fdefault-real-8       Set the default real kind to an 8 byte wide type
+! HELP-NEXT: -ffast-math            Allow aggressive, lossy floating-point optimizations
 ! HELP-NEXT: -ffixed-form           Process source files in fixed form
 ! HELP-NEXT: -ffixed-line-length=<value>
 ! HELP-NEXT: Use <value> as character line width in fixed mode
@@ -46,6 +47,7 @@
 ! HELP-NEXT: -fno-signed-zeros      Allow optimizations that ignore the sign of floating point zeros
 ! HELP-NEXT: -fopenacc              Enable OpenACC
 ! HELP-NEXT: -fopenmp               Parse OpenMP pragmas and generate parallel code.
+! HELP-NEXT: -fpass-plugin=<dsopath> Load pass plugin from a dynamic shared object file (only with new pass manager).
 ! HELP-NEXT: -freciprocal-math      Allow division operations to be reassociated
 ! HELP-NEXT: -fsyntax-only          Run the preprocessor, parser and semantic analysis stages
 ! HELP-NEXT: -fxor-operator         Enable .XOR. as a synonym of .NEQV.
@@ -107,6 +109,7 @@
 ! HELP-FC1-NEXT: -fdefault-double-8  Set the default double precision kind to an 8 byte wide type
 ! HELP-FC1-NEXT: -fdefault-integer-8 Set the default integer kind to an 8 byte wide type
 ! HELP-FC1-NEXT: -fdefault-real-8    Set the default real kind to an 8 byte wide type
+! HELP-FC1-NEXT: -ffast-math            Allow aggressive, lossy floating-point optimizations
 ! HELP-FC1-NEXT: -ffixed-form           Process source files in fixed form
 ! HELP-FC1-NEXT: -ffixed-line-length=<value>
 ! HELP-FC1-NEXT: Use <value> as character line width in fixed mode
@@ -129,6 +132,7 @@
 ! HELP-FC1-NEXT: -fno-signed-zeros      Allow optimizations that ignore the sign of floating point zeros
 ! HELP-FC1-NEXT: -fopenacc              Enable OpenACC
 ! HELP-FC1-NEXT: -fopenmp               Parse OpenMP pragmas and generate parallel code.
+! HELP-FC1-NEXT: -fpass-plugin=<dsopath> Load pass plugin from a dynamic shared object file (only with new pass manager).
 ! HELP-FC1-NEXT: -freciprocal-math      Allow division operations to be reassociated
 ! HELP-FC1-NEXT: -fsyntax-only          Run the preprocessor, parser and semantic analysis stages
 ! HELP-FC1-NEXT: -fxor-operator         Enable .XOR. as a synonym of .NEQV.
@@ -154,6 +158,8 @@
 ! HELP-FC1-NEXT: -P                     Disable linemarker output in -E mode
 ! HELP-FC1-NEXT: -std=<value>           Language standard to compile for
 ! HELP-FC1-NEXT: -S                     Only run preprocess and compilation steps
+! HELP-FC1-NEXT: -target-cpu <value>    Target a specific cpu type
+! HELP-FC1-NEXT: -target-feature <value> Target specific attributes
 ! HELP-FC1-NEXT: -test-io               Run the InputOuputTest action. Use for development and testing only.
 ! HELP-FC1-NEXT: -triple <value>        Specify target triple (e.g. i686-apple-darwin9)
 ! HELP-FC1-NEXT: -U <macro>             Undefine macro <macro>

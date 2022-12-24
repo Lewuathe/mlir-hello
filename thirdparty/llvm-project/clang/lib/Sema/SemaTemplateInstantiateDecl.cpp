@@ -469,8 +469,8 @@ static void instantiateOMPDeclareVariantAttr(
   if (!DeclVarData)
     return;
 
-  E = DeclVarData.value().second;
-  FD = DeclVarData.value().first;
+  E = DeclVarData->second;
+  FD = DeclVarData->first;
 
   if (auto *VariantDRE = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts())) {
     if (auto *VariantFD = dyn_cast<FunctionDecl>(VariantDRE->getDecl())) {
@@ -2268,7 +2268,7 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
 
     // In C++, the previous declaration we find might be a tag type
     // (class or enum). In this case, the new declaration will hide the
-    // tag type. Note that this does does not apply if we're declaring a
+    // tag type. Note that this does not apply if we're declaring a
     // typedef (C++ [dcl.typedef]p4).
     if (Previous.isSingleTagDecl())
       Previous.clear();
@@ -2661,7 +2661,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
 
     // In C++, the previous declaration we find might be a tag type
     // (class or enum). In this case, the new declaration will hide the
-    // tag type. Note that this does does not apply if we're declaring a
+    // tag type. Note that this does not apply if we're declaring a
     // typedef (C++ [dcl.typedef]p4).
     if (Previous.isSingleTagDecl())
       Previous.clear();
@@ -2787,8 +2787,9 @@ Decl *TemplateDeclInstantiator::VisitCXXConversionDecl(CXXConversionDecl *D) {
 }
 
 Decl *TemplateDeclInstantiator::VisitParmVarDecl(ParmVarDecl *D) {
-  return SemaRef.SubstParmVarDecl(D, TemplateArgs, /*indexAdjustment*/ 0, None,
-                                  /*ExpectParameterPack=*/ false);
+  return SemaRef.SubstParmVarDecl(D, TemplateArgs, /*indexAdjustment*/ 0,
+                                  std::nullopt,
+                                  /*ExpectParameterPack=*/false);
 }
 
 Decl *TemplateDeclInstantiator::VisitTemplateTypeParmDecl(
@@ -4043,7 +4044,7 @@ FunctionDecl *Sema::SubstSpaceshipAsEqualEqual(CXXRecordDecl *RD,
   Decl *R;
   if (auto *MD = dyn_cast<CXXMethodDecl>(Spaceship)) {
     R = Instantiator.VisitCXXMethodDecl(
-        MD, nullptr, None,
+        MD, nullptr, std::nullopt,
         TemplateDeclInstantiator::RewriteKind::RewriteSpaceshipAsEqualEqual);
   } else {
     assert(Spaceship->getFriendObjectKind() &&

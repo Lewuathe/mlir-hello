@@ -118,9 +118,7 @@ add_subdirectory(BLAKE3)
 
 add_llvm_component_library(LLVMSupport
   AddressRanges.cpp
-  AArch64TargetParser.cpp
   ABIBreak.cpp
-  ARMTargetParser.cpp
   AMDGPUMetadata.cpp
   APFixedPoint.cpp
   APFloat.cpp
@@ -153,7 +151,6 @@ add_llvm_component_library(LLVMSupport
   CrashRecoveryContext.cpp
   CSKYAttributes.cpp
   CSKYAttributeParser.cpp
-  CSKYTargetParser.cpp
   DataExtractor.cpp
   Debug.cpp
   DebugCounter.cpp
@@ -170,7 +167,6 @@ add_llvm_component_library(LLVMSupport
   FileUtilities.cpp
   FileOutputBuffer.cpp
   FoldingSet.cpp
-  Format.cpp
   FormattedStream.cpp
   FormatVariadic.cpp
   GlobPattern.cpp
@@ -206,7 +202,6 @@ add_llvm_component_library(LLVMSupport
   Regex.cpp
   RISCVAttributes.cpp
   RISCVAttributeParser.cpp
-  RISCVISAInfo.cpp
   ScaledNumber.cpp
   ScopedPrinter.cpp
   SHA1.cpp
@@ -225,13 +220,11 @@ add_llvm_component_library(LLVMSupport
   SymbolRemappingReader.cpp
   SystemUtils.cpp
   TarWriter.cpp
-  TargetParser.cpp
   ThreadPool.cpp
   TimeProfiler.cpp
   Timer.cpp
   ToolOutputFile.cpp
   TrigramIndex.cpp
-  Triple.cpp
   Twine.cpp
   TypeSize.cpp
   Unicode.cpp
@@ -241,7 +234,6 @@ add_llvm_component_library(LLVMSupport
   VersionTuple.cpp
   VirtualFileSystem.cpp
   WithColor.cpp
-  X86TargetParser.cpp
   YAMLParser.cpp
   YAMLTraits.cpp
   raw_os_ostream.cpp
@@ -261,7 +253,6 @@ add_llvm_component_library(LLVMSupport
   Atomic.cpp
   DynamicLibrary.cpp
   Errno.cpp
-  Host.cpp
   Memory.cpp
   Path.cpp
   Process.cpp

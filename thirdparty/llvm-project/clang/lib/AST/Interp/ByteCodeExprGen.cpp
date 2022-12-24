@@ -21,7 +21,6 @@ using namespace clang::interp;
 
 using APSInt = llvm::APSInt;
 template <typename T> using Expected = llvm::Expected<T>;
-template <typename T> using Optional = llvm::Optional<T>;
 
 namespace clang {
 namespace interp {
@@ -51,7 +50,7 @@ public:
       : Ctx(Ctx), OldDiscardResult(Ctx->DiscardResult),
         OldInitFn(std::move(Ctx->InitFn)) {
     Ctx->DiscardResult = NewDiscardResult;
-    Ctx->InitFn = llvm::Optional<InitFnRef>{};
+    Ctx->InitFn = std::optional<InitFnRef>{};
   }
 
   /// Root constructor, setting up compilation state.
@@ -81,7 +80,7 @@ private:
   /// Old discard flag to restore.
   bool OldDiscardResult;
   /// Old pointer emitter to restore.
-  llvm::Optional<InitFnRef> OldInitFn;
+  std::optional<InitFnRef> OldInitFn;
 };
 
 } // namespace interp
@@ -107,7 +106,8 @@ bool ByteCodeExprGen<Emitter>::VisitCastExpr(const CastExpr *CE) {
         });
   }
 
-  case CK_UncheckedDerivedToBase: {
+  case CK_UncheckedDerivedToBase:
+  case CK_DerivedToBase: {
     if (!this->visit(SubExpr))
       return false;
 
@@ -134,8 +134,8 @@ bool ByteCodeExprGen<Emitter>::VisitCastExpr(const CastExpr *CE) {
 
   case CK_IntegralToBoolean:
   case CK_IntegralCast: {
-    Optional<PrimType> FromT = classify(SubExpr->getType());
-    Optional<PrimType> ToT = classify(CE->getType());
+    std::optional<PrimType> FromT = classify(SubExpr->getType());
+    std::optional<PrimType> ToT = classify(CE->getType());
     if (!FromT || !ToT)
       return false;
 
@@ -186,9 +186,9 @@ bool ByteCodeExprGen<Emitter>::VisitBinaryOperator(const BinaryOperator *BO) {
   }
 
   // Typecheck the args.
-  Optional<PrimType> LT = classify(LHS->getType());
-  Optional<PrimType> RT = classify(RHS->getType());
-  Optional<PrimType> T = classify(BO->getType());
+  std::optional<PrimType> LT = classify(LHS->getType());
+  std::optional<PrimType> RT = classify(RHS->getType());
+  std::optional<PrimType> T = classify(BO->getType());
   if (!LT || !RT || !T) {
     return this->bail(BO);
   }
@@ -266,8 +266,8 @@ bool ByteCodeExprGen<Emitter>::VisitPointerArithBinOp(const BinaryOperator *E) {
       (!LHS->getType()->isPointerType() && !RHS->getType()->isPointerType()))
     return false;
 
-  Optional<PrimType> LT = classify(LHS);
-  Optional<PrimType> RT = classify(RHS);
+  std::optional<PrimType> LT = classify(LHS);
+  std::optional<PrimType> RT = classify(RHS);
 
   if (!LT || !RT)
     return false;
@@ -306,7 +306,7 @@ bool ByteCodeExprGen<Emitter>::VisitPointerArithBinOp(const BinaryOperator *E) {
 
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitImplicitValueInitExpr(const ImplicitValueInitExpr *E) {
-  if (Optional<PrimType> T = classify(E))
+  if (std::optional<PrimType> T = classify(E))
     return this->emitZero(*T, E);
 
   return false;
@@ -361,13 +361,34 @@ bool ByteCodeExprGen<Emitter>::VisitConstantExpr(const ConstantExpr *E) {
   return this->visit(E->getSubExpr());
 }
 
+static CharUnits AlignOfType(QualType T, const ASTContext &ASTCtx,
+                             UnaryExprOrTypeTrait Kind) {
+  bool AlignOfReturnsPreferred =
+      ASTCtx.getLangOpts().getClangABICompat() <= LangOptions::ClangABI::Ver7;
+
+  // C++ [expr.alignof]p3:
+  //     When alignof is applied to a reference type, the result is the
+  //     alignment of the referenced type.
+  if (const auto *Ref = T->getAs<ReferenceType>())
+    T = Ref->getPointeeType();
+
+  // __alignof is defined to return the preferred alignment.
+  // Before 8, clang returned the preferred alignment for alignof and
+  // _Alignof as well.
+  if (Kind == UETT_PreferredAlignOf || AlignOfReturnsPreferred)
+    return ASTCtx.toCharUnitsFromBits(ASTCtx.getPreferredTypeAlign(T));
+
+  return ASTCtx.getTypeAlignInChars(T);
+}
+
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitUnaryExprOrTypeTraitExpr(
     const UnaryExprOrTypeTraitExpr *E) {
+  UnaryExprOrTypeTrait Kind = E->getKind();
+  ASTContext &ASTCtx = Ctx.getASTContext();
 
-  if (E->getKind() == UETT_SizeOf) {
+  if (Kind == UETT_SizeOf) {
     QualType ArgType = E->getTypeOfArgument();
-
     CharUnits Size;
     if (ArgType->isVoidType() || ArgType->isFunctionType())
       Size = CharUnits::One();
@@ -375,7 +396,37 @@ bool ByteCodeExprGen<Emitter>::VisitUnaryExprOrTypeTraitExpr(
       if (ArgType->isDependentType() || !ArgType->isConstantSizeType())
         return false;
 
-      Size = Ctx.getASTContext().getTypeSizeInChars(ArgType);
+      Size = ASTCtx.getTypeSizeInChars(ArgType);
+    }
+
+    return this->emitConst(Size.getQuantity(), E);
+  }
+
+  if (Kind == UETT_AlignOf || Kind == UETT_PreferredAlignOf) {
+    CharUnits Size;
+
+    if (E->isArgumentType()) {
+      QualType ArgType = E->getTypeOfArgument();
+
+      Size = AlignOfType(ArgType, ASTCtx, Kind);
+    } else {
+      // Argument is an expression, not a type.
+      const Expr *Arg = E->getArgumentExpr()->IgnoreParens();
+
+      // The kinds of expressions that we have special-case logic here for
+      // should be kept up to date with the special checks for those
+      // expressions in Sema.
+
+      // alignof decl is always accepted, even if it doesn't make sense: we
+      // default to 1 in those cases.
+      if (const auto *DRE = dyn_cast<DeclRefExpr>(Arg))
+        Size = ASTCtx.getDeclAlign(DRE->getDecl(),
+                                   /*RefAsPointee*/ true);
+      else if (const auto *ME = dyn_cast<MemberExpr>(Arg))
+        Size = ASTCtx.getDeclAlign(ME->getMemberDecl(),
+                                   /*RefAsPointee*/ true);
+      else
+        Size = AlignOfType(Arg->getType(), ASTCtx, Kind);
     }
 
     return this->emitConst(Size.getQuantity(), E);
@@ -474,8 +525,8 @@ bool ByteCodeExprGen<Emitter>::VisitCompoundAssignOperator(
     const CompoundAssignOperator *E) {
   const Expr *LHS = E->getLHS();
   const Expr *RHS = E->getRHS();
-  Optional<PrimType> LT = classify(E->getLHS()->getType());
-  Optional<PrimType> RT = classify(E->getRHS()->getType());
+  std::optional<PrimType> LT = classify(E->getLHS()->getType());
+  std::optional<PrimType> RT = classify(E->getRHS()->getType());
 
   if (!LT || !RT)
     return false;
@@ -539,7 +590,7 @@ bool ByteCodeExprGen<Emitter>::visit(const Expr *E) {
 
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::visitBool(const Expr *E) {
-  if (Optional<PrimType> T = classify(E->getType())) {
+  if (std::optional<PrimType> T = classify(E->getType())) {
     return visit(E);
   } else {
     return this->bail(E);
@@ -577,7 +628,7 @@ template <class Emitter>
 bool ByteCodeExprGen<Emitter>::dereference(
     const Expr *LV, DerefKind AK, llvm::function_ref<bool(PrimType)> Direct,
     llvm::function_ref<bool(PrimType)> Indirect) {
-  if (Optional<PrimType> T = classify(LV->getType())) {
+  if (std::optional<PrimType> T = classify(LV->getType())) {
     if (!LV->refersToBitField()) {
       // Only primitive, non bit-field types can be dereferenced directly.
       if (auto *DE = dyn_cast<DeclRefExpr>(LV)) {
@@ -760,7 +811,7 @@ unsigned ByteCodeExprGen<Emitter>::allocateLocalPrimitive(DeclTy &&Src,
 }
 
 template <class Emitter>
-llvm::Optional<unsigned>
+std::optional<unsigned>
 ByteCodeExprGen<Emitter>::allocateLocal(DeclTy &&Src, bool IsExtended) {
   QualType Ty;
 
@@ -801,7 +852,7 @@ bool ByteCodeExprGen<Emitter>::visitArrayInitializer(const Expr *Initializer) {
   if (const auto *InitList = dyn_cast<InitListExpr>(Initializer)) {
     unsigned ElementIndex = 0;
     for (const Expr *Init : InitList->inits()) {
-      if (Optional<PrimType> T = classify(Init->getType())) {
+      if (std::optional<PrimType> T = classify(Init->getType())) {
         // Visit the primitive element like normal.
         if (!this->emitDupPtr(Init))
           return false;
@@ -838,7 +889,7 @@ bool ByteCodeExprGen<Emitter>::visitArrayInitializer(const Expr *Initializer) {
     //   the AILE's Common expr.
     const Expr *SubExpr = AILE->getSubExpr();
     size_t Size = AILE->getArraySize().getZExtValue();
-    Optional<PrimType> ElemT = classify(SubExpr->getType());
+    std::optional<PrimType> ElemT = classify(SubExpr->getType());
 
     // So, every iteration, we execute an assignment here
     // where the LHS is on the stack (the target array)
@@ -879,7 +930,7 @@ bool ByteCodeExprGen<Emitter>::visitArrayInitializer(const Expr *Initializer) {
     const auto *CAT = cast<ConstantArrayType>(AT);
     size_t NumElems = CAT->getSize().getZExtValue();
 
-    if (Optional<PrimType> ElemT = classify(CAT->getElementType())) {
+    if (std::optional<PrimType> ElemT = classify(CAT->getElementType())) {
       // TODO(perf): For int and bool types, we can probably just skip this
       //   since we memset our Block*s to 0 and so we have the desired value
       //   without this.
@@ -893,6 +944,37 @@ bool ByteCodeExprGen<Emitter>::visitArrayInitializer(const Expr *Initializer) {
       assert(false && "default initializer for non-primitive type");
     }
 
+    return true;
+  } else if (const auto *Ctor = dyn_cast<CXXConstructExpr>(Initializer)) {
+    const ConstantArrayType *CAT =
+        Ctx.getASTContext().getAsConstantArrayType(Ctor->getType());
+    assert(CAT);
+    size_t NumElems = CAT->getSize().getZExtValue();
+    const Function *Func = getFunction(Ctor->getConstructor());
+    if (!Func || !Func->isConstexpr())
+      return false;
+
+    // FIXME(perf): We're calling the constructor once per array element here,
+    //   in the old intepreter we had a special-case for trivial constructors.
+    for (size_t I = 0; I != NumElems; ++I) {
+      if (!this->emitDupPtr(Initializer))
+        return false;
+      if (!this->emitConstUint64(I, Initializer))
+        return false;
+      if (!this->emitAddOffsetUint64(Initializer))
+        return false;
+      if (!this->emitNarrowPtr(Initializer))
+        return false;
+
+      // Constructor arguments.
+      for (const auto *Arg : Ctor->arguments()) {
+        if (!this->visit(Arg))
+          return false;
+      }
+
+      if (!this->emitCall(Func, Initializer))
+        return false;
+    }
     return true;
   }
 
@@ -933,7 +1015,7 @@ bool ByteCodeExprGen<Emitter>::visitRecordInitializer(const Expr *Initializer) {
       if (!this->emitDupPtr(Initializer))
         return false;
 
-      if (Optional<PrimType> T = classify(Init)) {
+      if (std::optional<PrimType> T = classify(Init)) {
         if (!this->visit(Init))
           return false;
 
@@ -1019,8 +1101,13 @@ template <class Emitter>
 const Function *ByteCodeExprGen<Emitter>::getFunction(const FunctionDecl *FD) {
   assert(FD);
   const Function *Func = P.getFunction(FD);
+  bool IsBeingCompiled = Func && !Func->isFullyCompiled();
+  bool WasNotDefined = Func && !Func->hasBody();
 
-  if (!Func) {
+  if (IsBeingCompiled)
+    return Func;
+
+  if (!Func || WasNotDefined) {
     if (auto R = ByteCodeStmtGen<ByteCodeEmitter>(Ctx, P).compileFunc(FD))
       Func = *R;
     else {
@@ -1038,7 +1125,7 @@ bool ByteCodeExprGen<Emitter>::visitExpr(const Expr *Exp) {
   if (!visit(Exp))
     return false;
 
-  if (Optional<PrimType> T = classify(Exp))
+  if (std::optional<PrimType> T = classify(Exp))
     return this->emitRet(*T, Exp);
   else
     return this->emitRetValue(Exp);
@@ -1048,8 +1135,8 @@ template <class Emitter>
 bool ByteCodeExprGen<Emitter>::visitDecl(const VarDecl *VD) {
   const Expr *Init = VD->getInit();
 
-  if (Optional<unsigned> I = P.createGlobal(VD, Init)) {
-    if (Optional<PrimType> T = classify(VD->getType())) {
+  if (std::optional<unsigned> I = P.createGlobal(VD, Init)) {
+    if (std::optional<PrimType> T = classify(VD->getType())) {
       {
         // Primitive declarations - compute the value and set it.
         DeclScope<Emitter> LocalScope(this, VD);
@@ -1098,6 +1185,19 @@ bool ByteCodeExprGen<Emitter>::VisitCallExpr(const CallExpr *E) {
     if (Func->isFullyCompiled() && !Func->isConstexpr())
       return false;
 
+    QualType ReturnType = E->getCallReturnType(Ctx.getASTContext());
+    std::optional<PrimType> T = classify(ReturnType);
+
+    if (Func->hasRVO() && DiscardResult) {
+      // If we need to discard the return value but the function returns its
+      // value via an RVO pointer, we need to create one such pointer just
+      // for this call.
+      if (std::optional<unsigned> LocalIndex = allocateLocal(E)) {
+        if (!this->emitGetPtrLocal(*LocalIndex, E))
+          return false;
+      }
+    }
+
     // Put arguments on the stack.
     for (const auto *Arg : E->arguments()) {
       if (!this->visit(Arg))
@@ -1110,13 +1210,8 @@ bool ByteCodeExprGen<Emitter>::VisitCallExpr(const CallExpr *E) {
     if (!this->emitCall(Func, E))
       return false;
 
-    QualType ReturnType = E->getCallReturnType(Ctx.getASTContext());
-    if (DiscardResult && !ReturnType->isVoidType()) {
-      Optional<PrimType> T = classify(ReturnType);
-      if (T)
-        return this->emitPop(*T, E);
-      // TODO: This is a RVO function and we need to ignore the return value.
-    }
+    if (DiscardResult && !ReturnType->isVoidType() && T)
+      return this->emitPop(*T, E);
 
     return true;
   } else {
@@ -1176,7 +1271,7 @@ bool ByteCodeExprGen<Emitter>::VisitCXXThisExpr(const CXXThisExpr *E) {
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitUnaryOperator(const UnaryOperator *E) {
   const Expr *SubExpr = E->getSubExpr();
-  Optional<PrimType> T = classify(SubExpr->getType());
+  std::optional<PrimType> T = classify(SubExpr->getType());
 
   // TODO: Support pointers for inc/dec operators.
   switch (E->getOpcode()) {

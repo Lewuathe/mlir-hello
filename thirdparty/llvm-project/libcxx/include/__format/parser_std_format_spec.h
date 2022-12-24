@@ -52,12 +52,12 @@ __parse_arg_id(const _CharT* __begin, const _CharT* __end, auto& __parse_ctx) {
   // This function is a wrapper to call the real parser. But it does the
   // validation for the pre-conditions and post-conditions.
   if (__begin == __end)
-    __throw_format_error("End of input while parsing format-spec arg-id");
+    std::__throw_format_error("End of input while parsing format-spec arg-id");
 
   __format::__parse_number_result __r = __format::__parse_arg_id(__begin, __end, __parse_ctx);
 
   if (__r.__ptr == __end || *__r.__ptr != _CharT('}'))
-    __throw_format_error("Invalid arg-id");
+    std::__throw_format_error("Invalid arg-id");
 
   ++__r.__ptr;
   return __r;
@@ -66,28 +66,33 @@ __parse_arg_id(const _CharT* __begin, const _CharT* __end, auto& __parse_ctx) {
 template <class _Context>
 _LIBCPP_HIDE_FROM_ABI constexpr uint32_t
 __substitute_arg_id(basic_format_arg<_Context> __format_arg) {
-  return visit_format_arg(
+  // [format.string.std]/8
+  //   If the corresponding formatting argument is not of integral type...
+  // This wording allows char and bool too. LWG-3720 changes the wording to
+  //    If the corresponding formatting argument is not of standard signed or
+  //    unsigned integer type,
+  // This means the 128-bit will not be valid anymore.
+  // TODO FMT Verify this resolution is accepted and add a test to verify
+  //          128-bit integrals fail and switch to visit_format_arg.
+  return _VSTD::__visit_format_arg(
       [](auto __arg) -> uint32_t {
         using _Type = decltype(__arg);
         if constexpr (integral<_Type>) {
           if constexpr (signed_integral<_Type>) {
             if (__arg < 0)
-              __throw_format_error("A format-spec arg-id replacement shouldn't "
-                                   "have a negative value");
+              std::__throw_format_error("A format-spec arg-id replacement shouldn't have a negative value");
           }
 
           using _CT = common_type_t<_Type, decltype(__format::__number_max)>;
           if (static_cast<_CT>(__arg) >
               static_cast<_CT>(__format::__number_max))
-            __throw_format_error("A format-spec arg-id replacement exceeds "
-                                 "the maximum supported value");
+            std::__throw_format_error("A format-spec arg-id replacement exceeds the maximum supported value");
 
           return __arg;
         } else if constexpr (same_as<_Type, monostate>)
-          __throw_format_error("Argument index out of bounds");
+          std::__throw_format_error("Argument index out of bounds");
         else
-          __throw_format_error("A format-spec arg-id replacement argument "
-                               "isn't an integral type");
+          std::__throw_format_error("A format-spec arg-id replacement argument isn't an integral type");
       },
       __format_arg);
 }
@@ -96,6 +101,7 @@ __substitute_arg_id(basic_format_arg<_Context> __format_arg) {
 ///
 /// They default to false so when a new field is added it needs to be opted in
 /// explicitly.
+// TODO FMT Use an ABI tag for this struct.
 struct __fields {
   uint8_t __sign_ : 1 {false};
   uint8_t __alternate_form_ : 1 {false};
@@ -103,6 +109,13 @@ struct __fields {
   uint8_t __precision_ : 1 {false};
   uint8_t __locale_specific_form_ : 1 {false};
   uint8_t __type_ : 1 {false};
+  // Determines the valid values for fill.
+  //
+  // Originally the fill could be any character except { and }. Range-based
+  // formatters use the colon to mark the beginning of the
+  // underlying-format-spec. To avoid parsing ambiguities these formatter
+  // specializations prohibit the use of the colon as a fill character.
+  uint8_t __allow_colon_in_fill_ : 1 {false};
 };
 
 // By not placing this constant in the formatter class it's not duplicated for
@@ -122,6 +135,10 @@ inline constexpr __fields __fields_floating_point{
     .__type_                 = true};
 inline constexpr __fields __fields_string{.__precision_ = true, .__type_ = true};
 inline constexpr __fields __fields_pointer{.__type_ = true};
+
+#  if _LIBCPP_STD_VER > 20
+inline constexpr __fields __fields_tuple{.__type_ = false, .__allow_colon_in_fill_ = true};
+#  endif
 
 enum class _LIBCPP_ENUM_VIS __alignment : uint8_t {
   /// No alignment is set in the format string.
@@ -251,7 +268,7 @@ public:
     if (__begin == __end)
       return __begin;
 
-    if (__parse_fill_align(__begin, __end) && __begin == __end)
+    if (__parse_fill_align(__begin, __end, __fields.__allow_colon_in_fill_) && __begin == __end)
       return __begin;
 
     if (__fields.__sign_ && __parse_sign(__begin) && __begin == __end)
@@ -279,7 +296,7 @@ public:
       // parsing. In that case that parser should do the end of format string
       // validation.
       if (__begin != __end && *__begin != _CharT('}'))
-        __throw_format_error("The format-spec should consume the input or end with a '}'");
+        std::__throw_format_error("The format-spec should consume the input or end with a '}'");
     }
 
     return __begin;
@@ -359,13 +376,17 @@ private:
     return false;
   }
 
-  _LIBCPP_HIDE_FROM_ABI constexpr bool __parse_fill_align(const _CharT*& __begin, const _CharT* __end) {
+  // range-fill and tuple-fill are identical
+  _LIBCPP_HIDE_FROM_ABI constexpr bool
+  __parse_fill_align(const _CharT*& __begin, const _CharT* __end, bool __use_range_fill) {
     _LIBCPP_ASSERT(__begin != __end, "when called with an empty input the function will cause "
                                      "undefined behavior by evaluating data not in the input");
     if (__begin + 1 != __end) {
       if (__parse_alignment(*(__begin + 1))) {
-        if (*__begin == _CharT('{') || *__begin == _CharT('}'))
-          __throw_format_error("The format-spec fill field contains an invalid character");
+        if (__use_range_fill && (*__begin == _CharT('{') || *__begin == _CharT('}') || *__begin == _CharT(':')))
+          std::__throw_format_error("The format-spec range-fill field contains an invalid character");
+        else if (*__begin == _CharT('{') || *__begin == _CharT('}'))
+          std::__throw_format_error("The format-spec fill field contains an invalid character");
 
         __fill_ = *__begin;
         __begin += 2;
@@ -419,7 +440,7 @@ private:
 
   _LIBCPP_HIDE_FROM_ABI constexpr bool __parse_width(const _CharT*& __begin, const _CharT* __end, auto& __parse_ctx) {
     if (*__begin == _CharT('0'))
-      __throw_format_error("A format-spec width field shouldn't have a leading zero");
+      std::__throw_format_error("A format-spec width field shouldn't have a leading zero");
 
     if (*__begin == _CharT('{')) {
       __format::__parse_number_result __r = __format_spec::__parse_arg_id(++__begin, __end, __parse_ctx);
@@ -447,7 +468,7 @@ private:
 
     ++__begin;
     if (__begin == __end)
-      __throw_format_error("End of input while parsing format-spec precision");
+      std::__throw_format_error("End of input while parsing format-spec precision");
 
     if (*__begin == _CharT('{')) {
       __format::__parse_number_result __arg_id = __format_spec::__parse_arg_id(++__begin, __end, __parse_ctx);
@@ -458,7 +479,7 @@ private:
     }
 
     if (*__begin < _CharT('0') || *__begin > _CharT('9'))
-      __throw_format_error("The format-spec precision field doesn't contain a value or arg-id");
+      std::__throw_format_error("The format-spec precision field doesn't contain a value or arg-id");
 
     __format::__parse_number_result __r = __format::__parse_number(__begin, __end);
     __precision_ = __r.__value;
@@ -870,7 +891,7 @@ _LIBCPP_HIDE_FROM_ABI constexpr __column_width_result<_CharT> __estimate_column_
   // unit is non-ASCII we omit the current code unit and let the Grapheme
   // clustering algorithm do its work.
   const _CharT* __it = __str.begin();
-  if (__is_ascii(*__it)) {
+  if (__format_spec::__is_ascii(*__it)) {
     do {
       --__maximum;
       ++__it;
@@ -878,12 +899,12 @@ _LIBCPP_HIDE_FROM_ABI constexpr __column_width_result<_CharT> __estimate_column_
         return {__str.size(), __str.end()};
 
       if (__maximum == 0) {
-        if (__is_ascii(*__it))
+        if (__format_spec::__is_ascii(*__it))
           return {static_cast<size_t>(__it - __str.begin()), __it};
 
         break;
       }
-    } while (__is_ascii(*__it));
+    } while (__format_spec::__is_ascii(*__it));
     --__it;
     ++__maximum;
   }

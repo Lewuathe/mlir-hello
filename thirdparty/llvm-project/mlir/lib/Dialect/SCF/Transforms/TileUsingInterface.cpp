@@ -18,6 +18,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/Utils/Utils.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/IndexingUtils.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/DestinationStyleOpInterface.h"
@@ -59,47 +60,19 @@ fillInterchangeVector(ArrayRef<int64_t> interchangeVector,
   return filledVector;
 }
 
-/// Helper method to apply permutation to a vector
-template <typename T>
-static SmallVector<T> applyPermutationToVector(const SmallVector<T> &vector,
-                                               ArrayRef<int64_t> interchange) {
-  assert(interchange.size() == vector.size());
-  return llvm::to_vector(
-      llvm::map_range(interchange, [&](int64_t val) { return vector[val]; }));
-}
-/// Helper method to apply to invert a permutation.
-static SmallVector<int64_t>
-invertPermutationVector(ArrayRef<int64_t> interchange) {
-  SmallVector<int64_t> inversion(interchange.size());
-  for (const auto &pos : llvm::enumerate(interchange)) {
-    inversion[pos.value()] = pos.index();
-  }
-  return inversion;
-}
-/// Method to check if an interchange vector is a permutation.
-static bool isPermutation(ArrayRef<int64_t> interchange) {
-  llvm::SmallDenseSet<int64_t, 4> seenVals;
-  for (auto val : interchange) {
-    if (seenVals.count(val))
-      return false;
-    seenVals.insert(val);
-  }
-  return seenVals.size() == interchange.size();
-}
-
 //===----------------------------------------------------------------------===//
 // tileUsingSCFForOp implementation.
 //===----------------------------------------------------------------------===//
 
 // Check if `stride` evenly divides the trip count `size - offset`.
 static bool tileDividesIterationDomain(Range loopRange) {
-  Optional<int64_t> offsetAsInt = getConstantIntValue(loopRange.offset);
+  std::optional<int64_t> offsetAsInt = getConstantIntValue(loopRange.offset);
   if (!offsetAsInt)
     return false;
-  Optional<int64_t> sizeAsInt = getConstantIntValue(loopRange.size);
+  std::optional<int64_t> sizeAsInt = getConstantIntValue(loopRange.size);
   if (!sizeAsInt)
     return false;
-  Optional<int64_t> strideAsInt = getConstantIntValue(loopRange.stride);
+  std::optional<int64_t> strideAsInt = getConstantIntValue(loopRange.stride);
   if (!strideAsInt)
     return false;
   return ((sizeAsInt.value() - offsetAsInt.value()) % strideAsInt.value() == 0);
@@ -110,7 +83,7 @@ static bool tileDividesIterationDomain(Range loopRange) {
 static OpFoldResult getBoundedTileSize(OpBuilder &b, Location loc,
                                        Range loopRange, Value iv,
                                        Value tileSize) {
-  Optional<int64_t> ts = getConstantIntValue(tileSize);
+  std::optional<int64_t> ts = getConstantIntValue(tileSize);
   if (ts && ts.value() == 1)
     return getAsOpFoldResult(tileSize);
 
@@ -321,16 +294,14 @@ mlir::scf::tileUsingSCFForOp(RewriterBase &rewriter, TilingInterface op,
                                                 iterationDomain.size());
     }
     if (!interchangeVector.empty()) {
-      if (!isPermutation(interchangeVector)) {
+      if (!isPermutationVector(interchangeVector)) {
         return rewriter.notifyMatchFailure(
             op, "invalid intechange vector, not a permutation of the entire "
                 "iteration space");
       }
 
-      iterationDomain =
-          applyPermutationToVector(iterationDomain, interchangeVector);
-      tileSizeVector =
-          applyPermutationToVector(tileSizeVector, interchangeVector);
+      applyPermutationToVector(iterationDomain, interchangeVector);
+      applyPermutationToVector(tileSizeVector, interchangeVector);
     }
 
     // 3. Materialize an empty loop nest that iterates over the tiles. These
@@ -341,8 +312,8 @@ mlir::scf::tileUsingSCFForOp(RewriterBase &rewriter, TilingInterface op,
 
     if (!interchangeVector.empty()) {
       auto inversePermutation = invertPermutationVector(interchangeVector);
-      offsets = applyPermutationToVector(offsets, inversePermutation);
-      sizes = applyPermutationToVector(sizes, inversePermutation);
+      applyPermutationToVector(offsets, inversePermutation);
+      applyPermutationToVector(sizes, inversePermutation);
     }
   }
 
@@ -408,7 +379,7 @@ mlir::scf::tileUsingSCFForOp(RewriterBase &rewriter, TilingInterface op,
                                         innerMostLoop.getRegionIterArgs());
   }
 
-  tilingResult.replacements = replacementOr.value();
+  tilingResult.replacements = *replacementOr;
 
   LLVM_DEBUG({
     if (!tilingResult.loops.empty()) {
@@ -467,9 +438,8 @@ mlir::scf::tileReductionUsingScf(PatternRewriter &b,
 
   // 3. Generate the tiled implementation within the inner most loop.
   b.setInsertionPoint(loops.back().getBody()->getTerminator());
-  Operation *parallelOp =
-      op.tileToPartialReduction(b, loc, identityTensor.value()->getResults(),
-                                offsets, sizes, reductionDim);
+  Operation *parallelOp = op.tileToPartialReduction(
+      b, loc, (*identityTensor)->getResults(), offsets, sizes, reductionDim);
 
   SmallVector<OpFoldResult> resultSizesList;
   for (size_t i = 0; i < offsets.size(); i++)
@@ -477,8 +447,8 @@ mlir::scf::tileReductionUsingScf(PatternRewriter &b,
         b.createOrFold<tensor::DimOp>(loc, parallelOp->getResult(0), i));
   SmallVector<OpFoldResult> outOffsets(offsets.size(), b.getIndexAttr(0));
   FailureOr<SmallVector<Value>> replacementOr = yieldTiledValues(
-      b, identityTensor.value()->getResults(), parallelOp->getResults(),
-      outOffsets, resultSizesList, loops);
+      b, (*identityTensor)->getResults(), parallelOp->getResults(), outOffsets,
+      resultSizesList, loops);
   if (failed(replacementOr))
     return b.notifyMatchFailure(op, "failed to yield replacement");
 
@@ -493,12 +463,11 @@ mlir::scf::tileReductionUsingScf(PatternRewriter &b,
 
   // 4. Apply the merge reduction to combine all the partial values.
   b.setInsertionPointAfter(*loops.begin());
-  Operation *mergeOp =
-      op.mergeReductions(b, loc, replacementOr.value(), reductionDim);
+  Operation *mergeOp = op.mergeReductions(b, loc, *replacementOr, reductionDim);
   b.replaceOp(op, mergeOp->getResults());
 
   SCFReductionTilingResult results;
-  results.initialOp = identityTensor.value();
+  results.initialOp = *identityTensor;
   results.loops = std::move(loops);
   results.parallelTiledOp = parallelOp;
   results.mergeOp = mergeOp;
@@ -513,10 +482,10 @@ mlir::scf::tileReductionUsingScf(PatternRewriter &b,
 /// `iter_args` of the outer most that is encountered. Traversing the iter_args
 /// indicates that this is a destination operand of the consumer. If there was
 /// no loop traversal needed, the second value of the returned tuple is empty.
-static std::tuple<OpResult, Optional<OpOperand *>>
+static std::tuple<OpResult, std::optional<OpOperand *>>
 getUntiledProducerFromSliceSource(OpOperand *source,
                                   ArrayRef<scf::ForOp> loops) {
-  Optional<OpOperand *> destinationIterArg;
+  std::optional<OpOperand *> destinationIterArg;
   auto loopIt = loops.rbegin();
   while (auto iterArg = source->get().dyn_cast<BlockArgument>()) {
     scf::ForOp loop = *loopIt;
@@ -550,7 +519,7 @@ mlir::scf::tileConsumerAndFuseProducerGreedilyUsingSCFForOp(
         tileUsingSCFForOp(rewriter, consumer, options.tilingOptions);
     if (failed(tilingResult))
       return rewriter.notifyMatchFailure(consumer, "failed to tile consumer");
-    for (auto tiledOp : tilingResult->tiledOps)
+    for (auto *tiledOp : tilingResult->tiledOps)
       tileAndFuseResult.tiledAndFusedOps.insert(tiledOp);
     tileAndFuseResult.loops = std::move(tilingResult->loops);
     for (const auto &result : llvm::enumerate(
@@ -603,7 +572,7 @@ mlir::scf::tileConsumerAndFuseProducerGreedilyUsingSCFForOp(
                                                      fusableProducer);
     if (failed(fusedProducerValue))
       continue;
-    rewriter.replaceOp(candidateSliceOp, fusedProducerValue.value());
+    rewriter.replaceOp(candidateSliceOp, *fusedProducerValue);
 
     // 2d. The operands of the fused producer might themselved be slices of
     //     values produced by operations that implement the `TilingInterface`.
@@ -662,7 +631,7 @@ mlir::scf::tileConsumerAndFuseProducerGreedilyUsingSCFForOp(
     // TODO: This can be modeled better if the `DestinationStyleOpInterface`.
     // Update to use that when it does become available.
     scf::ForOp outerMostLoop = tileAndFuseResult.loops.front();
-    Optional<unsigned> iterArgNumber;
+    std::optional<unsigned> iterArgNumber;
     if (destinationIterArg) {
       iterArgNumber = outerMostLoop.getIterArgNumberForOpOperand(
           *destinationIterArg.value());
@@ -675,8 +644,8 @@ mlir::scf::tileConsumerAndFuseProducerGreedilyUsingSCFForOp(
             iterArgNumber.value(),
             dstOp.getTiedOpOperand(fusableProducer)->get());
       }
-      if (auto dstOp = fusedProducerValue.value()
-                           .getDefiningOp<DestinationStyleOpInterface>()) {
+      if (auto dstOp = fusedProducerValue
+                           ->getDefiningOp<DestinationStyleOpInterface>()) {
         scf::ForOp innerMostLoop = tileAndFuseResult.loops.back();
         updateDestinationOperandsForTiledOp(
             rewriter, dstOp.getDpsInitOperand(resultNumber)->get(),

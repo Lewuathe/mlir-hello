@@ -3191,6 +3191,18 @@ the function signature. For example:
     fmt(fmt, "hello", 123); // warning: format string is not a string literal
   }
 
+When using the format attribute on a variadic function, the first data parameter
+_must_ be the index of the ellipsis in the parameter list. Clang will generate
+a diagnostic otherwise, as it wouldn't be possible to forward that argument list
+to `printf`-family functions. For instance, this is an error:
+
+.. code-block:: c
+
+  __attribute__((__format__(__printf__, 1, 2)))
+  void fmt(const char *s, int b, ...);
+  // ^ error: format attribute parameter 3 is out of bounds
+  // (must be __printf__, 1, 3)
+
 Using the ``format`` attribute on a non-variadic function emits a GCC
 compatibility diagnostic.
   }];
@@ -5768,7 +5780,7 @@ by showing the control-flow statement where the path diverges.
     if (somePredicate()) {
       ...
       callback();
-    } esle {
+    } else {
       callback(); // OK: callback is called on every path
     }
   }
@@ -6768,5 +6780,44 @@ The symbol used for ``thunk-extern`` is target specific:
 * X86: ``__x86_return_thunk``
 
 As such, this function attribute is currently only supported on X86 targets.
+  }];
+}
+
+def ReadOnlyPlacementDocs : Documentation {
+  let Category = DocCatType;
+  let Content = [{This attribute is attached to a structure, class or union declaration.
+  When attached to a record declaration/definition, it checks if all instances
+  of this type can be placed in the read-only data segment of the program. If it
+  finds an instance that can not be placed in a read-only segment, the compiler
+  emits a warning at the source location where the type was used.
+
+  Examples:
+  * ``struct __attribute__((enforce_read_only_placement)) Foo;``
+  * ``struct __attribute__((enforce_read_only_placement)) Bar { ... };``
+
+  Both ``Foo`` and ``Bar`` types have the ``enforce_read_only_placement`` attribute.
+
+  The goal of introducing this attribute is to assist developers with writing secure
+  code. A ``const``-qualified global is generally placed in the read-only section
+  of the memory that has additional run time protection from malicious writes. By
+  attaching this attribute to a declaration, the developer can express the intent
+  to place all instances of the annotated type in the read-only program memory.
+
+  Note 1: The attribute doesn't guarantee that the object will be placed in the
+  read-only data segment as it does not instruct the compiler to ensure such
+  a placement. It emits a warning if something in the code can be proven to prevent
+  an instance from being placed in the read-only data segment.
+
+  Note 2: Currently, clang only checks if all global declarations of a given type 'T'
+  are ``const``-qualified. The following conditions would also prevent the data to be
+  put into read only segment, but the corresponding warnings are not yet implemented.
+
+  1. An instance of type ``T`` is allocated on the heap/stack.
+  2. Type ``T`` defines/inherits a mutable field.
+  3. Type ``T`` defines/inherits non-constexpr constructor(s) for initialization.
+  4. A field of type ``T`` is defined by type ``Q``, which does not bear the
+     ``enforce_read_only_placement`` attribute.
+  5. A type ``Q`` inherits from type ``T`` and it does not have the
+     ``enforce_read_only_placement`` attribute.
   }];
 }

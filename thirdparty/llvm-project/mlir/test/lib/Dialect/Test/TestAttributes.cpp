@@ -101,7 +101,7 @@ TestI64ElementsAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 LogicalResult
 TestAttrWithFormatAttr::verify(function_ref<InFlightDiagnostic()> emitError,
                                int64_t one, std::string two, IntegerAttr three,
-                               ArrayRef<int> four,
+                               ArrayRef<int> four, uint64_t five,
                                ArrayRef<AttrWithTypeBuilderAttr> arrayOfAttrs) {
   if (four.size() != static_cast<unsigned>(one))
     return emitError() << "expected 'one' to equal 'four.size()'";
@@ -157,7 +157,7 @@ void TestSubElementsAccessAttr::print(::mlir::AsmPrinter &printer) const {
 ArrayRef<uint64_t> TestExtern1DI64ElementsAttr::getElements() const {
   if (auto *blob = getHandle().getBlob())
     return blob->getDataAs<uint64_t>();
-  return llvm::None;
+  return std::nullopt;
 }
 
 //===----------------------------------------------------------------------===//
@@ -165,15 +165,15 @@ ArrayRef<uint64_t> TestExtern1DI64ElementsAttr::getElements() const {
 //===----------------------------------------------------------------------===//
 
 static ParseResult parseTrueFalse(AsmParser &p,
-                                  FailureOr<Optional<int>> &result) {
+                                  FailureOr<std::optional<int>> &result) {
   bool b;
   if (p.parseInteger(b))
     return failure();
-  result = Optional<int>(b);
+  result = std::optional<int>(b);
   return success();
 }
 
-static void printTrueFalse(AsmPrinter &p, Optional<int> result) {
+static void printTrueFalse(AsmPrinter &p, std::optional<int> result) {
   p << (*result ? "true" : "false");
 }
 
