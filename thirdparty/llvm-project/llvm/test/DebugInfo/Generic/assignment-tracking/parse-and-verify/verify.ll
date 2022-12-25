@@ -1,10 +1,17 @@
-; RUN: opt %s -S -verify -experimental-assignment-tracking 2>&1 \
+; RUN: opt %s -S -passes=verify -experimental-assignment-tracking 2>&1 \
 ; RUN: | FileCheck %s
 
 ;; Check that badly formed assignment tracking metadata is caught either
 ;; while parsing or by the verifier.
 ;;
 ;; Checks for this one are inline.
+
+define dso_local void @fun2() !dbg !15 {
+  ;; DIAssignID copied here from @fun() where it is used by intrinsics.
+  ; CHECK: dbg.assign not in same function as inst
+  %x = alloca i32, align 4, !DIAssignID !14
+  ret void
+}
 
 define dso_local void @fun() !dbg !7 {
 entry:
@@ -15,17 +22,17 @@ entry:
 
   ;; Each following dbg.assign has an argument of the incorrect type.
   ; CHECK: invalid llvm.dbg.assign intrinsic address/value
-  call void @llvm.dbg.assign(metadata !3, metadata !10, metadata !DIExpression(), metadata !14, metadata i32* undef, metadata !DIExpression()), !dbg !13
+  call void @llvm.dbg.assign(metadata !3, metadata !10, metadata !DIExpression(), metadata !14, metadata ptr undef, metadata !DIExpression()), !dbg !13
   ; CHECK: invalid llvm.dbg.assign intrinsic variable
-  call void @llvm.dbg.assign(metadata i32 0, metadata !2, metadata !DIExpression(), metadata !14, metadata i32* undef, metadata !DIExpression()), !dbg !13
+  call void @llvm.dbg.assign(metadata i32 0, metadata !2, metadata !DIExpression(), metadata !14, metadata ptr undef, metadata !DIExpression()), !dbg !13
   ; CHECK: invalid llvm.dbg.assign intrinsic expression
-  call void @llvm.dbg.assign(metadata !14, metadata !10, metadata !2, metadata !14, metadata i32* undef, metadata !DIExpression()), !dbg !13
+  call void @llvm.dbg.assign(metadata !14, metadata !10, metadata !2, metadata !14, metadata ptr undef, metadata !DIExpression()), !dbg !13
   ; CHECK: invalid llvm.dbg.assign intrinsic DIAssignID
-  call void @llvm.dbg.assign(metadata !14, metadata !10, metadata !DIExpression(), metadata !2, metadata i32* undef, metadata !DIExpression()), !dbg !13
+  call void @llvm.dbg.assign(metadata !14, metadata !10, metadata !DIExpression(), metadata !2, metadata ptr undef, metadata !DIExpression()), !dbg !13
   ; CHECK: invalid llvm.dbg.assign intrinsic address
   call void @llvm.dbg.assign(metadata !14, metadata !10, metadata !DIExpression(), metadata !14, metadata !3, metadata !DIExpression()), !dbg !13
   ; CHECK: invalid llvm.dbg.assign intrinsic address expression
-  call void @llvm.dbg.assign(metadata !14, metadata !10, metadata !DIExpression(), metadata !14, metadata i32* undef, metadata !2), !dbg !13
+  call void @llvm.dbg.assign(metadata !14, metadata !10, metadata !DIExpression(), metadata !14, metadata ptr undef, metadata !2), !dbg !13
   ret void
 }
 
@@ -50,3 +57,4 @@ declare void @llvm.dbg.assign(metadata, metadata, metadata, metadata, metadata, 
 !11 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
 !13 = !DILocation(line: 1, column: 1, scope: !7)
 !14 = distinct !DIAssignID()
+!15 = distinct !DISubprogram(name: "fun2", scope: !1, file: !1, line: 1, type: !8, scopeLine: 1, spFlags: DISPFlagDefinition, unit: !0, retainedNodes: !2)

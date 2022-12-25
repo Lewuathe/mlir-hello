@@ -202,6 +202,12 @@ exception cstdlib
 exception type_traits
 exception version
 execution version
+expected cstddef
+expected cstdlib
+expected exception
+expected initializer_list
+expected new
+expected version
 experimental/algorithm algorithm
 experimental/algorithm cstddef
 experimental/algorithm type_traits
@@ -347,6 +353,7 @@ format optional
 format stdexcept
 format string
 format string_view
+format tuple
 format type_traits
 format version
 forward_list algorithm

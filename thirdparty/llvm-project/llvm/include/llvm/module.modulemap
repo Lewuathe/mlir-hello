@@ -286,6 +286,7 @@ module LLVM_intrinsic_gen {
   module IR_PatternMatch { header "IR/PatternMatch.h" export * }
   module IR_SafepointIRVerifier { header "IR/SafepointIRVerifier.h" export * }
   module IR_Statepoint { header "IR/Statepoint.h" export * }
+  module IR_DebugInfo { header "IR/DebugInfo.h" export * }
 
   export *
 }
@@ -411,14 +412,23 @@ module LLVM_Utils {
     // Exclude these; they are fundamentally non-modular.
     exclude header "Support/PluginLoader.h"
     exclude header "Support/Solaris/sys/regset.h"
+    textual header "Support/TargetOpcodes.def"
+
+  }
+
+  module TargetParser {
+    requires cplusplus
+
+    umbrella "TargetParser"
+    module * { export * }
 
     // These are intended for textual inclusion.
-    textual header "Support/AArch64TargetParser.def"
-    textual header "Support/ARMTargetParser.def"
-    textual header "Support/CSKYTargetParser.def"
-    textual header "Support/RISCVTargetParser.def"
-    textual header "Support/TargetOpcodes.def"
-    textual header "Support/X86TargetParser.def"
+    textual header "TargetParser/AArch64TargetParser.def"
+    textual header "TargetParser/ARMTargetParser.def"
+    textual header "TargetParser/CSKYTargetParser.def"
+    textual header "TargetParser/RISCVTargetParser.def"
+    textual header "TargetParser/X86TargetParser.def"
+    textual header "TargetParser/LoongArchTargetParser.def"
   }
 
   // This part of the module is usable from both C and C++ code.

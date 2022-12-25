@@ -53,7 +53,7 @@ static const SanitizerMask SupportsCoverage =
     SanitizerKind::DataFlow | SanitizerKind::Fuzzer |
     SanitizerKind::FuzzerNoLink | SanitizerKind::FloatDivideByZero |
     SanitizerKind::SafeStack | SanitizerKind::ShadowCallStack |
-    SanitizerKind::Thread | SanitizerKind::ObjCCast;
+    SanitizerKind::Thread | SanitizerKind::ObjCCast | SanitizerKind::KCFI;
 static const SanitizerMask RecoverableByDefault =
     SanitizerKind::Undefined | SanitizerKind::Integer |
     SanitizerKind::ImplicitConversion | SanitizerKind::Nullability |
@@ -104,6 +104,7 @@ enum CoverageFeature {
 enum BinaryMetadataFeature {
   BinaryMetadataCovered = 1 << 0,
   BinaryMetadataAtomics = 1 << 1,
+  BinaryMetadataUAR = 1 << 2,
 };
 
 /// Parse a -fsanitize= or -fno-sanitize= argument's values, diagnosing any
@@ -249,7 +250,7 @@ static SanitizerMask parseSanitizeTrapArgs(const Driver &D,
         SanitizerSet S;
         S.Mask = InvalidValues;
         D.Diag(diag::err_drv_unsupported_option_argument)
-            << Arg->getOption().getName() << toString(S);
+            << Arg->getSpelling() << toString(S);
       }
       TrappingKinds |= expandSanitizerGroups(Add) & ~TrapRemove;
     } else if (Arg->getOption().matches(options::OPT_fno_sanitize_trap_EQ)) {
@@ -604,7 +605,7 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
         SetToDiagnose.Mask |= KindsToDiagnose;
         if (DiagnoseErrors)
           D.Diag(diag::err_drv_unsupported_option_argument)
-              << Arg->getOption().getName() << toString(SetToDiagnose);
+              << Arg->getSpelling() << toString(SetToDiagnose);
         DiagnosedUnrecoverableKinds |= KindsToDiagnose;
       }
       RecoverableKinds |= expandSanitizerGroups(Add);
@@ -619,7 +620,7 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
         SetToDiagnose.Mask |= KindsToDiagnose;
         if (DiagnoseErrors)
           D.Diag(diag::err_drv_unsupported_option_argument)
-              << Arg->getOption().getName() << toString(SetToDiagnose);
+              << Arg->getSpelling() << toString(SetToDiagnose);
         DiagnosedAlwaysRecoverableKinds |= KindsToDiagnose;
       }
       RecoverableKinds &= ~expandSanitizerGroups(Remove);
@@ -951,7 +952,7 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
       auto parsedAsanDtorKind = AsanDtorKindFromString(Arg->getValue());
       if (parsedAsanDtorKind == llvm::AsanDtorKind::Invalid && DiagnoseErrors) {
         TC.getDriver().Diag(clang::diag::err_drv_unsupported_option_argument)
-            << Arg->getOption().getName() << Arg->getValue();
+            << Arg->getSpelling() << Arg->getValue();
       }
       AsanDtorKind = parsedAsanDtorKind;
     }
@@ -964,7 +965,7 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
               llvm::AsanDetectStackUseAfterReturnMode::Invalid &&
           DiagnoseErrors) {
         TC.getDriver().Diag(clang::diag::err_drv_unsupported_option_argument)
-            << Arg->getOption().getName() << Arg->getValue();
+            << Arg->getSpelling() << Arg->getValue();
       }
       AsanUseAfterReturn = parsedAsanUseAfterReturn;
     }
@@ -1133,7 +1134,8 @@ void SanitizerArgs::addArgs(const ToolChain &TC, const llvm::opt::ArgList &Args,
   // flags. Does not depend on any other sanitizers.
   const std::pair<int, std::string> BinaryMetadataFlags[] = {
       std::make_pair(BinaryMetadataCovered, "covered"),
-      std::make_pair(BinaryMetadataAtomics, "atomics")};
+      std::make_pair(BinaryMetadataAtomics, "atomics"),
+      std::make_pair(BinaryMetadataUAR, "uar")};
   for (const auto &F : BinaryMetadataFlags) {
     if (BinaryMetadataFeatures & F.first)
       CmdArgs.push_back(
@@ -1346,7 +1348,7 @@ SanitizerMask parseArgValues(const Driver &D, const llvm::opt::Arg *A,
       Kinds |= Kind;
     else if (DiagnoseErrors)
       D.Diag(clang::diag::err_drv_unsupported_option_argument)
-          << A->getOption().getName() << Value;
+          << A->getSpelling() << Value;
   }
   return Kinds;
 }
@@ -1381,7 +1383,7 @@ int parseCoverageFeatures(const Driver &D, const llvm::opt::Arg *A,
                 .Default(0);
     if (F == 0 && DiagnoseErrors)
       D.Diag(clang::diag::err_drv_unsupported_option_argument)
-          << A->getOption().getName() << Value;
+          << A->getSpelling() << Value;
     Features |= F;
   }
   return Features;
@@ -1399,11 +1401,12 @@ int parseBinaryMetadataFeatures(const Driver &D, const llvm::opt::Arg *A,
     int F = llvm::StringSwitch<int>(Value)
                 .Case("covered", BinaryMetadataCovered)
                 .Case("atomics", BinaryMetadataAtomics)
+                .Case("uar", BinaryMetadataUAR)
                 .Case("all", ~0)
                 .Default(0);
     if (F == 0 && DiagnoseErrors)
       D.Diag(clang::diag::err_drv_unsupported_option_argument)
-          << A->getOption().getName() << Value;
+          << A->getSpelling() << Value;
     Features |= F;
   }
   return Features;
