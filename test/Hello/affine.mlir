@@ -1,4 +1,4 @@
-// RUN: mlir-opt --lower-affine --convert-scf-to-cf --convert-func-to-llvm --convert-cf-to-llvm --convert-memref-to-llvm -reconcile-unrealized-casts %s | FileCheck %s
+// RUN: mlir-opt --lower-affine --convert-scf-to-cf --convert-func-to-llvm --convert-cf-to-llvm --finalize-memref-to-llvm -reconcile-unrealized-casts %s | FileCheck %s
 
 // CHECK: llvm.func @main() -> f32
 module {
