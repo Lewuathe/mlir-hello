@@ -77,9 +77,9 @@ def err_drv_hipspv_no_hip_path : Error<
   "'--hip-path' must be specified when offloading to "
   "SPIR-V%select{| unless %1 is given}0.">;
 
-def err_drv_undetermined_amdgpu_arch : Error<
-  "cannot determine AMDGPU architecture: %0; consider passing it via "
-  "'--march'">;
+def err_drv_undetermined_gpu_arch : Error<
+  "cannot determine %0 architecture: %1; consider passing it via "
+  "'%2'">;
 def err_drv_cuda_version_unsupported : Error<
   "GPU arch %0 is supported by CUDA versions between %1 and %2 (inclusive), "
   "but installation at %3 is %4; use '--cuda-path' to specify a different CUDA "
@@ -126,6 +126,8 @@ def err_drv_invalid_unwindlib_name : Error<
   "invalid unwind library name in argument '%0'">;
 def err_drv_incompatible_unwindlib : Error<
   "--rtlib=libgcc requires --unwindlib=libgcc">;
+def err_drv_incompatible_options : Error<
+  "The combination of '%0' and '%1' is incompatible">;
 def err_drv_invalid_stdlib_name : Error<
   "invalid library name in argument '%0'">;
 def err_drv_invalid_output_with_multiple_archs : Error<
@@ -213,6 +215,10 @@ def err_drv_malformed_sanitizer_coverage_allowlist : Error<
   "malformed sanitizer coverage allowlist: '%0'">;
 def err_drv_malformed_sanitizer_coverage_ignorelist : Error<
   "malformed sanitizer coverage ignorelist: '%0'">;
+def err_drv_malformed_sanitizer_metadata_ignorelist : Error<
+  "malformed sanitizer metadata ignorelist: '%0'">;
+def err_drv_unsupported_static_ubsan_darwin : Error<
+  "static UndefinedBehaviorSanitizer runtime is not supported on darwin">;
 def err_drv_duplicate_config : Error<
   "no more than one option '--config' is allowed">;
 def err_drv_cannot_open_config_file : Error<
@@ -487,6 +493,9 @@ def err_test_module_file_extension_format : Error<
   "-ftest-module-file-extension argument '%0' is not of the required form "
   "'blockname:major:minor:hashed:user info'">;
 
+def err_drv_module_output_with_multiple_arch : Error<
+  "option '-fmodule-output' can't be used with multiple arch options">;
+
 def err_drv_extract_api_wrong_kind : Error<
   "header file '%0' input '%1' does not match the type of prior input "
   "in api extraction; use '-x %2' to override">;
@@ -625,6 +634,11 @@ def warn_drv_libstdcxx_not_found : Warning<
   "command line to use the libc++ standard library instead">,
   InGroup<DiagGroup<"stdlibcxx-not-found">>;
 
+def warn_deperecated_fcoroutines_ts_flag : Warning<
+  "the '-fcoroutines-ts' flag is deprecated and it will be removed in Clang 17; "
+  "use '-std=c++20' or higher to use standard C++ coroutines instead">,
+  InGroup<DeprecatedExperimentalCoroutine>;
+
 def err_drv_cannot_mix_options : Error<"cannot specify '%1' along with '%0'">;
 
 def err_drv_invalid_object_mode : Error<
@@ -681,6 +695,9 @@ def err_drv_dxc_missing_target_profile : Error<
   "target profile option (-T) is missing">;
 def err_drv_hlsl_unsupported_target : Error<
   "HLSL code generation is unsupported for target '%0'">;
+def warn_drv_dxc_missing_dxv : Warning<"dxv not found. "
+    "Resulting DXIL will not be validated or signed for use in release environments.">,
+    InGroup<DXILValidation>;
 
 def err_drv_invalid_range_dxil_validator_version : Error<
   "invalid validator version : %0\n"
