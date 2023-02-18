@@ -557,6 +557,14 @@ bool RISCVRegisterInfo::needsFrameBaseReg(MachineInstr *MI,
 bool RISCVRegisterInfo::isFrameOffsetLegal(const MachineInstr *MI,
                                            Register BaseReg,
                                            int64_t Offset) const {
+  unsigned FIOperandNum = 0;
+  while (!MI->getOperand(FIOperandNum).isFI()) {
+    FIOperandNum++;
+    assert(FIOperandNum < MI->getNumOperands() &&
+           "Instr does not have a FrameIndex operand!");
+  }
+
+  Offset += getFrameIndexInstrOffset(MI, FIOperandNum);
   return isInt<12>(Offset);
 }
 
@@ -586,10 +594,12 @@ Register RISCVRegisterInfo::materializeFrameBaseRegister(MachineBasicBlock *MBB,
 void RISCVRegisterInfo::resolveFrameIndex(MachineInstr &MI, Register BaseReg,
                                           int64_t Offset) const {
   unsigned FIOperandNum = 0;
-  while (!MI.getOperand(FIOperandNum).isFI())
+  while (!MI.getOperand(FIOperandNum).isFI()) {
     FIOperandNum++;
-  assert(FIOperandNum < MI.getNumOperands() &&
-         "Instr does not have a FrameIndex operand!");
+    assert(FIOperandNum < MI.getNumOperands() &&
+           "Instr does not have a FrameIndex operand!");
+  }
+
   Offset += getFrameIndexInstrOffset(&MI, FIOperandNum);
   // FrameIndex Operands are always represented as a
   // register followed by an immediate.
@@ -696,8 +706,7 @@ bool RISCVRegisterInfo::getRegAllocationHints(
   auto tryAddHint = [&](const MachineOperand &VRRegMO, const MachineOperand &MO,
                         bool NeedGPRC) -> void {
     Register Reg = MO.getReg();
-    Register PhysReg =
-        Register::isPhysicalRegister(Reg) ? Reg : Register(VRM->getPhys(Reg));
+    Register PhysReg = Reg.isPhysical() ? Reg : Register(VRM->getPhys(Reg));
     if (PhysReg && (!NeedGPRC || RISCV::GPRCRegClass.contains(PhysReg))) {
       assert(!MO.getSubReg() && !VRRegMO.getSubReg() && "Unexpected subreg!");
       if (!MRI->isReserved(PhysReg) && !is_contained(Hints, PhysReg))
@@ -744,14 +753,13 @@ bool RISCVRegisterInfo::getRegAllocationHints(
     if (!MO.isReg())
       return true;
     Register Reg = MO.getReg();
-    Register PhysReg =
-        Register::isPhysicalRegister(Reg) ? Reg : Register(VRM->getPhys(Reg));
+    Register PhysReg = Reg.isPhysical() ? Reg : Register(VRM->getPhys(Reg));
     return PhysReg && RISCV::GPRCRegClass.contains(PhysReg);
   };
 
   for (auto &MO : MRI->reg_nodbg_operands(VirtReg)) {
     const MachineInstr &MI = *MO.getParent();
-    unsigned OpIdx = MI.getOperandNo(&MO);
+    unsigned OpIdx = MO.getOperandNo();
     bool NeedGPRC;
     if (isCompressible(MI, NeedGPRC)) {
       if (OpIdx == 0 && MI.getOperand(1).isReg()) {

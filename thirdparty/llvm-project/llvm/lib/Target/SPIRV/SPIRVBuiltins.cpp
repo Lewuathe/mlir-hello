@@ -1450,6 +1450,19 @@ static MachineInstr *getBlockStructInstr(Register ParamReg,
   return ValueMI;
 }
 
+// Return an integer constant corresponding to the given register and
+// defined in spv_track_constant.
+// TODO: maybe unify with prelegalizer pass.
+static unsigned getConstFromIntrinsic(Register Reg, MachineRegisterInfo *MRI) {
+  MachineInstr *DefMI = MRI->getUniqueVRegDef(Reg);
+  assert(isSpvIntrinsic(*DefMI, Intrinsic::spv_track_constant) &&
+         DefMI->getOperand(2).isReg());
+  MachineInstr *DefMI2 = MRI->getUniqueVRegDef(DefMI->getOperand(2).getReg());
+  assert(DefMI2->getOpcode() == TargetOpcode::G_CONSTANT &&
+         DefMI2->getOperand(1).isCImm());
+  return DefMI2->getOperand(1).getCImm()->getValue().getZExtValue();
+}
+
 // Return type of the instruction result from spv_assign_type intrinsic.
 // TODO: maybe unify with prelegalizer pass.
 static const Type *getMachineInstrType(MachineInstr *MI) {
@@ -1574,7 +1587,7 @@ static bool buildEnqueueKernel(const SPIRV::IncomingCall *Call,
   MIB.addUse(buildConstantIntReg(DL.getTypeStoreSize(PType), MIRBuilder, GR));
   // Param Aligment: Aligment of block literal structure.
   MIB.addUse(
-      buildConstantIntReg(DL.getPrefTypeAlignment(PType), MIRBuilder, GR));
+      buildConstantIntReg(DL.getPrefTypeAlign(PType).value(), MIRBuilder, GR));
 
   for (unsigned i = 0; i < LocalSizes.size(); i++)
     MIB.addUse(LocalSizes[i]);
@@ -1720,7 +1733,8 @@ static bool generateConvertInst(const StringRef DemangledCall,
                     SPIRV::Decoration::SaturatedConversion, {});
   if (Builtin->IsRounded)
     buildOpDecorate(Call->ReturnRegister, MIRBuilder,
-                    SPIRV::Decoration::FPRoundingMode, {Builtin->RoundingMode});
+                    SPIRV::Decoration::FPRoundingMode,
+                    {(unsigned)Builtin->RoundingMode});
 
   unsigned Opcode = SPIRV::OpNop;
   if (GR->isScalarOrVectorOfType(Call->Arguments[0], SPIRV::OpTypeInt)) {
@@ -1784,6 +1798,35 @@ static bool generateVectorLoadStoreInst(const SPIRV::IncomingCall *Call,
   // like "vstorea_halfn_r".
   if (Builtin->IsRounded)
     MIB.addImm(static_cast<uint32_t>(Builtin->RoundingMode));
+  return true;
+}
+
+static bool generateLoadStoreInst(const SPIRV::IncomingCall *Call,
+                                  MachineIRBuilder &MIRBuilder,
+                                  SPIRVGlobalRegistry *GR) {
+  // Lookup the instruction opcode in the TableGen records.
+  const SPIRV::DemangledBuiltin *Builtin = Call->Builtin;
+  unsigned Opcode =
+      SPIRV::lookupNativeBuiltin(Builtin->Name, Builtin->Set)->Opcode;
+  bool IsLoad = Opcode == SPIRV::OpLoad;
+  // Build the instruction.
+  auto MIB = MIRBuilder.buildInstr(Opcode);
+  if (IsLoad) {
+    MIB.addDef(Call->ReturnRegister);
+    MIB.addUse(GR->getSPIRVTypeID(Call->ReturnType));
+  }
+  // Add a pointer to the value to load/store.
+  MIB.addUse(Call->Arguments[0]);
+  // Add a value to store.
+  if (!IsLoad)
+    MIB.addUse(Call->Arguments[1]);
+  // Add optional memory attributes and an alignment.
+  MachineRegisterInfo *MRI = MIRBuilder.getMRI();
+  unsigned NumArgs = Call->Arguments.size();
+  if ((IsLoad && NumArgs >= 2) || NumArgs >= 3)
+    MIB.addImm(getConstFromIntrinsic(Call->Arguments[IsLoad ? 1 : 2], MRI));
+  if ((IsLoad && NumArgs >= 3) || NumArgs >= 4)
+    MIB.addImm(getConstFromIntrinsic(Call->Arguments[IsLoad ? 2 : 3], MRI));
   return true;
 }
 
@@ -1864,6 +1907,8 @@ std::optional<bool> lowerBuiltin(const StringRef DemangledCall,
     return generateConvertInst(DemangledCall, Call.get(), MIRBuilder, GR);
   case SPIRV::VectorLoadStore:
     return generateVectorLoadStoreInst(Call.get(), MIRBuilder, GR);
+  case SPIRV::LoadStore:
+    return generateLoadStoreInst(Call.get(), MIRBuilder, GR);
   }
   return false;
 }

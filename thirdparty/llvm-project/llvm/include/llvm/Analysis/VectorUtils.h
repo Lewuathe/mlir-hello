@@ -125,6 +125,21 @@ struct VFInfo {
   std::string ScalarName; /// Scalar Function Name.
   std::string VectorName; /// Vector Function Name associated to this VFInfo.
   VFISAKind ISA;          /// Instruction Set Architecture.
+
+  /// Returns the index of the first parameter with the kind 'GlobalPredicate',
+  /// if any exist.
+  std::optional<unsigned> getParamIndexForOptionalMask() const {
+    unsigned ParamCount = Shape.Parameters.size();
+    for (unsigned i = 0; i < ParamCount; ++i)
+      if (Shape.Parameters[i].ParamKind == VFParamKind::GlobalPredicate)
+        return i;
+
+    return std::nullopt;
+  }
+
+  /// Returns true if at least one of the operands to the vectorized function
+  /// has the kind 'GlobalPredicate'.
+  bool isMasked() const { return getParamIndexForOptionalMask().has_value(); }
 };
 
 namespace VFABI {
@@ -406,6 +421,11 @@ void narrowShuffleMaskElts(int Scale, ArrayRef<int> Mask,
 /// divide evenly (scale down) to map to wider vector elements.
 bool widenShuffleMaskElts(int Scale, ArrayRef<int> Mask,
                           SmallVectorImpl<int> &ScaledMask);
+
+/// Repetitively apply `widenShuffleMaskElts()` for as long as it succeeds,
+/// to get the shuffle mask with widest possible elements.
+void getShuffleMaskWithWidestElts(ArrayRef<int> Mask,
+                                  SmallVectorImpl<int> &ScaledMask);
 
 /// Splits and processes shuffle mask depending on the number of input and
 /// output registers. The function does 2 main things: 1) splits the

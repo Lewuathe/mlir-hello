@@ -620,6 +620,11 @@ def int_call_preallocated_setup : DefaultAttrsIntrinsic<[llvm_token_ty], [llvm_i
 def int_call_preallocated_arg : DefaultAttrsIntrinsic<[llvm_ptr_ty], [llvm_token_ty, llvm_i32_ty]>;
 def int_call_preallocated_teardown : DefaultAttrsIntrinsic<[], [llvm_token_ty]>;
 
+// This intrinsic is intentionally undocumented and users shouldn't call it;
+// it's produced then quickly consumed during codegen.
+def int_callbr_landingpad : Intrinsic<[llvm_any_ty], [LLVMMatchType<0>],
+                                      [IntrNoMerge]>;
+
 //===------------------- Standard C Library Intrinsics --------------------===//
 //
 
@@ -1236,12 +1241,12 @@ def int_strip_invariant_group : DefaultAttrsIntrinsic<[llvm_anyptr_ty],
 def int_experimental_stackmap : DefaultAttrsIntrinsic<[],
                                   [llvm_i64_ty, llvm_i32_ty, llvm_vararg_ty],
                                   [Throws]>;
-def int_experimental_patchpoint_void : DefaultAttrsIntrinsic<[],
+def int_experimental_patchpoint_void : Intrinsic<[],
                                                  [llvm_i64_ty, llvm_i32_ty,
                                                   llvm_ptr_ty, llvm_i32_ty,
                                                   llvm_vararg_ty],
                                                   [Throws]>;
-def int_experimental_patchpoint_i64 : DefaultAttrsIntrinsic<[llvm_i64_ty],
+def int_experimental_patchpoint_i64 : Intrinsic<[llvm_i64_ty],
                                                 [llvm_i64_ty, llvm_i32_ty,
                                                  llvm_ptr_ty, llvm_i32_ty,
                                                  llvm_vararg_ty],
@@ -1538,6 +1543,11 @@ let IntrProperties = [IntrNoMem, IntrNoSync, IntrWillReturn] in {
                                LLVMMatchType<0>,
                                LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
                                llvm_i32_ty]>;
+  def int_vp_abs : DefaultAttrsIntrinsic<[ llvm_anyvector_ty ],
+                             [ LLVMMatchType<0>,
+                               LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
+                               llvm_i32_ty,
+                               llvm_i1_ty]>;
   def int_vp_smin : DefaultAttrsIntrinsic<[ llvm_anyvector_ty ],
                              [ LLVMMatchType<0>,
                                LLVMMatchType<0>,
@@ -1722,7 +1732,6 @@ let IntrProperties = [IntrNoMem, IntrNoSync, IntrWillReturn] in {
                              [ llvm_anyvector_ty,
                                LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
                                llvm_i32_ty]>;
-
   // Shuffles
   def int_vp_select : DefaultAttrsIntrinsic<[ llvm_anyvector_ty ],
                              [ LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
@@ -1815,6 +1824,19 @@ let IntrProperties = [IntrNoMem, IntrNoSync, IntrWillReturn] in {
                                llvm_anyvector_ty,
                                LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
                                llvm_i32_ty]>;
+}
+
+let IntrProperties = [IntrNoMem, IntrNoSync, IntrWillReturn, ImmArg<ArgIndex<3>>] in {
+  def int_vp_ctlz : DefaultAttrsIntrinsic<[ llvm_anyvector_ty ],
+                             [ LLVMMatchType<0>,
+                               LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
+                               llvm_i32_ty,
+                               llvm_i1_ty]>;
+  def int_vp_cttz : DefaultAttrsIntrinsic<[ llvm_anyvector_ty ],
+                             [ LLVMMatchType<0>,
+                               LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
+                               llvm_i32_ty,
+                               llvm_i1_ty]>;
 }
 
 def int_get_active_lane_mask:

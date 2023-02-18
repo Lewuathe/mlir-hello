@@ -69,6 +69,7 @@ def libc_function(
     copts = copts or []
     copts.append("-O3")
     copts.append("-fno-builtin")
+    copts.append("-fno-lax-vector-conversions")
 
     # We compile the code twice, the first target is suffixed with ".__internal__" and contains the
     # C++ functions in the "__llvm_libc" namespace. This allows us to test the function in the
@@ -87,7 +88,7 @@ def libc_function(
     func_attrs = ["__attribute__((visibility(\"default\")))"]
     if weak:
         func_attrs.append("__attribute__((weak))")
-    local_defines = local_defines or ["LLVM_LIBC_PUBLIC_PACKAGING"]
+    local_defines = local_defines or ["LIBC_COPT_PUBLIC_PACKAGING"]
     local_defines.append("LLVM_LIBC_FUNCTION_ATTR='%s'" % " ".join(func_attrs))
     _libc_library(
         name = name,
