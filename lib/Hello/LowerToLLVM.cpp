@@ -166,7 +166,7 @@ void HelloToLLVMLoweringPass::runOnOperation() {
   populateSCFToControlFlowConversionPatterns(patterns);
   mlir::arith::populateArithToLLVMConversionPatterns(typeConverter, patterns);
 
-  mlir::populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
+  mlir::populateFinalizeMemRefToLLVMConversionPatterns(typeConverter, patterns);
   mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter, patterns);
   populateFuncToLLVMConversionPatterns(typeConverter, patterns);
 

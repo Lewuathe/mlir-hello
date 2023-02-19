@@ -54,15 +54,15 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/ScopedPrinter.h"
-#include "llvm/Support/TargetParser.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/YAMLParser.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/TargetParser.h"
 #include <optional>
 
 using namespace clang::driver;
@@ -567,6 +567,7 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
                           ArgStringList &CmdArgs, const InputInfo &Output,
                           const InputInfo &Input, bool IsThinLTO) {
   const bool IsOSAIX = ToolChain.getTriple().isOSAIX();
+  const bool IsAMDGCN = ToolChain.getTriple().isAMDGCN();
   const char *Linker = Args.MakeArgString(ToolChain.GetLinkerPath());
   const Driver &D = ToolChain.getDriver();
   if (llvm::sys::path::filename(Linker) != "ld.lld" &&
@@ -631,9 +632,12 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
         OOpt = "2";
     } else if (A->getOption().matches(options::OPT_O0))
       OOpt = "0";
-    if (!OOpt.empty())
+    if (!OOpt.empty()) {
       CmdArgs.push_back(
           Args.MakeArgString(Twine(PluginOptPrefix) + ExtraDash + "O" + OOpt));
+      if (IsAMDGCN)
+        CmdArgs.push_back(Args.MakeArgString(Twine("--lto-CGO") + OOpt));
+    }
   }
 
   if (Args.hasArg(options::OPT_gsplit_dwarf))
@@ -873,8 +877,7 @@ bool tools::addOpenMPRuntime(ArgStringList &CmdArgs, const ToolChain &TC,
   if (IsOffloadingHost)
     CmdArgs.push_back("-lomptarget");
 
-  if (IsOffloadingHost && TC.getDriver().isUsingLTO(/* IsOffload */ true) &&
-      !Args.hasArg(options::OPT_nogpulib))
+  if (IsOffloadingHost && !Args.hasArg(options::OPT_nogpulib))
     CmdArgs.push_back("-lomptarget.devicertl");
 
   addArchSpecificRPath(TC, Args, CmdArgs);
@@ -1419,10 +1422,6 @@ tools::ParsePICArgs(const ToolChain &ToolChain, const ArgList &Args) {
     }
   }
 
-  // AMDGPU-specific defaults for PIC.
-  if (Triple.getArch() == llvm::Triple::amdgcn)
-    PIC = true;
-
   // The last argument relating to either PIC or PIE wins, and no
   // other argument is used. If the last argument is any flavor of the
   // '-fno-...' arguments, both PIC and PIE are disabled. Any PIE
@@ -1961,8 +1960,7 @@ bool tools::SDLSearch(const Driver &D, const llvm::opt::ArgList &DriverArgs,
 /// Search if a user provided archive file lib<libname>.a exists in any of
 /// the library paths. If so, add a new command to clang-offload-bundler to
 /// unbundle this archive and create a temporary device specific archive. Name
-/// of this SDL is passed to the llvm-link (for amdgcn) or to the
-/// clang-nvlink-wrapper (for nvptx) commands by the driver.
+/// of this SDL is passed to the llvm-link tool.
 bool tools::GetSDLFromOffloadArchive(
     Compilation &C, const Driver &D, const Tool &T, const JobAction &JA,
     const InputInfoList &Inputs, const llvm::opt::ArgList &DriverArgs,
@@ -2086,17 +2084,6 @@ void tools::AddStaticDeviceLibsLinking(Compilation &C, const Tool &T,
                       Arch, Target, isBitCodeSDL, postClangLink);
 }
 
-// Wrapper function used for post clang linking of bitcode SDLS for nvptx by
-// the CUDA toolchain.
-void tools::AddStaticDeviceLibsPostLinking(const Driver &D,
-                                const llvm::opt::ArgList &DriverArgs,
-                                llvm::opt::ArgStringList &CC1Args,
-                                StringRef Arch, StringRef Target,
-                                bool isBitCodeSDL, bool postClangLink) {
-  AddStaticDeviceLibs(nullptr, nullptr, nullptr, nullptr, D, DriverArgs,
-                      CC1Args, Arch, Target, isBitCodeSDL, postClangLink);
-}
-
 // User defined Static Device Libraries(SDLs) can be passed to clang for
 // offloading GPU compilers. Like static host libraries, the use of a SDL is
 // specified with the -l command line option. The primary difference between
@@ -2109,11 +2096,9 @@ void tools::AddStaticDeviceLibsPostLinking(const Driver &D,
 //           compilation. For AMDGPU, these libraries are linked one time
 //           during the application link phase.
 //
-// * Machine-code SDLs: They are archive files. For NVPTX, the archive members
-//           contain cubin for Nvidia GPUs and are linked one time during the
-//           link phase by the CUDA SDK linker called nvlink.	For AMDGPU, the
-//           process for machine code SDLs is still in development. But they
-//           will be linked by the LLVM tool lld.
+// * Machine-code SDLs: They are archive files. For AMDGPU, the process for
+//           machine code SDLs is still in development. But they will be linked
+//           by the LLVM tool lld.
 //
 // * Bundled objects that contain both host and device codes: Bundled objects
 //           may also contain library code compiled from source. For NVPTX, the
@@ -2178,10 +2163,9 @@ void tools::AddStaticDeviceLibs(Compilation *C, const Tool *T,
   }
 
   // The search stops as soon as an SDL file is found. The driver then provides
-  // the full filename of the SDL to the llvm-link or clang-nvlink-wrapper
-  // command. If no SDL is found after searching each LINKPATH with
-  // SEARCH-ORDER, it is possible that an archive file lib<libname>.a exists
-  // and may contain bundled object files.
+  // the full filename of the SDL to the llvm-link command. If no SDL is found
+  // after searching each LINKPATH with SEARCH-ORDER, it is possible that an
+  // archive file lib<libname>.a exists and may contain bundled object files.
   for (auto SDLName : SDLNames) {
     // This is the only call to SDLSearch
     if (!SDLSearch(D, DriverArgs, CC1Args, LibraryPaths, SDLName, Arch, Target,

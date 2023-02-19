@@ -62,7 +62,8 @@ FunctionPass *llvm::createRISCVSExtWRemovalPass() {
 
 // This function returns true if the machine instruction always outputs a value
 // where bits 63:32 match bit 31.
-static bool isSignExtendingOpW(MachineInstr &MI, MachineRegisterInfo &MRI) {
+static bool isSignExtendingOpW(const MachineInstr &MI,
+                               const MachineRegisterInfo &MRI) {
   uint64_t TSFlags = MI.getDesc().TSFlags;
 
   // Instructions that can be determined from opcode are marked in tablegen.
@@ -93,7 +94,8 @@ static bool isSignExtendingOpW(MachineInstr &MI, MachineRegisterInfo &MRI) {
   return false;
 }
 
-static bool isSignExtendedW(Register SrcReg, MachineRegisterInfo &MRI,
+static bool isSignExtendedW(Register SrcReg, const MachineRegisterInfo &MRI,
+                            const RISCVInstrInfo &TII,
                             SmallPtrSetImpl<MachineInstr *> &FixableDef) {
 
   SmallPtrSet<const MachineInstr *, 4> Visited;
@@ -173,8 +175,9 @@ static bool isSignExtendedW(Register SrcReg, MachineRegisterInfo &MRI,
 
         const AttributeSet &Attrs = CalleeFn->getAttributes().getRetAttrs();
         unsigned BitWidth = IntTy->getBitWidth();
-        return (BitWidth <= 32 && Attrs.hasAttribute(Attribute::SExt)) ||
-               (BitWidth < 32 && Attrs.hasAttribute(Attribute::ZExt));
+        if ((BitWidth <= 32 && Attrs.hasAttribute(Attribute::SExt)) ||
+            (BitWidth < 32 && Attrs.hasAttribute(Attribute::ZExt)))
+          continue;
       }
 
       if (!AddRegDefToWorkList(CopySrcReg))
@@ -193,7 +196,7 @@ static bool isSignExtendedW(Register SrcReg, MachineRegisterInfo &MRI,
     case RISCV::REM:
     case RISCV::ANDI:
     case RISCV::ORI:
-    case RISCV::XORI: {
+    case RISCV::XORI:
       // |Remainder| is always <= |Dividend|. If D is 32-bit, then so is R.
       // DIV doesn't work because of the edge case 0xf..f 8000 0000 / (long)-1
       // Logical operations use a sign extended 12-bit immediate.
@@ -201,7 +204,13 @@ static bool isSignExtendedW(Register SrcReg, MachineRegisterInfo &MRI,
         return false;
 
       break;
-    }
+    case RISCV::PseudoCCADDW:
+    case RISCV::PseudoCCSUBW:
+      // Returns operand 4 or an ADDW/SUBW of operands 5 and 6. We only need to
+      // check if operand 4 is sign extended.
+      if (!AddRegDefToWorkList(MI->getOperand(4).getReg()))
+        return false;
+      break;
     case RISCV::REMU:
     case RISCV::AND:
     case RISCV::OR:
@@ -214,21 +223,34 @@ static bool isSignExtendedW(Register SrcReg, MachineRegisterInfo &MRI,
     case RISCV::MIN:
     case RISCV::MINU:
     case RISCV::PseudoCCMOVGPR:
+    case RISCV::PseudoCCAND:
+    case RISCV::PseudoCCOR:
+    case RISCV::PseudoCCXOR:
     case RISCV::PHI: {
       // If all incoming values are sign-extended, the output of AND, OR, XOR,
       // MIN, MAX, or PHI is also sign-extended.
 
       // The input registers for PHI are operand 1, 3, ...
       // The input registers for PseudoCCMOVGPR are 4 and 5.
+      // The input registers for PseudoCCAND/OR/XOR are 4, 5, and 6.
       // The input registers for others are operand 1 and 2.
       unsigned B = 1, E = 3, D = 1;
-      if (MI->getOpcode() == RISCV::PHI) {
+      switch (MI->getOpcode()) {
+      case RISCV::PHI:
         E = MI->getNumOperands();
         D = 2;
-      } else if (MI->getOpcode() == RISCV::PseudoCCMOVGPR) {
+        break;
+      case RISCV::PseudoCCMOVGPR:
         B = 4;
         E = 6;
-      }
+        break;
+      case RISCV::PseudoCCAND:
+      case RISCV::PseudoCCOR:
+      case RISCV::PseudoCCXOR:
+        B = 4;
+        E = 7;
+        break;
+       }
 
       for (unsigned I = B; I != E; I += D) {
         if (!MI->getOperand(I).isReg())
@@ -262,7 +284,7 @@ static bool isSignExtendedW(Register SrcReg, MachineRegisterInfo &MRI,
     case RISCV::LWU:
     case RISCV::MUL:
     case RISCV::SUB:
-      if (RISCV::hasAllWUsers(*MI, MRI)) {
+      if (TII.hasAllWUsers(*MI, MRI)) {
         FixableDef.insert(MI);
         break;
       }
@@ -323,7 +345,8 @@ bool RISCVSExtWRemoval::runOnMachineFunction(MachineFunction &MF) {
       // If all users only use the lower bits, this sext.w is redundant.
       // Or if all definitions reaching MI sign-extend their output,
       // then sext.w is redundant.
-      if (!RISCV::hasAllWUsers(*MI, MRI) && !isSignExtendedW(SrcReg, MRI, FixableDefs))
+      if (!TII.hasAllWUsers(*MI, MRI) &&
+          !isSignExtendedW(SrcReg, MRI, TII, FixableDefs))
         continue;
 
       Register DstReg = MI->getOperand(0).getReg();

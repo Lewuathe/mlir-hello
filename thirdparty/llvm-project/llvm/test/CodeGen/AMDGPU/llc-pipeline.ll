@@ -93,12 +93,14 @@
 ; GCN-O0-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O0-NEXT:      DummyCGSCCPass
 ; GCN-O0-NEXT:      FunctionPass Manager
+; GCN-O0-NEXT:        Prepare callbr
 ; GCN-O0-NEXT:        Safe Stack instrumentation pass
 ; GCN-O0-NEXT:        Insert stack protectors
 ; GCN-O0-NEXT:        Dominator Tree Construction
 ; GCN-O0-NEXT:        Post-Dominator Tree Construction
 ; GCN-O0-NEXT:        Natural Loop Information
 ; GCN-O0-NEXT:        Legacy Divergence Analysis
+; GCN-O0-NEXT:        Assignment Tracking Analysis
 ; GCN-O0-NEXT:        AMDGPU DAG->DAG Pattern Instruction Selection
 ; GCN-O0-NEXT:        MachineDominator Tree Construction
 ; GCN-O0-NEXT:        SI Fix SGPR copies
@@ -143,6 +145,9 @@
 ; GCN-O0-NEXT:        Register Usage Information Collector Pass
 ; GCN-O0-NEXT:        Live DEBUG_VALUE analysis
 ; GCN-O0-NEXT:        Machine Sanitizer Binary Metadata
+; GCN-O0-NEXT:        Lazy Machine Block Frequency Analysis
+; GCN-O0-NEXT:        Machine Optimization Remark Emitter
+; GCN-O0-NEXT:        Stack Frame Layout Analysis
 ; GCN-O0-NEXT:    Function register usage analysis
 ; GCN-O0-NEXT:    FunctionPass Manager
 ; GCN-O0-NEXT:      Lazy Machine Block Frequency Analysis
@@ -281,6 +286,7 @@
 ; GCN-O1-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O1-NEXT:      DummyCGSCCPass
 ; GCN-O1-NEXT:      FunctionPass Manager
+; GCN-O1-NEXT:        Prepare callbr
 ; GCN-O1-NEXT:        Safe Stack instrumentation pass
 ; GCN-O1-NEXT:        Insert stack protectors
 ; GCN-O1-NEXT:        Dominator Tree Construction
@@ -290,6 +296,7 @@
 ; GCN-O1-NEXT:        Basic Alias Analysis (stateless AA impl)
 ; GCN-O1-NEXT:        Function Alias Analysis Results
 ; GCN-O1-NEXT:        Branch Probability Analysis
+; GCN-O1-NEXT:        Assignment Tracking Analysis
 ; GCN-O1-NEXT:        Lazy Branch Probability Analysis
 ; GCN-O1-NEXT:        Lazy Block Frequency Analysis
 ; GCN-O1-NEXT:        AMDGPU DAG->DAG Pattern Instruction Selection
@@ -411,6 +418,9 @@
 ; GCN-O1-NEXT:        Register Usage Information Collector Pass
 ; GCN-O1-NEXT:        Live DEBUG_VALUE analysis
 ; GCN-O1-NEXT:        Machine Sanitizer Binary Metadata
+; GCN-O1-NEXT:        Lazy Machine Block Frequency Analysis
+; GCN-O1-NEXT:        Machine Optimization Remark Emitter
+; GCN-O1-NEXT:        Stack Frame Layout Analysis
 ; GCN-O1-NEXT:    Function register usage analysis
 ; GCN-O1-NEXT:    FunctionPass Manager
 ; GCN-O1-NEXT:      Lazy Machine Block Frequency Analysis
@@ -573,6 +583,7 @@
 ; GCN-O1-OPTS-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O1-OPTS-NEXT:      DummyCGSCCPass
 ; GCN-O1-OPTS-NEXT:      FunctionPass Manager
+; GCN-O1-OPTS-NEXT:        Prepare callbr
 ; GCN-O1-OPTS-NEXT:        Safe Stack instrumentation pass
 ; GCN-O1-OPTS-NEXT:        Insert stack protectors
 ; GCN-O1-OPTS-NEXT:        Dominator Tree Construction
@@ -582,6 +593,7 @@
 ; GCN-O1-OPTS-NEXT:        Basic Alias Analysis (stateless AA impl)
 ; GCN-O1-OPTS-NEXT:        Function Alias Analysis Results
 ; GCN-O1-OPTS-NEXT:        Branch Probability Analysis
+; GCN-O1-OPTS-NEXT:        Assignment Tracking Analysis
 ; GCN-O1-OPTS-NEXT:        Lazy Branch Probability Analysis
 ; GCN-O1-OPTS-NEXT:        Lazy Block Frequency Analysis
 ; GCN-O1-OPTS-NEXT:        AMDGPU DAG->DAG Pattern Instruction Selection
@@ -711,6 +723,9 @@
 ; GCN-O1-OPTS-NEXT:        Register Usage Information Collector Pass
 ; GCN-O1-OPTS-NEXT:        Live DEBUG_VALUE analysis
 ; GCN-O1-OPTS-NEXT:        Machine Sanitizer Binary Metadata
+; GCN-O1-OPTS-NEXT:        Lazy Machine Block Frequency Analysis
+; GCN-O1-OPTS-NEXT:        Machine Optimization Remark Emitter
+; GCN-O1-OPTS-NEXT:        Stack Frame Layout Analysis
 ; GCN-O1-OPTS-NEXT:    Function register usage analysis
 ; GCN-O1-OPTS-NEXT:    FunctionPass Manager
 ; GCN-O1-OPTS-NEXT:      Lazy Machine Block Frequency Analysis
@@ -874,6 +889,7 @@
 ; GCN-O2-NEXT:      Analysis if a function is memory bound
 ; GCN-O2-NEXT:      DummyCGSCCPass
 ; GCN-O2-NEXT:      FunctionPass Manager
+; GCN-O2-NEXT:        Prepare callbr
 ; GCN-O2-NEXT:        Safe Stack instrumentation pass
 ; GCN-O2-NEXT:        Insert stack protectors
 ; GCN-O2-NEXT:        Dominator Tree Construction
@@ -883,6 +899,7 @@
 ; GCN-O2-NEXT:        Basic Alias Analysis (stateless AA impl)
 ; GCN-O2-NEXT:        Function Alias Analysis Results
 ; GCN-O2-NEXT:        Branch Probability Analysis
+; GCN-O2-NEXT:        Assignment Tracking Analysis
 ; GCN-O2-NEXT:        Lazy Branch Probability Analysis
 ; GCN-O2-NEXT:        Lazy Block Frequency Analysis
 ; GCN-O2-NEXT:        AMDGPU DAG->DAG Pattern Instruction Selection
@@ -1014,6 +1031,9 @@
 ; GCN-O2-NEXT:        Register Usage Information Collector Pass
 ; GCN-O2-NEXT:        Live DEBUG_VALUE analysis
 ; GCN-O2-NEXT:        Machine Sanitizer Binary Metadata
+; GCN-O2-NEXT:        Lazy Machine Block Frequency Analysis
+; GCN-O2-NEXT:        Machine Optimization Remark Emitter
+; GCN-O2-NEXT:        Stack Frame Layout Analysis
 ; GCN-O2-NEXT:    Function register usage analysis
 ; GCN-O2-NEXT:    FunctionPass Manager
 ; GCN-O2-NEXT:      Lazy Machine Block Frequency Analysis
@@ -1187,6 +1207,7 @@
 ; GCN-O3-NEXT:      Analysis if a function is memory bound
 ; GCN-O3-NEXT:      DummyCGSCCPass
 ; GCN-O3-NEXT:      FunctionPass Manager
+; GCN-O3-NEXT:        Prepare callbr
 ; GCN-O3-NEXT:        Safe Stack instrumentation pass
 ; GCN-O3-NEXT:        Insert stack protectors
 ; GCN-O3-NEXT:        Dominator Tree Construction
@@ -1196,6 +1217,7 @@
 ; GCN-O3-NEXT:        Basic Alias Analysis (stateless AA impl)
 ; GCN-O3-NEXT:        Function Alias Analysis Results
 ; GCN-O3-NEXT:        Branch Probability Analysis
+; GCN-O3-NEXT:        Assignment Tracking Analysis
 ; GCN-O3-NEXT:        Lazy Branch Probability Analysis
 ; GCN-O3-NEXT:        Lazy Block Frequency Analysis
 ; GCN-O3-NEXT:        AMDGPU DAG->DAG Pattern Instruction Selection
@@ -1327,6 +1349,9 @@
 ; GCN-O3-NEXT:        Register Usage Information Collector Pass
 ; GCN-O3-NEXT:        Live DEBUG_VALUE analysis
 ; GCN-O3-NEXT:        Machine Sanitizer Binary Metadata
+; GCN-O3-NEXT:        Lazy Machine Block Frequency Analysis
+; GCN-O3-NEXT:        Machine Optimization Remark Emitter
+; GCN-O3-NEXT:        Stack Frame Layout Analysis
 ; GCN-O3-NEXT:    Function register usage analysis
 ; GCN-O3-NEXT:    FunctionPass Manager
 ; GCN-O3-NEXT:      Lazy Machine Block Frequency Analysis
