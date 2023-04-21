@@ -142,8 +142,6 @@ public:
   std::string getAsString() const override;
 
   bool typeIsConvertibleTo(const RecTy *RHS) const override;
-
-  bool typeIsA(const RecTy *RHS) const override;
 };
 
 /// 'int' - Represent an integer value of no particular size
@@ -785,7 +783,18 @@ public:
 ///
 class UnOpInit : public OpInit, public FoldingSetNode {
 public:
-  enum UnaryOp : uint8_t { CAST, NOT, HEAD, TAIL, SIZE, EMPTY, GETDAGOP, LOG2 };
+  enum UnaryOp : uint8_t {
+    TOLOWER,
+    TOUPPER,
+    CAST,
+    NOT,
+    HEAD,
+    TAIL,
+    SIZE,
+    EMPTY,
+    GETDAGOP,
+    LOG2
+  };
 
 private:
   Init *LHS;

@@ -154,9 +154,7 @@ Operation *ShapeDialect::materializeConstant(OpBuilder &builder,
     return builder.create<ConstSizeOp>(loc, type, value.cast<IntegerAttr>());
   if (type.isa<WitnessType>())
     return builder.create<ConstWitnessOp>(loc, type, value.cast<BoolAttr>());
-  if (arith::ConstantOp::isBuildableWith(value, type))
-    return builder.create<arith::ConstantOp>(loc, type, value);
-  return nullptr;
+  return arith::ConstantOp::materialize(builder, value, type, loc);
 }
 
 LogicalResult ShapeDialect::verifyOperationAttribute(Operation *op,
@@ -1132,7 +1130,7 @@ OpFoldResult DivOp::fold(FoldAdaptor adaptor) {
   // negative. Rather, APInt rounds toward zero.
   APInt quotient, remainder;
   APInt::sdivrem(lhs.getValue(), rhs.getValue(), quotient, remainder);
-  if (quotient.isNegative() && !remainder.isNullValue()) {
+  if (quotient.isNegative() && !remainder.isZero()) {
     quotient -= 1;
   }
 

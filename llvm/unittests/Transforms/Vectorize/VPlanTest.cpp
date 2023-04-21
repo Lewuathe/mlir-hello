@@ -899,7 +899,7 @@ TEST(VPRecipeTest, CastVPWidenSelectRecipeToVPUserAndVPDef) {
   Args.push_back(&Op2);
   Args.push_back(&Op3);
   VPWidenSelectRecipe WidenSelectR(*SelectI,
-                                   make_range(Args.begin(), Args.end()), false);
+                                   make_range(Args.begin(), Args.end()));
   EXPECT_TRUE(isa<VPUser>(&WidenSelectR));
   VPRecipeBase *BaseR = &WidenSelectR;
   EXPECT_TRUE(isa<VPUser>(BaseR));
@@ -960,7 +960,7 @@ TEST(VPRecipeTest, CastVPInterleaveRecipeToVPUser) {
   VPValue Addr;
   VPValue Mask;
   InterleaveGroup<Instruction> IG(4, false, Align(4));
-  VPInterleaveRecipe Recipe(&IG, &Addr, {}, &Mask);
+  VPInterleaveRecipe Recipe(&IG, &Addr, {}, &Mask, false);
   EXPECT_TRUE(isa<VPUser>(&Recipe));
   VPRecipeBase *BaseR = &Recipe;
   EXPECT_TRUE(isa<VPUser>(BaseR));
@@ -976,8 +976,7 @@ TEST(VPRecipeTest, CastVPReplicateRecipeToVPUser) {
   Args.push_back(&Op1);
   Args.push_back(&Op2);
 
-  VPReplicateRecipe Recipe(nullptr, make_range(Args.begin(), Args.end()), true,
-                           false);
+  VPReplicateRecipe Recipe(nullptr, make_range(Args.begin(), Args.end()), true);
   EXPECT_TRUE(isa<VPUser>(&Recipe));
   VPRecipeBase *BaseR = &Recipe;
   EXPECT_TRUE(isa<VPUser>(BaseR));
@@ -1048,8 +1047,7 @@ TEST(VPRecipeTest, MayHaveSideEffectsAndMayReadWriteMemory) {
     Args.push_back(&Op1);
     Args.push_back(&Op2);
     Args.push_back(&Op3);
-    VPWidenSelectRecipe Recipe(*SelectI, make_range(Args.begin(), Args.end()),
-                               false);
+    VPWidenSelectRecipe Recipe(*SelectI, make_range(Args.begin(), Args.end()));
     EXPECT_FALSE(Recipe.mayHaveSideEffects());
     EXPECT_FALSE(Recipe.mayReadFromMemory());
     EXPECT_FALSE(Recipe.mayWriteToMemory());
@@ -1140,6 +1138,27 @@ TEST(VPRecipeTest, MayHaveSideEffectsAndMayReadWriteMemory) {
   }
 
   {
+    // Test for a call to a function without side-effects.
+    LLVMContext C;
+    Module M("", C);
+    Function *TheFn = Intrinsic::getDeclaration(&M, Intrinsic::thread_pointer);
+
+    auto *Call = CallInst::Create(TheFn->getFunctionType(), TheFn);
+    VPValue Op1;
+    VPValue Op2;
+    SmallVector<VPValue *, 2> Args;
+    Args.push_back(&Op1);
+    Args.push_back(&Op2);
+    VPWidenCallRecipe Recipe(*Call, make_range(Args.begin(), Args.end()),
+                             false);
+    EXPECT_FALSE(Recipe.mayHaveSideEffects());
+    EXPECT_FALSE(Recipe.mayReadFromMemory());
+    EXPECT_FALSE(Recipe.mayWriteToMemory());
+    EXPECT_FALSE(Recipe.mayReadOrWriteMemory());
+    delete Call;
+  }
+
+  {
     VPValue Op1;
     VPValue Op2;
     InductionDescriptor IndDesc;
@@ -1184,8 +1203,8 @@ TEST(VPRecipeTest, dump) {
       BinaryOperator::CreateAdd(UndefValue::get(Int32), UndefValue::get(Int32));
   AI->setName("a");
   SmallVector<VPValue *, 2> Args;
-  VPValue *ExtVPV1 = Plan.getOrAddExternalDef(ConstantInt::get(Int32, 1));
-  VPValue *ExtVPV2 = Plan.getOrAddExternalDef(ConstantInt::get(Int32, 2));
+  VPValue *ExtVPV1 = Plan.getVPValueOrAddLiveIn(ConstantInt::get(Int32, 1));
+  VPValue *ExtVPV2 = Plan.getVPValueOrAddLiveIn(ConstantInt::get(Int32, 2));
   Args.push_back(ExtVPV1);
   Args.push_back(ExtVPV2);
   VPWidenRecipe *WidenR =

@@ -189,8 +189,10 @@ TEST(ConfigParseTest, ParsesConfigurationBools) {
   CHECK_PARSE_BOOL(SpaceBeforeCpp11BracedList);
   CHECK_PARSE_BOOL(SpaceBeforeCtorInitializerColon);
   CHECK_PARSE_BOOL(SpaceBeforeInheritanceColon);
+  CHECK_PARSE_BOOL(SpaceBeforeJsonColon);
   CHECK_PARSE_BOOL(SpaceBeforeRangeBasedForLoopColon);
   CHECK_PARSE_BOOL(SpaceBeforeSquareBrackets);
+  CHECK_PARSE_BOOL(VerilogBreakBetweenInstancePorts);
 
   CHECK_PARSE_NESTED_BOOL(BraceWrapping, AfterCaseLabel);
   CHECK_PARSE_NESTED_BOOL(BraceWrapping, AfterClass);
@@ -470,20 +472,20 @@ TEST(ConfigParseTest, ParsesConfiguration) {
 
   CHECK_PARSE("AlignTrailingComments: Leave", AlignTrailingComments,
               FormatStyle::TrailingCommentsAlignmentStyle(
-                  {FormatStyle::TCAS_Leave, 1}));
+                  {FormatStyle::TCAS_Leave, 0}));
   CHECK_PARSE("AlignTrailingComments: Always", AlignTrailingComments,
               FormatStyle::TrailingCommentsAlignmentStyle(
-                  {FormatStyle::TCAS_Always, 1}));
+                  {FormatStyle::TCAS_Always, 0}));
   CHECK_PARSE("AlignTrailingComments: Never", AlignTrailingComments,
               FormatStyle::TrailingCommentsAlignmentStyle(
-                  {FormatStyle::TCAS_Never, 1}));
+                  {FormatStyle::TCAS_Never, 0}));
   // For backwards compatibility
   CHECK_PARSE("AlignTrailingComments: true", AlignTrailingComments,
               FormatStyle::TrailingCommentsAlignmentStyle(
-                  {FormatStyle::TCAS_Always, 1}));
+                  {FormatStyle::TCAS_Always, 0}));
   CHECK_PARSE("AlignTrailingComments: false", AlignTrailingComments,
               FormatStyle::TrailingCommentsAlignmentStyle(
-                  {FormatStyle::TCAS_Never, 1}));
+                  {FormatStyle::TCAS_Never, 0}));
   CHECK_PARSE_NESTED_VALUE("Kind: Always", AlignTrailingComments, Kind,
                            FormatStyle::TCAS_Always);
   CHECK_PARSE_NESTED_VALUE("Kind: Never", AlignTrailingComments, Kind,

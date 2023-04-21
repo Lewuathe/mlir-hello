@@ -168,6 +168,12 @@ def FunctionLike : SubsetSubject<DeclBase,
                                  [{S->getFunctionType(false) != nullptr}],
                                  "functions, function pointers">;
 
+// Function Pointer is a stricter version of FunctionLike that only allows function
+// pointers.
+def FunctionPointer : SubsetSubject<DeclBase,
+                                    [{S->isFunctionPointerType()}],
+                                    "functions pointers">;
+
 def OpenCLKernelFunction
     : SubsetSubject<Function, [{S->hasAttr<OpenCLKernelAttr>()}],
                     "kernel functions">;
@@ -287,23 +293,22 @@ class VariadicEnumArgument<string name, string type, list<string> values,
 }
 
 // This handles one spelling of an attribute.
-class Spelling<string name, string variety> {
+class Spelling<string name, string variety, int version = 1> {
   string Name = name;
   string Variety = variety;
+  int Version = version;
 }
 
 class GNU<string name> : Spelling<name, "GNU">;
 class Declspec<string name> : Spelling<name, "Declspec">;
 class Microsoft<string name> : Spelling<name, "Microsoft">;
 class CXX11<string namespace, string name, int version = 1>
-    : Spelling<name, "CXX11"> {
+    : Spelling<name, "CXX11", version> {
   string Namespace = namespace;
-  int Version = version;
 }
 class C2x<string namespace, string name, int version = 1>
-    : Spelling<name, "C2x"> {
+    : Spelling<name, "C2x", version> {
   string Namespace = namespace;
-  int Version = version;
 }
 
 class Keyword<string name> : Spelling<name, "Keyword">;
@@ -321,7 +326,8 @@ class GCC<string name, bit allowInC = 1> : Spelling<name, "GCC"> {
 // The Clang spelling implies GNU<name>, CXX11<"clang", name>, and optionally,
 // C2x<"clang", name>. This spelling should be used for any Clang-specific
 // attributes.
-class Clang<string name, bit allowInC = 1> : Spelling<name, "Clang"> {
+class Clang<string name, bit allowInC = 1, int version = 1>
+    : Spelling<name, "Clang", version> {
   bit AllowInC = allowInC;
 }
 
@@ -408,6 +414,7 @@ def TargetRISCV : TargetArch<["riscv32", "riscv64"]>;
 def TargetX86 : TargetArch<["x86"]>;
 def TargetAnyX86 : TargetArch<["x86", "x86_64"]>;
 def TargetWebAssembly : TargetArch<["wasm32", "wasm64"]>;
+def TargetNVPTX : TargetArch<["nvptx", "nvptx64"]>;
 def TargetWindows : TargetSpec {
   let OSes = ["Win32"];
 }
@@ -792,7 +799,8 @@ def XRayLogArgs : InheritableAttr {
 def PatchableFunctionEntry
     : InheritableAttr,
       TargetSpecificAttr<TargetArch<
-          ["aarch64", "aarch64_be", "riscv32", "riscv64", "x86", "x86_64"]>> {
+          ["aarch64", "aarch64_be", "loongarch32", "loongarch64", "riscv32",
+           "riscv64", "x86", "x86_64"]>> {
   let Spellings = [GCC<"patchable_function_entry">];
   let Subjects = SubjectList<[Function, ObjCMethod]>;
   let Args = [UnsignedArgument<"Count">, DefaultIntArgument<"Offset", 0>];
@@ -826,7 +834,7 @@ def Annotate : InheritableParamAttr {
     return AnnotateAttr::Create(Ctx, Annotation, nullptr, 0, CommonInfo);
   }
   static AnnotateAttr *CreateImplicit(ASTContext &Ctx, llvm::StringRef Annotation, \
-              const AttributeCommonInfo &CommonInfo = {SourceRange{}}) {
+              const AttributeCommonInfo &CommonInfo) {
     return AnnotateAttr::CreateImplicit(Ctx, Annotation, nullptr, 0, CommonInfo);
   }
   }];
@@ -918,6 +926,7 @@ def Availability : InheritableAttr {
              .Case("maccatalyst_app_extension", "macCatalyst (App Extension)")
              .Case("swift", "Swift")
              .Case("shadermodel", "HLSL ShaderModel")
+             .Case("ohos", "OpenHarmony OS")
              .Default(llvm::StringRef());
 }
 static llvm::StringRef getPlatformNameSourceSpelling(llvm::StringRef Platform) {
@@ -958,10 +967,12 @@ static llvm::StringRef canonicalizePlatformName(llvm::StringRef Platform) {
 }
 
 def ExternalSourceSymbol : InheritableAttr {
-  let Spellings = [Clang<"external_source_symbol">];
+  let Spellings = [Clang<"external_source_symbol", /*allowInC=*/1,
+                   /*version=*/20230206>];
   let Args = [StringArgument<"language", 1>,
               StringArgument<"definedIn", 1>,
-              BoolArgument<"generatedDeclaration", 1>];
+              BoolArgument<"generatedDeclaration", 1>,
+              StringArgument<"USR", 1>];
   let HasCustomParsing = 1;
   let Subjects = SubjectList<[Named]>;
   let Documentation = [ExternalSourceSymbolDocs];
@@ -1210,6 +1221,12 @@ def CUDAHost : InheritableAttr {
   let SimpleHandler = 1;
 }
 def : MutualExclusions<[CUDAGlobal, CUDAHost]>;
+
+def NVPTXKernel : InheritableAttr, TargetSpecificAttr<TargetNVPTX> {
+  let Spellings = [Clang<"nvptx_kernel">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [Undocumented];
+}
 
 def HIPManaged : InheritableAttr {
   let Spellings = [GNU<"managed">, Declspec<"__managed__">];
@@ -2831,6 +2848,7 @@ def Unavailable : InheritableAttr {
                  "IR_ARCInitReturnsUnrelated",
                  "IR_ARCFieldWithOwnership"], 1, /*fake*/ 1>];
   let Documentation = [Undocumented];
+  let MeaningfulToClassTemplateDefinition = 1;
 }
 
 def DiagnoseIf : InheritableAttr {
@@ -4128,6 +4146,13 @@ def FunctionReturnThunks : InheritableAttr,
   let Subjects = SubjectList<[Function]>;
   let Documentation = [FunctionReturnThunksDocs];
 }
+
+def WebAssemblyFuncref : TypeAttr, TargetSpecificAttr<TargetWebAssembly> {
+  let Spellings = [Keyword<"__funcref">];
+  let Documentation = [WebAssemblyExportNameDocs];
+  let Subjects = SubjectList<[FunctionPointer], ErrorDiag>;
+}
+
 def ReadOnlyPlacement : InheritableAttr {
   let Spellings = [Clang<"enforce_read_only_placement">];
   let Subjects = SubjectList<[Record]>;

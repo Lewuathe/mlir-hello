@@ -327,8 +327,8 @@ class MicrosoftCXXNameMangler {
 
   typedef llvm::DenseMap<const void *, StringRef> TemplateArgStringMap;
   TemplateArgStringMap TemplateArgStrings;
-  llvm::StringSaver TemplateArgStringStorage;
   llvm::BumpPtrAllocator TemplateArgStringStorageAlloc;
+  llvm::StringSaver TemplateArgStringStorage;
 
   typedef std::set<std::pair<int, bool>> PassObjectSizeArgsSet;
   PassObjectSizeArgsSet PassObjectSizeArgs;
@@ -845,6 +845,7 @@ void MicrosoftCXXNameMangler::mangleFloat(llvm::APFloat Number) {
   case APFloat::S_Float8E4M3FN:
   case APFloat::S_Float8E5M2FNUZ:
   case APFloat::S_Float8E4M3FNUZ:
+  case APFloat::S_Float8E4M3B11FNUZ:
     llvm_unreachable("Tried to mangle unexpected APFloat semantics");
   }
 
@@ -2481,6 +2482,13 @@ void MicrosoftCXXNameMangler::mangleType(const BuiltinType *T, Qualifiers,
     mangleArtificialTagType(TTK_Struct, "__bf16", {"__clang"});
     break;
 
+#define WASM_REF_TYPE(InternalName, MangledName, Id, SingletonId, AS)          \
+  case BuiltinType::Id:                                                        \
+    mangleArtificialTagType(TTK_Struct, MangledName);                          \
+    mangleArtificialTagType(TTK_Struct, MangledName, {"__clang"});             \
+    break;
+
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
 #define SVE_TYPE(Name, Id, SingletonId) \
   case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"

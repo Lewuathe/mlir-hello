@@ -10,15 +10,17 @@
 #include "AMDGPU.h"
 #include "AMDGPUAsmUtils.h"
 #include "AMDKernelCodeT.h"
-#include "GCNSubtarget.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/IntrinsicsR600.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/AMDHSAKernelDescriptor.h"
 #include "llvm/Support/CommandLine.h"
@@ -1919,44 +1921,53 @@ bool isKernelCC(const Function *Func) {
 }
 
 bool hasXNACK(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureXNACK];
+  return STI.hasFeature(AMDGPU::FeatureXNACK);
 }
 
 bool hasSRAMECC(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureSRAMECC];
+  return STI.hasFeature(AMDGPU::FeatureSRAMECC);
 }
 
 bool hasMIMG_R128(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureMIMG_R128] && !STI.getFeatureBits()[AMDGPU::FeatureR128A16];
+  return STI.hasFeature(AMDGPU::FeatureMIMG_R128) && !STI.hasFeature(AMDGPU::FeatureR128A16);
 }
 
 bool hasA16(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureA16];
+  return STI.hasFeature(AMDGPU::FeatureA16);
 }
 
 bool hasG16(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureG16];
+  return STI.hasFeature(AMDGPU::FeatureG16);
 }
 
 bool hasPackedD16(const MCSubtargetInfo &STI) {
-  return !STI.getFeatureBits()[AMDGPU::FeatureUnpackedD16VMem] && !isCI(STI) &&
+  return !STI.hasFeature(AMDGPU::FeatureUnpackedD16VMem) && !isCI(STI) &&
          !isSI(STI);
 }
 
+unsigned getNSAMaxSize(const MCSubtargetInfo &STI) {
+  auto Version = getIsaVersion(STI.getCPU());
+  if (Version.Major == 10)
+    return Version.Minor >= 3 ? 13 : 5;
+  if (Version.Major == 11)
+    return 5;
+  return 0;
+}
+
 bool isSI(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureSouthernIslands];
+  return STI.hasFeature(AMDGPU::FeatureSouthernIslands);
 }
 
 bool isCI(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureSeaIslands];
+  return STI.hasFeature(AMDGPU::FeatureSeaIslands);
 }
 
 bool isVI(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureVolcanicIslands];
+  return STI.hasFeature(AMDGPU::FeatureVolcanicIslands);
 }
 
 bool isGFX9(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX9];
+  return STI.hasFeature(AMDGPU::FeatureGFX9);
 }
 
 bool isGFX9_GFX10(const MCSubtargetInfo &STI) {
@@ -1976,7 +1987,7 @@ bool isGFX9Plus(const MCSubtargetInfo &STI) {
 }
 
 bool isGFX10(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX10];
+  return STI.hasFeature(AMDGPU::FeatureGFX10);
 }
 
 bool isGFX10Plus(const MCSubtargetInfo &STI) {
@@ -1984,7 +1995,7 @@ bool isGFX10Plus(const MCSubtargetInfo &STI) {
 }
 
 bool isGFX11(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX11];
+  return STI.hasFeature(AMDGPU::FeatureGFX11);
 }
 
 bool isGFX11Plus(const MCSubtargetInfo &STI) {
@@ -2004,39 +2015,39 @@ bool isGFX10Before1030(const MCSubtargetInfo &STI) {
 }
 
 bool isGCN3Encoding(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGCN3Encoding];
+  return STI.hasFeature(AMDGPU::FeatureGCN3Encoding);
 }
 
 bool isGFX10_AEncoding(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX10_AEncoding];
+  return STI.hasFeature(AMDGPU::FeatureGFX10_AEncoding);
 }
 
 bool isGFX10_BEncoding(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX10_BEncoding];
+  return STI.hasFeature(AMDGPU::FeatureGFX10_BEncoding);
 }
 
 bool hasGFX10_3Insts(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX10_3Insts];
+  return STI.hasFeature(AMDGPU::FeatureGFX10_3Insts);
 }
 
 bool isGFX90A(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX90AInsts];
+  return STI.hasFeature(AMDGPU::FeatureGFX90AInsts);
 }
 
 bool isGFX940(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureGFX940Insts];
+  return STI.hasFeature(AMDGPU::FeatureGFX940Insts);
 }
 
 bool hasArchitectedFlatScratch(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureArchitectedFlatScratch];
+  return STI.hasFeature(AMDGPU::FeatureArchitectedFlatScratch);
 }
 
 bool hasMAIInsts(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureMAIInsts];
+  return STI.hasFeature(AMDGPU::FeatureMAIInsts);
 }
 
 bool hasVOPD(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureVOPD];
+  return STI.hasFeature(AMDGPU::FeatureVOPD);
 }
 
 int32_t getTotalNumVGPRs(bool has90AInsts, int32_t ArgNumAGPR,
@@ -2585,77 +2596,6 @@ unsigned getNumFlatOffsetBits(const MCSubtargetInfo &ST) {
     return 12;
 
   return 13;
-}
-
-// Given Imm, split it into the values to put into the SOffset and ImmOffset
-// fields in an MUBUF instruction. Return false if it is not possible (due to a
-// hardware bug needing a workaround).
-//
-// The required alignment ensures that individual address components remain
-// aligned if they are aligned to begin with. It also ensures that additional
-// offsets within the given alignment can be added to the resulting ImmOffset.
-bool splitMUBUFOffset(uint32_t Imm, uint32_t &SOffset, uint32_t &ImmOffset,
-                      const GCNSubtarget *Subtarget, Align Alignment) {
-  const uint32_t MaxImm = alignDown(4095, Alignment.value());
-  uint32_t Overflow = 0;
-
-  if (Imm > MaxImm) {
-    if (Imm <= MaxImm + 64) {
-      // Use an SOffset inline constant for 4..64
-      Overflow = Imm - MaxImm;
-      Imm = MaxImm;
-    } else {
-      // Try to keep the same value in SOffset for adjacent loads, so that
-      // the corresponding register contents can be re-used.
-      //
-      // Load values with all low-bits (except for alignment bits) set into
-      // SOffset, so that a larger range of values can be covered using
-      // s_movk_i32.
-      //
-      // Atomic operations fail to work correctly when individual address
-      // components are unaligned, even if their sum is aligned.
-      uint32_t High = (Imm + Alignment.value()) & ~4095;
-      uint32_t Low = (Imm + Alignment.value()) & 4095;
-      Imm = Low;
-      Overflow = High - Alignment.value();
-    }
-  }
-
-  // There is a hardware bug in SI and CI which prevents address clamping in
-  // MUBUF instructions from working correctly with SOffsets. The immediate
-  // offset is unaffected.
-  if (Overflow > 0 &&
-      Subtarget->getGeneration() <= AMDGPUSubtarget::SEA_ISLANDS)
-    return false;
-
-  ImmOffset = Imm;
-  SOffset = Overflow;
-  return true;
-}
-
-SIModeRegisterDefaults::SIModeRegisterDefaults(const Function &F) {
-  *this = getDefaultForCallingConv(F.getCallingConv());
-
-  StringRef IEEEAttr = F.getFnAttribute("amdgpu-ieee").getValueAsString();
-  if (!IEEEAttr.empty())
-    IEEE = IEEEAttr == "true";
-
-  StringRef DX10ClampAttr
-    = F.getFnAttribute("amdgpu-dx10-clamp").getValueAsString();
-  if (!DX10ClampAttr.empty())
-    DX10Clamp = DX10ClampAttr == "true";
-
-  StringRef DenormF32Attr = F.getFnAttribute("denormal-fp-math-f32").getValueAsString();
-  if (!DenormF32Attr.empty())
-    FP32Denormals = parseDenormalFPAttribute(DenormF32Attr);
-
-  StringRef DenormAttr = F.getFnAttribute("denormal-fp-math").getValueAsString();
-  if (!DenormAttr.empty()) {
-    DenormalMode DenormMode = parseDenormalFPAttribute(DenormAttr);
-    if (DenormF32Attr.empty())
-      FP32Denormals = DenormMode;
-    FP64FP16Denormals = DenormMode;
-  }
 }
 
 namespace {
