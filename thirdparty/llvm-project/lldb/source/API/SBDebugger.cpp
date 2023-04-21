@@ -481,8 +481,7 @@ lldb::SBStructuredData SBDebugger::GetSetting(const char *setting) {
     m_opaque_sp->DumpAllPropertyValues(&exe_ctx, json_strm, /*dump_mask*/ 0,
                                        /*is_json*/ true);
 
-  data.m_impl_up->SetObjectSP(
-      StructuredData::ParseJSON(json_strm.GetString().str()));
+  data.m_impl_up->SetObjectSP(StructuredData::ParseJSON(json_strm.GetString()));
   return data;
 }
 
@@ -1684,9 +1683,39 @@ void SBDebugger::SetLoggingCallback(lldb::LogOutputCallback log_callback,
   }
 }
 
+void SBDebugger::SetDestroyCallback(
+    lldb::SBDebuggerDestroyCallback destroy_callback, void *baton) {
+  LLDB_INSTRUMENT_VA(this, destroy_callback, baton);
+  if (m_opaque_sp) {
+    return m_opaque_sp->SetDestroyCallback(
+        destroy_callback, baton);
+  }
+}
+
 SBTrace
 SBDebugger::LoadTraceFromFile(SBError &error,
                               const SBFileSpec &trace_description_file) {
   LLDB_INSTRUMENT_VA(this, error, trace_description_file);
   return SBTrace::LoadTraceFromFile(error, *this, trace_description_file);
+}
+
+void SBDebugger::RequestInterrupt() {
+  LLDB_INSTRUMENT_VA(this);
+  
+  if (m_opaque_sp)
+    m_opaque_sp->RequestInterrupt();  
+}
+void SBDebugger::CancelInterruptRequest()  {
+  LLDB_INSTRUMENT_VA(this);
+  
+  if (m_opaque_sp)
+    m_opaque_sp->CancelInterruptRequest();  
+}
+
+bool SBDebugger::InterruptRequested()   {
+  LLDB_INSTRUMENT_VA(this);
+  
+  if (m_opaque_sp)
+    return m_opaque_sp->InterruptRequested();
+  return false;
 }

@@ -100,6 +100,20 @@ class AllocLikeOp<string mnemonic,
     static StringRef getAlignmentAttrStrName() { return "alignment"; }
 
     MemRefType getType() { return getResult().getType().cast<MemRefType>(); }
+
+    SmallVector<OpFoldResult> getMixedSizes() {
+      SmallVector<OpFoldResult> result;
+      unsigned ctr = 0;
+      OpBuilder b(getContext());
+      for (int64_t i = 0, e = getType().getRank(); i < e; ++i) {
+        if (getType().isDynamicDim(i)) {
+          result.push_back(getDynamicSizes()[ctr++]);
+        } else {
+          result.push_back(b.getIndexAttr(getType().getShape()[i]));
+        }
+      }
+      return result;
+    }
   }];
 
   let assemblyFormat = [{
@@ -761,6 +775,17 @@ def MemRef_DmaStartOp : MemRef_Op<"dma_start"> {
         return nullptr;
       return getOperand(getNumOperands() - 1);
     }
+
+    void getEffects(
+        SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &
+        effects) {
+      effects.emplace_back(MemoryEffects::Read::get(), getSrcMemRef(),
+                           SideEffects::DefaultResource::get());
+      effects.emplace_back(MemoryEffects::Write::get(), getDstMemRef(),
+                           SideEffects::DefaultResource::get());
+      effects.emplace_back(MemoryEffects::Read::get(), getTagMemRef(),
+                           SideEffects::DefaultResource::get());
+    }
   }];
   let hasCustomAssemblyFormat = 1;
   let hasFolder = 1;
@@ -802,6 +827,12 @@ def MemRef_DmaWaitOp : MemRef_Op<"dma_wait"> {
     /// Returns the rank (number of indices) of the tag memref.
     unsigned getTagMemRefRank() {
       return getTagMemRef().getType().cast<MemRefType>().getRank();
+    }
+    void getEffects(
+        SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &
+        effects) {
+      effects.emplace_back(MemoryEffects::Read::get(), getTagMemRef(),
+                           SideEffects::DefaultResource::get());
     }
   }];
   let hasFolder = 1;
@@ -1359,18 +1390,16 @@ def MemRef_ReinterpretCastOp
 
   let extraClassDeclaration = extraBaseClassDeclaration # [{
     // The result of the op is always a ranked memref.
-    MemRefType getType() { return getResult().getType().cast<MemRefType>(); }
+    MemRefType getType() { return getResult().getType(); }
     Value getViewSource() { return getSource(); }
 
-    /// Return the rank of the source ShapedType.
-    unsigned getResultRank() {
-      return getResult().getType().cast<ShapedType>().getRank();
-    }
+    /// Return the rank of the result type.
+    unsigned getResultRank() { return getType().getRank(); }
 
     /// Return the expected rank of each of the`static_offsets`, `static_sizes`
     /// and `static_strides` attributes.
     std::array<unsigned, 3> getArrayAttrMaxRanks() {
-      unsigned resultRank = getResult().getType().cast<ShapedType>().getRank();
+      unsigned resultRank = getType().getRank();
       return {1, resultRank, resultRank};
     }
 
@@ -1799,8 +1828,7 @@ def SubViewOp : MemRef_OpWithOffsetSizesAndStrides<"subview", [
     The representation based on offsets, sizes and strides support a
     partially-static specification via attributes specified through the
     `static_offsets`, `static_sizes` and `static_strides` arguments. A special
-    sentinel value ShapedType::kDynamic and
-    ShapedType::kDynamic encodes that the corresponding entry has
+    sentinel value ShapedType::kDynamic encodes that the corresponding entry has
     a dynamic value.
 
     A subview operation may additionally reduce the rank of the resulting view
@@ -1932,13 +1960,13 @@ def SubViewOp : MemRef_OpWithOffsetSizesAndStrides<"subview", [
   }];
 
   let builders = [
-    // Build a SubViewOp with mixed static and dynamic entries and custom
-    // result type. If the type passed is nullptr, it is inferred.
+    // Build a SubViewOp with mixed static and dynamic entries and inferred
+    // result type.
     OpBuilder<(ins "Value":$source, "ArrayRef<OpFoldResult>":$offsets,
       "ArrayRef<OpFoldResult>":$sizes, "ArrayRef<OpFoldResult>":$strides,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
-    // Build a SubViewOp with mixed static and dynamic entries and inferred
-    // result type.
+    // Build a SubViewOp with mixed static and dynamic entries and custom
+    // result type. If the type passed is nullptr, it is inferred.
     OpBuilder<(ins "MemRefType":$resultType, "Value":$source,
       "ArrayRef<OpFoldResult>":$offsets, "ArrayRef<OpFoldResult>":$sizes,
       "ArrayRef<OpFoldResult>":$strides,
@@ -2091,7 +2119,6 @@ def MemRef_TransposeOp : MemRef_Op<"transpose", [
 
   let extraClassDeclaration = [{
     static StringRef getPermutationAttrStrName() { return "permutation"; }
-    ShapedType getShapedType() { return getIn().getType().cast<ShapedType>(); }
   }];
 
   let hasCustomAssemblyFormat = 1;

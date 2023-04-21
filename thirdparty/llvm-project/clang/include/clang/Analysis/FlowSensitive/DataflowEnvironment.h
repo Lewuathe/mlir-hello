@@ -22,6 +22,7 @@
 #include "clang/Analysis/FlowSensitive/ControlFlowContext.h"
 #include "clang/Analysis/FlowSensitive/DataflowAnalysisContext.h"
 #include "clang/Analysis/FlowSensitive/DataflowLattice.h"
+#include "clang/Analysis/FlowSensitive/Logger.h"
 #include "clang/Analysis/FlowSensitive/StorageLocation.h"
 #include "clang/Analysis/FlowSensitive/Value.h"
 #include "llvm/ADT/DenseMap.h"
@@ -177,9 +178,13 @@ public:
   /// with a symbolic representation of the `this` pointee.
   Environment(DataflowAnalysisContext &DACtx, const DeclContext &DeclCtx);
 
-  const DataflowAnalysisContext::Options &getAnalysisOptions() {
+  const DataflowAnalysisContext::Options &getAnalysisOptions() const {
     return DACtx->getOptions();
   }
+
+  Arena &arena() const { return DACtx->arena(); }
+
+  Logger &logger() const { return *DACtx->getOptions().Log; }
 
   /// Creates and returns an environment to use for an inline analysis  of the
   /// callee. Uses the storage location from each argument in the `Call` as the
@@ -316,44 +321,33 @@ public:
   /// is assigned a storage location in the environment, otherwise returns null.
   Value *getValue(const Expr &E, SkipPast SP) const;
 
-  /// Transfers ownership of `Loc` to the analysis context and returns a
-  /// reference to it.
-  ///
-  /// Requirements:
-  ///
-  ///  `Loc` must not be null.
-  template <typename T>
-  std::enable_if_t<std::is_base_of<StorageLocation, T>::value, T &>
-  takeOwnership(std::unique_ptr<T> Loc) {
-    return DACtx->takeOwnership(std::move(Loc));
-  }
+  // FIXME: should we deprecate the following & call arena().create() directly?
 
-  /// Transfers ownership of `Val` to the analysis context and returns a
-  /// reference to it.
+  /// Creates a `T` (some subclass of `Value`), forwarding `args` to the
+  /// constructor, and returns a reference to it.
   ///
-  /// Requirements:
-  ///
-  ///  `Val` must not be null.
-  template <typename T>
+  /// The analysis context takes ownership of the created object. The object
+  /// will be destroyed when the analysis context is destroyed.
+  template <typename T, typename... Args>
   std::enable_if_t<std::is_base_of<Value, T>::value, T &>
-  takeOwnership(std::unique_ptr<T> Val) {
-    return DACtx->takeOwnership(std::move(Val));
+  create(Args &&...args) {
+    return arena().create<T>(std::forward<Args>(args)...);
   }
 
   /// Returns a symbolic boolean value that models a boolean literal equal to
   /// `Value`
   AtomicBoolValue &getBoolLiteralValue(bool Value) const {
-    return DACtx->getBoolLiteralValue(Value);
+    return arena().makeLiteral(Value);
   }
 
   /// Returns an atomic boolean value.
   BoolValue &makeAtomicBoolValue() const {
-    return DACtx->createAtomicBoolValue();
+    return arena().create<AtomicBoolValue>();
   }
 
   /// Returns a unique instance of boolean Top.
   BoolValue &makeTopBoolValue() const {
-    return DACtx->createTopBoolValue();
+    return arena().create<TopBoolValue>();
   }
 
   /// Returns a boolean value that represents the conjunction of `LHS` and
@@ -361,7 +355,7 @@ public:
   /// order, will return the same result. If the given boolean values represent
   /// the same value, the result will be the value itself.
   BoolValue &makeAnd(BoolValue &LHS, BoolValue &RHS) const {
-    return DACtx->getOrCreateConjunction(LHS, RHS);
+    return arena().makeAnd(LHS, RHS);
   }
 
   /// Returns a boolean value that represents the disjunction of `LHS` and
@@ -369,13 +363,13 @@ public:
   /// order, will return the same result. If the given boolean values represent
   /// the same value, the result will be the value itself.
   BoolValue &makeOr(BoolValue &LHS, BoolValue &RHS) const {
-    return DACtx->getOrCreateDisjunction(LHS, RHS);
+    return arena().makeOr(LHS, RHS);
   }
 
   /// Returns a boolean value that represents the negation of `Val`. Subsequent
   /// calls with the same argument will return the same result.
   BoolValue &makeNot(BoolValue &Val) const {
-    return DACtx->getOrCreateNegation(Val);
+    return arena().makeNot(Val);
   }
 
   /// Returns a boolean value represents `LHS` => `RHS`. Subsequent calls with
@@ -383,7 +377,7 @@ public:
   /// values represent the same value, the result will be a value that
   /// represents the true boolean literal.
   BoolValue &makeImplication(BoolValue &LHS, BoolValue &RHS) const {
-    return DACtx->getOrCreateImplication(LHS, RHS);
+    return arena().makeImplies(LHS, RHS);
   }
 
   /// Returns a boolean value represents `LHS` <=> `RHS`. Subsequent calls with
@@ -391,21 +385,11 @@ public:
   /// result. If the given boolean values represent the same value, the result
   /// will be a value that represents the true boolean literal.
   BoolValue &makeIff(BoolValue &LHS, BoolValue &RHS) const {
-    return DACtx->getOrCreateIff(LHS, RHS);
+    return arena().makeEquals(LHS, RHS);
   }
 
   /// Returns the token that identifies the flow condition of the environment.
   AtomicBoolValue &getFlowConditionToken() const { return *FlowConditionToken; }
-
-  /// Builds and returns the logical formula defining the flow condition
-  /// identified by `Token`. If a value in the formula is present as a key in
-  /// `Substitutions`, it will be substituted with the value it maps to.
-  BoolValue &buildAndSubstituteFlowCondition(
-      AtomicBoolValue &Token,
-      llvm::DenseMap<AtomicBoolValue *, BoolValue *> Substitutions) {
-    return DACtx->buildAndSubstituteFlowCondition(Token,
-                                                  std::move(Substitutions));
-  }
 
   /// Adds `Val` to the set of clauses that constitute the flow condition.
   void addToFlowCondition(BoolValue &Val);
@@ -457,8 +441,9 @@ private:
   void pushCallInternal(const FunctionDecl *FuncDecl,
                         ArrayRef<const Expr *> Args);
 
-  /// Assigns storage locations and values to all variables in `Vars`.
-  void initVars(llvm::DenseSet<const VarDecl *> Vars);
+  /// Assigns storage locations and values to all global variables, fields
+  /// and functions referenced in `FuncDecl`. `FuncDecl` must have a body.
+  void initFieldsGlobalsAndFuncs(const FunctionDecl *FuncDecl);
 
   // `DACtx` is not null and not owned by this object.
   DataflowAnalysisContext *DACtx;

@@ -3217,6 +3217,12 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
     Out << (type_name == InternalName ? "u" : "") << type_name.size()          \
         << type_name;                                                          \
     break;
+#define SVE_OPAQUE_TYPE(InternalName, MangledName, Id, SingletonId)            \
+  case BuiltinType::Id:                                                        \
+    type_name = MangledName;                                                   \
+    Out << (type_name == InternalName ? "u" : "") << type_name.size()          \
+        << type_name;                                                          \
+    break;
 #include "clang/Basic/AArch64SVEACLETypes.def"
 #define PPC_VECTOR_TYPE(Name, Id, Size) \
   case BuiltinType::Id: \
@@ -3231,6 +3237,12 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
     Out << 'u' << type_name.size() << type_name;                               \
     break;
 #include "clang/Basic/RISCVVTypes.def"
+#define WASM_REF_TYPE(InternalName, MangledName, Id, SingletonId, AS)          \
+  case BuiltinType::Id:                                                        \
+    type_name = MangledName;                                                   \
+    Out << 'u' << type_name.size() << type_name;                               \
+    break;
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
   }
 }
 

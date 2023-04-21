@@ -474,8 +474,6 @@ typedef unsigned LLVMAttributeIndex;
  * @}
  */
 
-void LLVMInitializeCore(LLVMPassRegistryRef R);
-
 /** Deallocate and destroy all ManagedStatic variables.
     @see llvm::llvm_shutdown
     @see ManagedStatic */
@@ -1411,8 +1409,6 @@ LLVMBool LLVMIsLiteralStruct(LLVMTypeRef StructTy);
 /**
  * Obtain the element type of an array or vector type.
  *
- * This currently also works for pointer types, but this usage is deprecated.
- *
  * @see llvm::SequentialType::getElementType()
  */
 LLVMTypeRef LLVMGetElementType(LLVMTypeRef Ty);
@@ -2259,9 +2255,6 @@ LLVMValueRef LLVMConstPointerCast(LLVMValueRef ConstantVal,
 LLVMValueRef LLVMConstIntCast(LLVMValueRef ConstantVal, LLVMTypeRef ToType,
                               LLVMBool isSigned);
 LLVMValueRef LLVMConstFPCast(LLVMValueRef ConstantVal, LLVMTypeRef ToType);
-LLVMValueRef LLVMConstSelect(LLVMValueRef ConstantCondition,
-                             LLVMValueRef ConstantIfTrue,
-                             LLVMValueRef ConstantIfFalse);
 LLVMValueRef LLVMConstExtractElement(LLVMValueRef VectorConstant,
                                      LLVMValueRef IndexConstant);
 LLVMValueRef LLVMConstInsertElement(LLVMValueRef VectorConstant,
@@ -4162,21 +4155,6 @@ LLVMMemoryBufferRef LLVMCreateMemoryBufferWithMemoryRangeCopy(const char *InputD
 const char *LLVMGetBufferStart(LLVMMemoryBufferRef MemBuf);
 size_t LLVMGetBufferSize(LLVMMemoryBufferRef MemBuf);
 void LLVMDisposeMemoryBuffer(LLVMMemoryBufferRef MemBuf);
-
-/**
- * @}
- */
-
-/**
- * @defgroup LLVMCCorePassRegistry Pass Registry
- * @ingroup LLVMCCore
- *
- * @{
- */
-
-/** Return the global pass registry, for use with initialization functions.
-    @see llvm::PassRegistry::getPassRegistry */
-LLVMPassRegistryRef LLVMGetGlobalPassRegistry(void);
 
 /**
  * @}
