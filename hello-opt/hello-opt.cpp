@@ -24,6 +24,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Target/LLVMIR/Export.h"
+#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 
 #include "llvm/IR/Module.h"
@@ -42,6 +43,7 @@ static cl::opt<std::string> inputFilename(cl::Positional,
                                           cl::value_desc("filename"));
 
 int dumpLLVMIR(mlir::ModuleOp module) {
+  mlir::registerBuiltinDialectTranslation(*module->getContext());
   mlir::registerLLVMDialectTranslation(*module->getContext());
   // Convert the module to LLVM IR in a new LLVM IR context.
 
@@ -55,7 +57,19 @@ int dumpLLVMIR(mlir::ModuleOp module) {
   // Initialize LLVM targets.
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
-  mlir::ExecutionEngine::setupTargetTriple(llvmModule.get());
+  auto tmBuilderOrError = llvm::orc::JITTargetMachineBuilder::detectHost();
+  if (!tmBuilderOrError) {
+    llvm::errs() << "Could not create JITTargetMachineBuilder\n";
+    return -1;
+  }
+  auto tmOrError = tmBuilderOrError->createTargetMachine();
+  if (!tmOrError) {
+    llvm::errs() << "Could not create TargetMachine\n";
+    return -1;
+  }
+  mlir::ExecutionEngine::setupTargetTripleAndDataLayout(llvmModule.get(),
+                                                        tmOrError.get().get());;
+//  mlir::ExecutionEngine::setupTargetTriple(llvmModule.get());
 
   // Optionally run an optimization pipeline over the llvm module.
   auto optPipeline = mlir::makeOptimizingTransformer(0, 0, nullptr);
@@ -92,7 +106,8 @@ int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningOpRef<mlir::Modul
 
   // Register passes to be applied in this compile process
   mlir::PassManager passManager(&context);
-  mlir::applyPassManagerCLOptions(passManager);
+  if(mlir::failed(mlir::applyPassManagerCLOptions(passManager)))
+    return 4;
 
   passManager.addPass(hello::createLowerToAffinePass());
   passManager.addPass(hello::createLowerToLLVMPass());

@@ -236,6 +236,10 @@ const CodeGenOptions &ABIInfo::getCodeGenOpts() const {
 
 bool ABIInfo::isAndroid() const { return getTarget().getTriple().isAndroid(); }
 
+bool ABIInfo::isOHOSFamily() const {
+  return getTarget().getTriple().isOHOSFamily();
+}
+
 bool ABIInfo::isHomogeneousAggregateBaseType(QualType Ty) const {
   return false;
 }
@@ -295,17 +299,13 @@ LLVM_DUMP_METHOD void ABIArgInfo::dump() const {
 static llvm::Value *emitRoundPointerUpToAlignment(CodeGenFunction &CGF,
                                                   llvm::Value *Ptr,
                                                   CharUnits Align) {
-  llvm::Value *PtrAsInt = Ptr;
   // OverflowArgArea = (OverflowArgArea + Align - 1) & -Align;
-  PtrAsInt = CGF.Builder.CreatePtrToInt(PtrAsInt, CGF.IntPtrTy);
-  PtrAsInt = CGF.Builder.CreateAdd(PtrAsInt,
-        llvm::ConstantInt::get(CGF.IntPtrTy, Align.getQuantity() - 1));
-  PtrAsInt = CGF.Builder.CreateAnd(PtrAsInt,
-           llvm::ConstantInt::get(CGF.IntPtrTy, -Align.getQuantity()));
-  PtrAsInt = CGF.Builder.CreateIntToPtr(PtrAsInt,
-                                        Ptr->getType(),
-                                        Ptr->getName() + ".aligned");
-  return PtrAsInt;
+  llvm::Value *RoundUp = CGF.Builder.CreateConstInBoundsGEP1_32(
+      CGF.Builder.getInt8Ty(), Ptr, Align.getQuantity() - 1);
+  return CGF.Builder.CreateIntrinsic(
+      llvm::Intrinsic::ptrmask, {CGF.AllocaInt8PtrTy, CGF.IntPtrTy},
+      {RoundUp, llvm::ConstantInt::get(CGF.IntPtrTy, -Align.getQuantity())},
+      nullptr, Ptr->getName() + ".aligned");
 }
 
 /// Emit va_arg for a platform using the common void* representation,
@@ -467,7 +467,7 @@ unsigned TargetCodeGenInfo::getSizeOfUnwindException() const {
   // Verified for:
   //   x86-64     FreeBSD, Linux, Darwin
   //   x86-32     FreeBSD, Linux, Darwin
-  //   PowerPC    Linux, Darwin
+  //   PowerPC    Linux
   //   ARM        Darwin (*not* EABI)
   //   AArch64    Linux
   return 32;
@@ -898,6 +898,15 @@ public:
       if (!FD->doesThisDeclarationHaveABody() && !FD->hasPrototype())
         Fn->addFnAttr("no-prototype");
     }
+  }
+
+  /// Return the WebAssembly externref reference type.
+  virtual llvm::Type *getWasmExternrefReferenceType() const override {
+    return llvm::Type::getWasm_ExternrefTy(getABIInfo().getVMContext());
+  }
+  /// Return the WebAssembly funcref reference type.
+  virtual llvm::Type *getWasmFuncrefReferenceType() const override {
+    return llvm::Type::getWasm_FuncrefTy(getABIInfo().getVMContext());
   }
 };
 
@@ -2381,9 +2390,7 @@ class X86_64ABIInfo : public ABIInfo {
       return false;
 
     const llvm::Triple &Triple = getTarget().getTriple();
-    if (Triple.isOSDarwin() || Triple.isPS())
-      return false;
-    if (Triple.isOSFreeBSD() && Triple.getOSMajorVersion() >= 10)
+    if (Triple.isOSDarwin() || Triple.isPS() || Triple.isOSFreeBSD())
       return false;
     return true;
   }
@@ -5730,7 +5737,7 @@ ABIArgInfo AArch64ABIInfo::coerceIllegalVector(QualType Ty) const {
 
   uint64_t Size = getContext().getTypeSize(Ty);
   // Android promotes <2 x i8> to i16, not i32
-  if (isAndroid() && (Size <= 16)) {
+  if ((isAndroid() || isOHOSFamily()) && (Size <= 16)) {
     llvm::Type *ResType = llvm::Type::getInt16Ty(getVMContext());
     return ABIArgInfo::getDirect(ResType);
   }
@@ -6337,7 +6344,7 @@ public:
     case llvm::Triple::MuslEABIHF:
       return true;
     default:
-      return false;
+      return getTarget().getTriple().isOHOSFamily();
     }
   }
 
@@ -7366,6 +7373,11 @@ void NVPTXTargetCodeGenInfo::setTargetAttributes(
       }
     }
   }
+
+  // Attach kernel metadata directly if compiling for NVPTX.
+  if (FD->hasAttr<NVPTXKernelAttr>()) {
+    addNVVMMetadata(F, "kernel", 1);
+  }
 }
 
 void NVPTXTargetCodeGenInfo::addNVVMMetadata(llvm::GlobalValue *GV,
@@ -7904,7 +7916,7 @@ bool SystemZTargetCodeGenInfo::isVectorTypeBased(const Type *Ty,
     if (isVectorTypeBased(FT->getReturnType().getTypePtr(), /*IsParam*/true))
       return true;
   if (const FunctionProtoType *Proto = Ty->getAs<FunctionProtoType>())
-    for (auto ParamType : Proto->getParamTypes())
+    for (const auto &ParamType : Proto->getParamTypes())
       if (isVectorTypeBased(ParamType.getTypePtr(), /*IsParam*/true))
         return true;
 
@@ -9462,6 +9474,7 @@ public:
                                          llvm::Function *BlockInvokeFunc,
                                          llvm::Type *BlockTy) const override;
   bool shouldEmitStaticExternCAliases() const override;
+  bool shouldEmitDWARFBitFieldSeparators() const override;
   void setCUDAKernelCallingConvention(const FunctionType *&FT) const override;
 };
 }
@@ -9629,7 +9642,7 @@ AMDGPUTargetCodeGenInfo::getGlobalVarAddressSpace(CodeGenModule &CGM,
     return AddrSpace;
 
   // Only promote to address space 4 if VarDecl has constant initialization.
-  if (CGM.isTypeConstant(D->getType(), false) &&
+  if (CGM.isTypeConstant(D->getType(), false, false) &&
       D->hasConstantInitialization()) {
     if (auto ConstAS = CGM.getTarget().getConstantAddressSpace())
       return *ConstAS;
@@ -9677,6 +9690,10 @@ AMDGPUTargetCodeGenInfo::getLLVMSyncScopeID(const LangOptions &LangOpts,
 
 bool AMDGPUTargetCodeGenInfo::shouldEmitStaticExternCAliases() const {
   return false;
+}
+
+bool AMDGPUTargetCodeGenInfo::shouldEmitDWARFBitFieldSeparators() const {
+  return true;
 }
 
 void AMDGPUTargetCodeGenInfo::setCUDAKernelCallingConvention(
@@ -10556,6 +10573,7 @@ public:
   }
 
   unsigned getOpenCLKernelCallingConv() const override;
+  llvm::Type *getOpenCLType(CodeGenModule &CGM, const Type *T) const override;
 };
 class SPIRVTargetCodeGenInfo : public CommonSPIRTargetCodeGenInfo {
 public:
@@ -10970,8 +10988,82 @@ static bool getTypeString(SmallStringEnc &Enc, const Decl *D,
   return false;
 }
 
+/// Construct a SPIR-V target extension type for the given OpenCL image type.
+static llvm::Type *getSPIRVImageType(llvm::LLVMContext &Ctx, StringRef BaseType,
+                                     StringRef OpenCLName,
+                                     unsigned AccessQualifier) {
+  // These parameters compare to the operands of OpTypeImage (see
+  // https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpTypeImage
+  // for more details). The first 6 integer parameters all default to 0, and
+  // will be changed to 1 only for the image type(s) that set the parameter to
+  // one. The 7th integer parameter is the access qualifier, which is tacked on
+  // at the end.
+  SmallVector<unsigned, 7> IntParams = {0, 0, 0, 0, 0, 0};
+
+  // Choose the dimension of the image--this corresponds to the Dim enum in
+  // SPIR-V (first integer parameter of OpTypeImage).
+  if (OpenCLName.startswith("image2d"))
+    IntParams[0] = 1; // 1D
+  else if (OpenCLName.startswith("image3d"))
+    IntParams[0] = 2; // 2D
+  else if (OpenCLName == "image1d_buffer")
+    IntParams[0] = 5; // Buffer
+  else
+    assert(OpenCLName.startswith("image1d") && "Unknown image type");
+
+  // Set the other integer parameters of OpTypeImage if necessary. Note that the
+  // OpenCL image types don't provide any information for the Sampled or
+  // Image Format parameters.
+  if (OpenCLName.contains("_depth"))
+    IntParams[1] = 1;
+  if (OpenCLName.contains("_array"))
+    IntParams[2] = 1;
+  if (OpenCLName.contains("_msaa"))
+    IntParams[3] = 1;
+
+  // Access qualifier
+  IntParams.push_back(AccessQualifier);
+
+  return llvm::TargetExtType::get(Ctx, BaseType, {llvm::Type::getVoidTy(Ctx)},
+                                  IntParams);
+}
+
+llvm::Type *CommonSPIRTargetCodeGenInfo::getOpenCLType(CodeGenModule &CGM,
+                                                       const Type *Ty) const {
+  llvm::LLVMContext &Ctx = CGM.getLLVMContext();
+  if (auto *PipeTy = dyn_cast<PipeType>(Ty))
+    return llvm::TargetExtType::get(Ctx, "spirv.Pipe", {},
+                                    {!PipeTy->isReadOnly()});
+  if (auto *BuiltinTy = dyn_cast<BuiltinType>(Ty)) {
+    enum AccessQualifier : unsigned { AQ_ro = 0, AQ_wo = 1, AQ_rw = 2 };
+    switch (BuiltinTy->getKind()) {
+#define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
+    case BuiltinType::Id:                                                      \
+      return getSPIRVImageType(Ctx, "spirv.Image", #ImgType, AQ_##Suffix);
+#include "clang/Basic/OpenCLImageTypes.def"
+    case BuiltinType::OCLSampler:
+      return llvm::TargetExtType::get(Ctx, "spirv.Sampler");
+    case BuiltinType::OCLEvent:
+      return llvm::TargetExtType::get(Ctx, "spirv.Event");
+    case BuiltinType::OCLClkEvent:
+      return llvm::TargetExtType::get(Ctx, "spirv.DeviceEvent");
+    case BuiltinType::OCLQueue:
+      return llvm::TargetExtType::get(Ctx, "spirv.Queue");
+    case BuiltinType::OCLReserveID:
+      return llvm::TargetExtType::get(Ctx, "spirv.ReserveId");
+#define INTEL_SUBGROUP_AVC_TYPE(Name, Id)                                      \
+    case BuiltinType::OCLIntelSubgroupAVC##Id:                                 \
+      return llvm::TargetExtType::get(Ctx, "spirv.Avc" #Id "INTEL");
+#include "clang/Basic/OpenCLExtensionTypes.def"
+    default:
+      return nullptr;
+    }
+  }
+
+  return nullptr;
+}
 //===----------------------------------------------------------------------===//
-// RISCV ABI Implementation
+// RISC-V ABI Implementation
 //===----------------------------------------------------------------------===//
 
 namespace {
@@ -11070,10 +11162,9 @@ bool RISCVABIInfo::detectFPCCEligibleStructHelper(QualType Ty, CharUnits CurOff,
     uint64_t Size = getContext().getTypeSize(Ty);
     if (IsInt && Size > XLen)
       return false;
-    // Can't be eligible if larger than the FP registers. Half precision isn't
-    // currently supported on RISC-V and the ABI hasn't been confirmed, so
-    // default to the integer ABI in that case.
-    if (IsFloat && (Size > FLen || Size < 32))
+    // Can't be eligible if larger than the FP registers. Handling of half
+    // precision values has been specified in the ABI, so don't block those.
+    if (IsFloat && Size > FLen)
       return false;
     // Can't be eligible if an integer type was already found (int+int pairs
     // are not eligible).

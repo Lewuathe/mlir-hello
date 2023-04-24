@@ -2198,6 +2198,13 @@ QualType Sema::BuildPointerType(QualType T,
   if (getLangOpts().OpenCL)
     T = deduceOpenCLPointeeAddrSpace(*this, T);
 
+  // In WebAssembly, pointers to reference types are illegal.
+  if (getASTContext().getTargetInfo().getTriple().isWasm() &&
+      T->isWebAssemblyReferenceType()) {
+    Diag(Loc, diag::err_wasm_reference_pr) << 0;
+    return QualType();
+  }
+
   // Build the pointer type.
   return Context.getPointerType(T);
 }
@@ -2272,6 +2279,13 @@ QualType Sema::BuildReferenceType(QualType T, bool SpelledAsLValue,
 
   if (getLangOpts().OpenCL)
     T = deduceOpenCLPointeeAddrSpace(*this, T);
+
+  // In WebAssembly, references to reference types are illegal.
+  if (getASTContext().getTargetInfo().getTriple().isWasm() &&
+      T->isWebAssemblyReferenceType()) {
+    Diag(Loc, diag::err_wasm_reference_pr) << 1;
+    return QualType();
+  }
 
   // Handle restrict on references.
   if (LValueRef)
@@ -4879,12 +4893,12 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
 
     // If we're supposed to infer nullability, do so now.
     if (inferNullability && !inferNullabilityInnerOnlyComplete) {
-      ParsedAttr::Syntax syntax = inferNullabilityCS
-                                      ? ParsedAttr::AS_ContextSensitiveKeyword
-                                      : ParsedAttr::AS_Keyword;
+      ParsedAttr::Form form =
+          inferNullabilityCS ? ParsedAttr::Form::ContextSensitiveKeyword()
+                             : ParsedAttr::Form::Keyword(false /*IsAlignAs*/);
       ParsedAttr *nullabilityAttr = Pool.create(
           S.getNullabilityKeyword(*inferNullability), SourceRange(pointerLoc),
-          nullptr, SourceLocation(), nullptr, 0, syntax);
+          nullptr, SourceLocation(), nullptr, 0, form);
 
       attrs.addAtEnd(nullabilityAttr);
 
@@ -4965,6 +4979,12 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
   // Walk the DeclTypeInfo, building the recursive type as we go.
   // DeclTypeInfos are ordered from the identifier out, which is
   // opposite of what we want :).
+
+  // Track if the produced type matches the structure of the declarator.
+  // This is used later to decide if we can fill `TypeLoc` from
+  // `DeclaratorChunk`s. E.g. it must be false if Clang recovers from
+  // an error by replacing the type with `int`.
+  bool AreDeclaratorChunksValid = true;
   for (unsigned i = 0, e = D.getNumTypeObjects(); i != e; ++i) {
     unsigned chunkIndex = e - i - 1;
     state.setCurrentChunkIndex(chunkIndex);
@@ -5056,6 +5076,19 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       DeclaratorChunk::ArrayTypeInfo &ATI = DeclType.Arr;
       Expr *ArraySize = static_cast<Expr*>(ATI.NumElts);
       ArrayType::ArraySizeModifier ASM;
+
+      // Microsoft property fields can have multiple sizeless array chunks
+      // (i.e. int x[][][]). Skip all of these except one to avoid creating
+      // bad incomplete array types.
+      if (chunkIndex != 0 && !ArraySize &&
+          D.getDeclSpec().getAttributes().hasMSPropertyAttr()) {
+        // This is a sizeless chunk. If the next is also, skip this one.
+        DeclaratorChunk &NextDeclType = D.getTypeObject(chunkIndex - 1);
+        if (NextDeclType.Kind == DeclaratorChunk::Array &&
+            !NextDeclType.Arr.NumElts)
+          break;
+      }
+
       if (ATI.isStar)
         ASM = ArrayType::Star;
       else if (ATI.hasStatic)
@@ -5097,17 +5130,6 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
           D.setInvalidType(true);
         }
       }
-      const AutoType *AT = T->getContainedAutoType();
-      // Allow arrays of auto if we are a generic lambda parameter.
-      // i.e. [](auto (&array)[5]) { return array[0]; }; OK
-      if (AT && D.getContext() != DeclaratorContext::LambdaExprParameter) {
-        // We've already diagnosed this for decltype(auto).
-        if (!AT->isDecltypeAuto())
-          S.Diag(DeclType.Loc, diag::err_illegal_decl_array_of_auto)
-              << getPrintableNameForEntity(Name) << T;
-        T = QualType();
-        break;
-      }
 
       // Array parameters can be marked nullable as well, although it's not
       // necessary if they're marked 'static'.
@@ -5145,6 +5167,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
                        : diag::err_deduced_return_type);
             T = Context.IntTy;
             D.setInvalidType(true);
+            AreDeclaratorChunksValid = false;
           } else {
             S.Diag(D.getDeclSpec().getTypeSpecTypeLoc(),
                    diag::warn_cxx11_compat_deduced_return_type);
@@ -5155,6 +5178,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
             S.Diag(D.getBeginLoc(), diag::err_trailing_return_in_parens)
                 << T << D.getSourceRange();
             D.setInvalidType(true);
+            // FIXME: recover and fill decls in `TypeLoc`s.
+            AreDeclaratorChunksValid = false;
           } else if (D.getName().getKind() ==
                      UnqualifiedIdKind::IK_DeductionGuideName) {
             if (T != Context.DependentTy) {
@@ -5162,6 +5187,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
                      diag::err_deduction_guide_with_complex_decl)
                   << D.getSourceRange();
               D.setInvalidType(true);
+              // FIXME: recover and fill decls in `TypeLoc`s.
+              AreDeclaratorChunksValid = false;
             }
           } else if (D.getContext() != DeclaratorContext::LambdaExpr &&
                      (T.hasQualifiers() || !isa<AutoType>(T) ||
@@ -5172,6 +5199,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
                    diag::err_trailing_return_without_auto)
                 << T << D.getDeclSpec().getSourceRange();
             D.setInvalidType(true);
+            // FIXME: recover and fill decls in `TypeLoc`s.
+            AreDeclaratorChunksValid = false;
           }
           T = S.GetTypeFromParser(FTI.getTrailingReturnType(), &TInfo);
           if (T.isNull()) {
@@ -5212,6 +5241,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         S.Diag(DeclType.Loc, diagID) << T->isFunctionType() << T;
         T = Context.IntTy;
         D.setInvalidType(true);
+        AreDeclaratorChunksValid = false;
       }
 
       // Do not allow returning half FP value.
@@ -5278,6 +5308,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
           ObjCObjectPointerTypeLoc TLoc = TLB.push<ObjCObjectPointerTypeLoc>(T);
           TLoc.setStarLoc(FixitLoc);
           TInfo = TLB.getTypeSourceInfo(Context, T);
+        } else {
+          AreDeclaratorChunksValid = false;
         }
 
         D.setInvalidType(true);
@@ -5398,6 +5430,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
           T = (!LangOpts.requiresStrictPrototypes() && !LangOpts.OpenCL)
                   ? Context.getFunctionNoProtoType(T, EI)
                   : Context.IntTy;
+          AreDeclaratorChunksValid = false;
           break;
         }
 
@@ -5632,9 +5665,13 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       if (!ClsType.isNull())
         T = S.BuildMemberPointerType(T, ClsType, DeclType.Loc,
                                      D.getIdentifier());
+      else
+        AreDeclaratorChunksValid = false;
+
       if (T.isNull()) {
         T = Context.IntTy;
         D.setInvalidType(true);
+        AreDeclaratorChunksValid = false;
       } else if (DeclType.Mem.TypeQuals) {
         T = S.BuildQualifiedType(T, DeclType.Loc, DeclType.Mem.TypeQuals);
       }
@@ -5652,6 +5689,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     if (T.isNull()) {
       D.setInvalidType(true);
       T = Context.IntTy;
+      AreDeclaratorChunksValid = false;
     }
 
     // See if there are any attributes on this declarator chunk.
@@ -5910,9 +5948,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
   }
 
   assert(!T.isNull() && "T must not be null at the end of this function");
-  if (D.isInvalidType())
+  if (!AreDeclaratorChunksValid)
     return Context.getTrivialTypeSourceInfo(T);
-
   return GetTypeSourceInfoForDeclarator(state, T, TInfo);
 }
 
@@ -5977,7 +6014,7 @@ static void transferARCOwnershipToDeclaratorChunk(TypeProcessingState &state,
   ParsedAttr *attr = D.getAttributePool().create(
       &S.Context.Idents.get("objc_ownership"), SourceLocation(),
       /*scope*/ nullptr, SourceLocation(),
-      /*args*/ &Args, 1, ParsedAttr::AS_GNU);
+      /*args*/ &Args, 1, ParsedAttr::Form::GNU());
   chunk.getAttrs().addAtEnd(attr);
   // TODO: mark whether we did this inference?
 }
@@ -6509,6 +6546,12 @@ GetTypeSourceInfoForDeclarator(TypeProcessingState &State,
   }
 
   for (unsigned i = 0, e = D.getNumTypeObjects(); i != e; ++i) {
+    // Microsoft property fields can have multiple sizeless array chunks
+    // (i.e. int x[][][]). Don't create more than one level of incomplete array.
+    if (CurrTL.getTypeLocClass() == TypeLoc::IncompleteArray && e != 1 &&
+        D.getDeclSpec().getAttributes().hasMSPropertyAttr())
+      continue;
+
     // An AtomicTypeLoc might be produced by an atomic qualifier in this
     // declarator chunk.
     if (AtomicTypeLoc ATL = CurrTL.getAs<AtomicTypeLoc>()) {
@@ -7329,6 +7372,37 @@ static bool handleMSPointerTypeQualifierAttr(TypeProcessingState &State,
     Pointee = S.Context.getAddrSpaceQualType(
         S.Context.removeAddrSpaceQualType(Pointee), ASIdx);
   Type = State.getAttributedType(A, Type, S.Context.getPointerType(Pointee));
+  return false;
+}
+
+static bool HandleWebAssemblyFuncrefAttr(TypeProcessingState &State,
+                                         QualType &QT, ParsedAttr &PAttr) {
+  assert(PAttr.getKind() == ParsedAttr::AT_WebAssemblyFuncref);
+
+  Sema &S = State.getSema();
+  Attr *A = createSimpleAttr<WebAssemblyFuncrefAttr>(S.Context, PAttr);
+
+  std::bitset<attr::LastAttr> Attrs;
+  attr::Kind NewAttrKind = A->getKind();
+  const auto *AT = dyn_cast<AttributedType>(QT);
+  while (AT) {
+    Attrs[AT->getAttrKind()] = true;
+    AT = dyn_cast<AttributedType>(AT->getModifiedType());
+  }
+
+  // You cannot specify duplicate type attributes, so if the attribute has
+  // already been applied, flag it.
+  if (Attrs[NewAttrKind]) {
+    S.Diag(PAttr.getLoc(), diag::warn_duplicate_attribute_exact) << PAttr;
+    return true;
+  }
+
+  // Add address space to type based on its attributes.
+  LangAS ASIdx = LangAS::wasm_funcref;
+  QualType Pointee = QT->getPointeeType();
+  Pointee = S.Context.getAddrSpaceQualType(
+      S.Context.removeAddrSpaceQualType(Pointee), ASIdx);
+  QT = State.getAttributedType(A, QT, S.Context.getPointerType(Pointee));
   return false;
 }
 
@@ -8489,6 +8563,12 @@ static void processTypeAttrs(TypeProcessingState &state, QualType &type,
       attr.setUsedAsTypeAttr();
       break;
 
+    case ParsedAttr::AT_WebAssemblyFuncref: {
+      if (!HandleWebAssemblyFuncrefAttr(state, type, attr))
+        attr.setUsedAsTypeAttr();
+      break;
+    }
+
     MS_TYPE_ATTRS_CASELIST:
       if (!handleMSPointerTypeQualifierAttr(state, attr, type))
         attr.setUsedAsTypeAttr();
@@ -8890,8 +8970,7 @@ static void assignInheritanceModel(Sema &S, CXXRecordDecl *RD) {
                           ? S.ImplicitMSInheritanceAttrLoc
                           : RD->getSourceRange();
     RD->addAttr(MSInheritanceAttr::CreateImplicit(
-        S.getASTContext(), BestCase, Loc, AttributeCommonInfo::AS_Microsoft,
-        MSInheritanceAttr::Spelling(IM)));
+        S.getASTContext(), BestCase, Loc, MSInheritanceAttr::Spelling(IM)));
     S.Consumer.AssignInheritanceModel(RD);
   }
 }

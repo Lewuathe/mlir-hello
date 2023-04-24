@@ -98,7 +98,7 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
       // The last dimension is the base case of the recursion, at this point
       // we store the element at the given index.
       if (dimension == valueShape.size()) {
-        rewriter.create<mlir::AffineStoreOp>(
+        rewriter.create<mlir::affine::AffineStoreOp>(
             loc, rewriter.create<mlir::arith::ConstantOp>(loc, *valueIt++), alloc,
             llvm::makeArrayRef(indices));
         return;
@@ -141,7 +141,7 @@ public:
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(HelloToAffineLowerPass)
 
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
-      registry.insert<mlir::AffineDialect, mlir::func::FuncDialect, mlir::memref::MemRefDialect>();
+      registry.insert<mlir::affine::AffineDialect, mlir::func::FuncDialect, mlir::memref::MemRefDialect>();
   }
 
   void runOnOperation() final;
@@ -152,7 +152,7 @@ void HelloToAffineLowerPass::runOnOperation() {
   mlir::ConversionTarget target(getContext());
 
   target.addIllegalDialect<hello::HelloDialect>();
-  target.addLegalDialect<mlir::AffineDialect, mlir::BuiltinDialect,
+  target.addLegalDialect<mlir::affine::AffineDialect, mlir::BuiltinDialect,
     mlir::func::FuncDialect, mlir::arith::ArithDialect, mlir::memref::MemRefDialect>();
   target.addDynamicallyLegalOp<hello::PrintOp>([](hello::PrintOp op) {
       return llvm::none_of(op->getOperandTypes(),

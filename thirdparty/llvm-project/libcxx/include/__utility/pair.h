@@ -15,13 +15,14 @@
 #include <__functional/unwrap_ref.h>
 #include <__fwd/get.h>
 #include <__fwd/tuple.h>
-#include <__tuple_dir/sfinae_helpers.h>
-#include <__tuple_dir/tuple_element.h>
-#include <__tuple_dir/tuple_indices.h>
-#include <__tuple_dir/tuple_size.h>
+#include <__tuple/sfinae_helpers.h>
+#include <__tuple/tuple_element.h>
+#include <__tuple/tuple_indices.h>
+#include <__tuple/tuple_size.h>
 #include <__type_traits/common_reference.h>
 #include <__type_traits/common_type.h>
 #include <__type_traits/conditional.h>
+#include <__type_traits/decay.h>
 #include <__type_traits/is_assignable.h>
 #include <__type_traits/is_constructible.h>
 #include <__type_traits/is_convertible.h>
@@ -69,8 +70,8 @@ struct _LIBCPP_TEMPLATE_VIS pair
     _T1 first;
     _T2 second;
 
-    pair(pair const&) = default;
-    pair(pair&&) = default;
+    _LIBCPP_HIDE_FROM_ABI pair(pair const&) = default;
+    _LIBCPP_HIDE_FROM_ABI pair(pair&&) = default;
 
 #ifdef _LIBCPP_CXX03_LANG
     _LIBCPP_HIDE_FROM_ABI
@@ -92,37 +93,37 @@ struct _LIBCPP_TEMPLATE_VIS pair
 #else
     struct _CheckArgs {
       template <int&...>
-      static constexpr bool __enable_explicit_default() {
+      static _LIBCPP_HIDE_FROM_ABI constexpr bool __enable_explicit_default() {
           return is_default_constructible<_T1>::value
               && is_default_constructible<_T2>::value
               && !__enable_implicit_default<>();
       }
 
       template <int&...>
-      static constexpr bool __enable_implicit_default() {
+      static _LIBCPP_HIDE_FROM_ABI constexpr bool __enable_implicit_default() {
           return __is_implicitly_default_constructible<_T1>::value
               && __is_implicitly_default_constructible<_T2>::value;
       }
 
       template <class _U1, class _U2>
-      static constexpr bool __is_pair_constructible() {
+      static _LIBCPP_HIDE_FROM_ABI constexpr bool __is_pair_constructible() {
           return is_constructible<first_type, _U1>::value
               && is_constructible<second_type, _U2>::value;
       }
 
       template <class _U1, class _U2>
-      static constexpr bool __is_implicit() {
+      static _LIBCPP_HIDE_FROM_ABI constexpr bool __is_implicit() {
           return is_convertible<_U1, first_type>::value
               && is_convertible<_U2, second_type>::value;
       }
 
       template <class _U1, class _U2>
-      static constexpr bool __enable_explicit() {
+      static _LIBCPP_HIDE_FROM_ABI constexpr bool __enable_explicit() {
           return __is_pair_constructible<_U1, _U2>() && !__is_implicit<_U1, _U2>();
       }
 
       template <class _U1, class _U2>
-      static constexpr bool __enable_implicit() {
+      static _LIBCPP_HIDE_FROM_ABI constexpr bool __enable_implicit() {
           return __is_pair_constructible<_U1, _U2>() && __is_implicit<_U1, _U2>();
       }
     };
@@ -133,18 +134,18 @@ struct _LIBCPP_TEMPLATE_VIS pair
 
     struct _CheckTupleLikeConstructor {
         template <class _Tuple>
-        static constexpr bool __enable_implicit() {
+        static _LIBCPP_HIDE_FROM_ABI constexpr bool __enable_implicit() {
             return __tuple_convertible<_Tuple, pair>::value;
         }
 
         template <class _Tuple>
-        static constexpr bool __enable_explicit() {
+        static _LIBCPP_HIDE_FROM_ABI constexpr bool __enable_explicit() {
             return __tuple_constructible<_Tuple, pair>::value
                && !__tuple_convertible<_Tuple, pair>::value;
         }
 
         template <class _Tuple>
-        static constexpr bool __enable_assign() {
+        static _LIBCPP_HIDE_FROM_ABI constexpr bool __enable_assign() {
             return __tuple_assignable<_Tuple, pair>::value;
         }
     };
@@ -152,7 +153,7 @@ struct _LIBCPP_TEMPLATE_VIS pair
     template <class _Tuple>
     using _CheckTLC _LIBCPP_NODEBUG = __conditional_t<
         __tuple_like_with_size<_Tuple, 2>::value
-            && !is_same<typename decay<_Tuple>::type, pair>::value,
+            && !is_same<__decay_t<_Tuple>, pair>::value,
         _CheckTupleLikeConstructor,
         __check_tuple_constructor_fail
     >;
@@ -424,22 +425,22 @@ pair(_T1, _T2) -> pair<_T1, _T2>;
 
 // [pairs.spec], specialized algorithms
 
-template <class _T1, class _T2>
+template <class _T1, class _T2, class _U1, class _U2>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
 bool
-operator==(const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
+operator==(const pair<_T1,_T2>& __x, const pair<_U1,_U2>& __y)
 {
     return __x.first == __y.first && __x.second == __y.second;
 }
 
 #if _LIBCPP_STD_VER >= 20
 
-template <class _T1, class _T2>
+template <class _T1, class _T2, class _U1, class _U2>
 _LIBCPP_HIDE_FROM_ABI constexpr
 common_comparison_category_t<
-        __synth_three_way_result<_T1>,
-        __synth_three_way_result<_T2> >
-operator<=>(const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
+        __synth_three_way_result<_T1, _U1>,
+        __synth_three_way_result<_T2, _U2> >
+operator<=>(const pair<_T1,_T2>& __x, const pair<_U1,_U2>& __y)
 {
     if (auto __c = std::__synth_three_way(__x.first, __y.first); __c != 0) {
       return __c;
@@ -449,42 +450,42 @@ operator<=>(const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
 
 #else // _LIBCPP_STD_VER >= 20
 
-template <class _T1, class _T2>
+template <class _T1, class _T2, class _U1, class _U2>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
 bool
-operator!=(const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
+operator!=(const pair<_T1,_T2>& __x, const pair<_U1,_U2>& __y)
 {
     return !(__x == __y);
 }
 
-template <class _T1, class _T2>
+template <class _T1, class _T2, class _U1, class _U2>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
 bool
-operator< (const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
+operator< (const pair<_T1,_T2>& __x, const pair<_U1,_U2>& __y)
 {
     return __x.first < __y.first || (!(__y.first < __x.first) && __x.second < __y.second);
 }
 
-template <class _T1, class _T2>
+template <class _T1, class _T2, class _U1, class _U2>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
 bool
-operator> (const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
+operator> (const pair<_T1,_T2>& __x, const pair<_U1,_U2>& __y)
 {
     return __y < __x;
 }
 
-template <class _T1, class _T2>
+template <class _T1, class _T2, class _U1, class _U2>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
 bool
-operator>=(const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
+operator>=(const pair<_T1,_T2>& __x, const pair<_U1,_U2>& __y)
 {
     return !(__x < __y);
 }
 
-template <class _T1, class _T2>
+template <class _T1, class _T2, class _U1, class _U2>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
 bool
-operator<=(const pair<_T1,_T2>& __x, const pair<_T1,_T2>& __y)
+operator<=(const pair<_T1,_T2>& __x, const pair<_U1,_U2>& __y)
 {
     return !(__y < __x);
 }

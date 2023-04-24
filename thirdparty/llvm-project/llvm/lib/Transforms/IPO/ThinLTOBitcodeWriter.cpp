@@ -18,9 +18,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/InitializePasses.h"
 #include "llvm/Object/ModuleSymbolTable.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/FunctionAttrs.h"
@@ -194,6 +192,13 @@ void simplifyExternals(Module &M) {
     NewF->takeName(&F);
     F.replaceAllUsesWith(ConstantExpr::getBitCast(NewF, F.getType()));
     F.eraseFromParent();
+  }
+
+  for (GlobalIFunc &I : llvm::make_early_inc_range(M.ifuncs())) {
+    if (I.use_empty())
+      I.eraseFromParent();
+    else
+      assert(I.getResolverFunction() && "ifunc misses its resolver function");
   }
 
   for (GlobalVariable &GV : llvm::make_early_inc_range(M.globals())) {

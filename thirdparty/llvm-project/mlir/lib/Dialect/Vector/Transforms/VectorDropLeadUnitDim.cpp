@@ -161,14 +161,16 @@ struct CastAwayInsertLeadingOneDim : public OpRewritePattern<vector::InsertOp> {
     Value newDstVector = rewriter.create<vector::ExtractOp>(
         loc, insertOp.getDest(), splatZero(dstDropCount));
 
+    // New position rank needs to be computed in two steps: (1) if destination
+    // type has leading unit dims, we also trim the position array accordingly,
+    // then (2) if source type also has leading unit dims, we need to append
+    // zeroes to the position array accordingly.
     unsigned oldPosRank = insertOp.getPosition().getValue().size();
-    unsigned newPosRank = newDstType.getRank() - newSrcRank;
+    unsigned newPosRank = std::max<int64_t>(0, oldPosRank - dstDropCount);
     SmallVector<Attribute> newPositions = llvm::to_vector(
         insertOp.getPosition().getValue().take_back(newPosRank));
-    if (newPosRank > oldPosRank) {
-      auto zeroAttr = rewriter.getZeroAttr(rewriter.getI64Type());
-      newPositions.resize(newPosRank, zeroAttr);
-    }
+    newPositions.resize(newDstType.getRank() - newSrcRank,
+                        rewriter.getI64IntegerAttr(0));
 
     auto newInsertOp = rewriter.create<vector::InsertOp>(
         loc, newDstType, newSrcVector, newDstVector,
@@ -291,9 +293,6 @@ struct CastAwayContractionLeadingOneDim
     if (oldAccType == nullptr)
       return failure();
     if (oldAccType.getRank() < 2)
-      return failure();
-    // TODO: implement masks.
-    if (!contractOp.getMasks().empty())
       return failure();
     if (oldAccType.getShape()[0] != 1)
       return failure();

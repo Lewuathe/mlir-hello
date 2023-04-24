@@ -479,7 +479,7 @@ public:
   void addDirectiveHandler(StringRef Directive,
                            ExtensionDirectiveHandler Handler) override {
     ExtensionDirectiveMap[Directive] = Handler;
-    if (DirectiveKindMap.find(Directive) == DirectiveKindMap.end()) {
+    if (!DirectiveKindMap.contains(Directive)) {
       DirectiveKindMap[Directive] = DK_HANDLER_DIRECTIVE;
     }
   }
@@ -6115,6 +6115,7 @@ bool MasmParser::parseDirectiveComm(bool IsLocal) {
 bool MasmParser::parseDirectiveComment(SMLoc DirectiveLoc) {
   std::string FirstLine = parseStringTo(AsmToken::EndOfStatement);
   size_t DelimiterEnd = FirstLine.find_first_of("\b\t\v\f\r\x1A ");
+  assert(DelimiterEnd != std::string::npos);
   StringRef Delimiter = StringRef(FirstLine).take_front(DelimiterEnd);
   if (Delimiter.empty())
     return Error(DirectiveLoc, "no delimiter in 'comment' directive");
@@ -6260,9 +6261,9 @@ bool MasmParser::parseDirectiveIfdef(SMLoc DirectiveLoc, bool expect_defined) {
           parseEOL())
         return true;
 
-      if (BuiltinSymbolMap.find(Name.lower()) != BuiltinSymbolMap.end()) {
+      if (BuiltinSymbolMap.contains(Name.lower())) {
         is_defined = true;
-      } else if (Variables.find(Name.lower()) != Variables.end()) {
+      } else if (Variables.contains(Name.lower())) {
         is_defined = true;
       } else {
         MCSymbol *Sym = getContext().lookupSymbol(Name.lower());
@@ -6381,9 +6382,9 @@ bool MasmParser::parseDirectiveElseIfdef(SMLoc DirectiveLoc,
           parseEOL())
         return true;
 
-      if (BuiltinSymbolMap.find(Name.lower()) != BuiltinSymbolMap.end()) {
+      if (BuiltinSymbolMap.contains(Name.lower())) {
         is_defined = true;
-      } else if (Variables.find(Name.lower()) != Variables.end()) {
+      } else if (Variables.contains(Name.lower())) {
         is_defined = true;
       } else {
         MCSymbol *Sym = getContext().lookupSymbol(Name);
@@ -6551,9 +6552,9 @@ bool MasmParser::parseDirectiveErrorIfdef(SMLoc DirectiveLoc,
     if (check(parseIdentifier(Name), "expected identifier after '.errdef'"))
       return true;
 
-    if (BuiltinSymbolMap.find(Name.lower()) != BuiltinSymbolMap.end()) {
+    if (BuiltinSymbolMap.contains(Name.lower())) {
       IsDefined = true;
-    } else if (Variables.find(Name.lower()) != Variables.end()) {
+    } else if (Variables.contains(Name.lower())) {
       IsDefined = true;
     } else {
       MCSymbol *Sym = getContext().lookupSymbol(Name);

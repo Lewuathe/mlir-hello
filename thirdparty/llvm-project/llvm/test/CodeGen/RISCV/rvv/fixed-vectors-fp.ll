@@ -1973,9 +1973,9 @@ define void @trunc_v8f16(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI91_0)
-; CHECK-NEXT:    flh ft0, %lo(.LCPI91_0)(a1)
+; CHECK-NEXT:    flh fa5, %lo(.LCPI91_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    vfcvt.rtz.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
 ; CHECK-NEXT:    vsetvli zero, zero, e16, m1, ta, mu
@@ -1996,8 +1996,8 @@ define void @trunc_v4f32(ptr %x) {
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vfabs.v v9, v8
 ; CHECK-NEXT:    lui a1, 307200
-; CHECK-NEXT:    fmv.w.x ft0, a1
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    fmv.w.x fa5, a1
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    vfcvt.rtz.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
 ; CHECK-NEXT:    vsetvli zero, zero, e32, m1, ta, mu
@@ -2017,9 +2017,9 @@ define void @trunc_v2f64(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; CHECK-NEXT:    vle64.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI93_0)
-; CHECK-NEXT:    fld ft0, %lo(.LCPI93_0)(a1)
+; CHECK-NEXT:    fld fa5, %lo(.LCPI93_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    vfcvt.rtz.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
 ; CHECK-NEXT:    vsetvli zero, zero, e64, m1, ta, mu
@@ -2039,9 +2039,9 @@ define void @ceil_v8f16(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI94_0)
-; CHECK-NEXT:    flh ft0, %lo(.LCPI94_0)(a1)
+; CHECK-NEXT:    flh fa5, %lo(.LCPI94_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 3
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2064,8 +2064,8 @@ define void @ceil_v4f32(ptr %x) {
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vfabs.v v9, v8
 ; CHECK-NEXT:    lui a1, 307200
-; CHECK-NEXT:    fmv.w.x ft0, a1
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    fmv.w.x fa5, a1
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 3
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2087,9 +2087,9 @@ define void @ceil_v2f64(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; CHECK-NEXT:    vle64.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI96_0)
-; CHECK-NEXT:    fld ft0, %lo(.LCPI96_0)(a1)
+; CHECK-NEXT:    fld fa5, %lo(.LCPI96_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 3
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2111,9 +2111,9 @@ define void @floor_v8f16(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI97_0)
-; CHECK-NEXT:    flh ft0, %lo(.LCPI97_0)(a1)
+; CHECK-NEXT:    flh fa5, %lo(.LCPI97_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 2
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2136,8 +2136,8 @@ define void @floor_v4f32(ptr %x) {
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vfabs.v v9, v8
 ; CHECK-NEXT:    lui a1, 307200
-; CHECK-NEXT:    fmv.w.x ft0, a1
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    fmv.w.x fa5, a1
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 2
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2159,9 +2159,9 @@ define void @floor_v2f64(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; CHECK-NEXT:    vle64.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI99_0)
-; CHECK-NEXT:    fld ft0, %lo(.LCPI99_0)(a1)
+; CHECK-NEXT:    fld fa5, %lo(.LCPI99_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 2
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2183,9 +2183,9 @@ define void @round_v8f16(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI100_0)
-; CHECK-NEXT:    flh ft0, %lo(.LCPI100_0)(a1)
+; CHECK-NEXT:    flh fa5, %lo(.LCPI100_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 4
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2208,8 +2208,8 @@ define void @round_v4f32(ptr %x) {
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vfabs.v v9, v8
 ; CHECK-NEXT:    lui a1, 307200
-; CHECK-NEXT:    fmv.w.x ft0, a1
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    fmv.w.x fa5, a1
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 4
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2231,9 +2231,9 @@ define void @round_v2f64(ptr %x) {
 ; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; CHECK-NEXT:    vle64.v v8, (a0)
 ; CHECK-NEXT:    lui a1, %hi(.LCPI102_0)
-; CHECK-NEXT:    fld ft0, %lo(.LCPI102_0)(a1)
+; CHECK-NEXT:    fld fa5, %lo(.LCPI102_0)(a1)
 ; CHECK-NEXT:    vfabs.v v9, v8
-; CHECK-NEXT:    vmflt.vf v0, v9, ft0
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
 ; CHECK-NEXT:    fsrmi a1, 4
 ; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
 ; CHECK-NEXT:    fsrm a1
@@ -2248,6 +2248,144 @@ define void @round_v2f64(ptr %x) {
   ret void
 }
 declare <2 x double> @llvm.round.v2f64(<2 x double>)
+
+define void @rint_v8f16(ptr %x) {
+; CHECK-LABEL: rint_v8f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
+; CHECK-NEXT:    vle16.v v8, (a0)
+; CHECK-NEXT:    lui a1, %hi(.LCPI103_0)
+; CHECK-NEXT:    flh fa5, %lo(.LCPI103_0)(a1)
+; CHECK-NEXT:    vfabs.v v9, v8
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
+; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
+; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
+; CHECK-NEXT:    vsetvli zero, zero, e16, m1, ta, mu
+; CHECK-NEXT:    vfsgnj.vv v8, v9, v8, v0.t
+; CHECK-NEXT:    vse16.v v8, (a0)
+; CHECK-NEXT:    ret
+  %a = load <8 x half>, ptr %x
+  %b = call <8 x half> @llvm.rint.v8f16(<8 x half> %a)
+  store <8 x half> %b, ptr %x
+  ret void
+}
+declare <8 x half> @llvm.rint.v8f16(<8 x half>)
+
+define void @rint_v4f32(ptr %x) {
+; CHECK-LABEL: rint_v4f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
+; CHECK-NEXT:    vle32.v v8, (a0)
+; CHECK-NEXT:    vfabs.v v9, v8
+; CHECK-NEXT:    lui a1, 307200
+; CHECK-NEXT:    fmv.w.x fa5, a1
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
+; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
+; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
+; CHECK-NEXT:    vsetvli zero, zero, e32, m1, ta, mu
+; CHECK-NEXT:    vfsgnj.vv v8, v9, v8, v0.t
+; CHECK-NEXT:    vse32.v v8, (a0)
+; CHECK-NEXT:    ret
+  %a = load <4 x float>, ptr %x
+  %b = call <4 x float> @llvm.rint.v4f32(<4 x float> %a)
+  store <4 x float> %b, ptr %x
+  ret void
+}
+declare <4 x float> @llvm.rint.v4f32(<4 x float>)
+
+define void @rint_v2f64(ptr %x) {
+; CHECK-LABEL: rint_v2f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
+; CHECK-NEXT:    vle64.v v8, (a0)
+; CHECK-NEXT:    lui a1, %hi(.LCPI105_0)
+; CHECK-NEXT:    fld fa5, %lo(.LCPI105_0)(a1)
+; CHECK-NEXT:    vfabs.v v9, v8
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
+; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
+; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
+; CHECK-NEXT:    vsetvli zero, zero, e64, m1, ta, mu
+; CHECK-NEXT:    vfsgnj.vv v8, v9, v8, v0.t
+; CHECK-NEXT:    vse64.v v8, (a0)
+; CHECK-NEXT:    ret
+  %a = load <2 x double>, ptr %x
+  %b = call <2 x double> @llvm.rint.v2f64(<2 x double> %a)
+  store <2 x double> %b, ptr %x
+  ret void
+}
+declare <2 x double> @llvm.rint.v2f64(<2 x double>)
+
+define void @nearbyint_v8f16(ptr %x) {
+; CHECK-LABEL: nearbyint_v8f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
+; CHECK-NEXT:    vle16.v v8, (a0)
+; CHECK-NEXT:    lui a1, %hi(.LCPI106_0)
+; CHECK-NEXT:    flh fa5, %lo(.LCPI106_0)(a1)
+; CHECK-NEXT:    vfabs.v v9, v8
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
+; CHECK-NEXT:    frflags a1
+; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
+; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
+; CHECK-NEXT:    fsflags a1
+; CHECK-NEXT:    vsetvli zero, zero, e16, m1, ta, mu
+; CHECK-NEXT:    vfsgnj.vv v8, v9, v8, v0.t
+; CHECK-NEXT:    vse16.v v8, (a0)
+; CHECK-NEXT:    ret
+  %a = load <8 x half>, ptr %x
+  %b = call <8 x half> @llvm.nearbyint.v8f16(<8 x half> %a)
+  store <8 x half> %b, ptr %x
+  ret void
+}
+declare <8 x half> @llvm.nearbyint.v8f16(<8 x half>)
+
+define void @nearbyint_v4f32(ptr %x) {
+; CHECK-LABEL: nearbyint_v4f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
+; CHECK-NEXT:    vle32.v v8, (a0)
+; CHECK-NEXT:    vfabs.v v9, v8
+; CHECK-NEXT:    lui a1, 307200
+; CHECK-NEXT:    fmv.w.x fa5, a1
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
+; CHECK-NEXT:    frflags a1
+; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
+; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
+; CHECK-NEXT:    fsflags a1
+; CHECK-NEXT:    vsetvli zero, zero, e32, m1, ta, mu
+; CHECK-NEXT:    vfsgnj.vv v8, v9, v8, v0.t
+; CHECK-NEXT:    vse32.v v8, (a0)
+; CHECK-NEXT:    ret
+  %a = load <4 x float>, ptr %x
+  %b = call <4 x float> @llvm.nearbyint.v4f32(<4 x float> %a)
+  store <4 x float> %b, ptr %x
+  ret void
+}
+declare <4 x float> @llvm.nearbyint.v4f32(<4 x float>)
+
+define void @nearbyint_v2f64(ptr %x) {
+; CHECK-LABEL: nearbyint_v2f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
+; CHECK-NEXT:    vle64.v v8, (a0)
+; CHECK-NEXT:    lui a1, %hi(.LCPI108_0)
+; CHECK-NEXT:    fld fa5, %lo(.LCPI108_0)(a1)
+; CHECK-NEXT:    vfabs.v v9, v8
+; CHECK-NEXT:    vmflt.vf v0, v9, fa5
+; CHECK-NEXT:    frflags a1
+; CHECK-NEXT:    vfcvt.x.f.v v9, v8, v0.t
+; CHECK-NEXT:    vfcvt.f.x.v v9, v9, v0.t
+; CHECK-NEXT:    fsflags a1
+; CHECK-NEXT:    vsetvli zero, zero, e64, m1, ta, mu
+; CHECK-NEXT:    vfsgnj.vv v8, v9, v8, v0.t
+; CHECK-NEXT:    vse64.v v8, (a0)
+; CHECK-NEXT:    ret
+  %a = load <2 x double>, ptr %x
+  %b = call <2 x double> @llvm.nearbyint.v2f64(<2 x double> %a)
+  store <2 x double> %b, ptr %x
+  ret void
+}
+declare <2 x double> @llvm.nearbyint.v2f64(<2 x double>)
 
 define void @fmuladd_v8f16(ptr %x, ptr %y, ptr %z) {
 ; CHECK-LABEL: fmuladd_v8f16:

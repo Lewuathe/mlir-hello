@@ -1207,7 +1207,7 @@ bool BranchFolder::OptimizeBranches(MachineFunction &MF) {
     MadeChange |= OptimizeBlock(&MBB);
 
     // If it is dead, remove it.
-    if (MBB.pred_empty()) {
+    if (MBB.pred_empty() && !MBB.isMachineBlockAddressTaken()) {
       RemoveDeadBlock(&MBB);
       MadeChange = true;
       ++NumDeadBlocks;
@@ -1877,8 +1877,8 @@ MachineBasicBlock::iterator findHoistingInsertPosAndDeps(MachineBasicBlock *MBB,
     } else {
       if (Uses.erase(Reg)) {
         if (Reg.isPhysical()) {
-          for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs)
-            Uses.erase(*SubRegs); // Use sub-registers to be conservative
+          for (MCPhysReg SubReg : TRI->subregs(Reg))
+            Uses.erase(SubReg); // Use sub-registers to be conservative
         }
       }
       addRegAndItsAliases(Reg, TRI, Defs);

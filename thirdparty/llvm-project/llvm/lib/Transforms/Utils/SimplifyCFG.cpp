@@ -1117,16 +1117,12 @@ static void CloneInstructionsIntoPredecessorBlockAndUpdateSSAUses(
                      RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
     VMap[&BonusInst] = NewBonusInst;
 
-    // If we moved a load, we cannot any longer claim any knowledge about
-    // its potential value. The previous information might have been valid
+    // If we speculated an instruction, we need to drop any metadata that may
+    // result in undefined behavior, as the metadata might have been valid
     // only given the branch precondition.
-    // For an analogous reason, we must also drop all the metadata whose
-    // semantics we don't understand. We *can* preserve !annotation, because
-    // it is tied to the instruction itself, not the value or position.
     // Similarly strip attributes on call parameters that may cause UB in
     // location the call is moved to.
-    NewBonusInst->dropUndefImplyingAttrsAndUnknownMetadata(
-        LLVMContext::MD_annotation);
+    NewBonusInst->dropUBImplyingAttrsAndMetadata();
 
     NewBonusInst->insertInto(PredBlock, PTI->getIterator());
     NewBonusInst->takeName(&BonusInst);
@@ -1595,12 +1591,13 @@ bool SimplifyCFGOpt::HoistThenElseCodeToIf(BranchInst *BI,
       if (!TTI.isProfitableToHoist(I1) || !TTI.isProfitableToHoist(I2))
         return Changed;
 
-      // If any of the two call sites has nomerge attribute, stop hoisting.
+      // If any of the two call sites has nomerge or convergent attribute, stop
+      // hoisting.
       if (const auto *CB1 = dyn_cast<CallBase>(I1))
-        if (CB1->cannotMerge())
+        if (CB1->cannotMerge() || CB1->isConvergent())
           return Changed;
       if (const auto *CB2 = dyn_cast<CallBase>(I2))
-        if (CB2->cannotMerge())
+        if (CB2->cannotMerge() || CB2->isConvergent())
           return Changed;
 
       if (isa<DbgInfoIntrinsic>(I1) || isa<DbgInfoIntrinsic>(I2)) {
@@ -1618,19 +1615,7 @@ bool SimplifyCFGOpt::HoistThenElseCodeToIf(BranchInst *BI,
         if (!I2->use_empty())
           I2->replaceAllUsesWith(I1);
         I1->andIRFlags(I2);
-        unsigned KnownIDs[] = {LLVMContext::MD_tbaa,
-                               LLVMContext::MD_range,
-                               LLVMContext::MD_fpmath,
-                               LLVMContext::MD_invariant_load,
-                               LLVMContext::MD_nonnull,
-                               LLVMContext::MD_invariant_group,
-                               LLVMContext::MD_align,
-                               LLVMContext::MD_dereferenceable,
-                               LLVMContext::MD_dereferenceable_or_null,
-                               LLVMContext::MD_mem_parallel_loop_access,
-                               LLVMContext::MD_access_group,
-                               LLVMContext::MD_preserve_access_index};
-        combineMetadata(I1, I2, KnownIDs, true);
+        combineMetadataForCSE(I1, I2, true);
 
         // I1 and I2 are being combined into a single instruction.  Its debug
         // location is the merged locations of the original instructions.
@@ -1808,9 +1793,9 @@ static bool canSinkInstructions(
     // Conservatively return false if I is an inline-asm instruction. Sinking
     // and merging inline-asm instructions can potentially create arguments
     // that cannot satisfy the inline-asm constraints.
-    // If the instruction has nomerge attribute, return false.
+    // If the instruction has nomerge or convergent attribute, return false.
     if (const auto *C = dyn_cast<CallBase>(I))
-      if (C->isInlineAsm() || C->cannotMerge())
+      if (C->isInlineAsm() || C->cannotMerge() || C->isConvergent())
         return false;
 
     // Each instruction must have zero or one use.
@@ -2455,9 +2440,13 @@ bool CompatibleSets::shouldBelongToSameSet(ArrayRef<InvokeInst *> Invokes) {
 
   // Can we theoretically form the data operands for the merged `invoke`?
   auto IsIllegalToMergeArguments = [](auto Ops) {
-    Type *Ty = std::get<0>(Ops)->getType();
-    assert(Ty == std::get<1>(Ops)->getType() && "Incompatible types?");
-    return Ty->isTokenTy() && std::get<0>(Ops) != std::get<1>(Ops);
+    Use &U0 = std::get<0>(Ops);
+    Use &U1 = std::get<1>(Ops);
+    if (U0 == U1)
+      return false;
+    return U0->getType()->isTokenTy() ||
+           !canReplaceOperandWithVariable(cast<Instruction>(U0.getUser()),
+                                          U0.getOperandNo());
   };
   assert(Invokes.size() == 2 && "Always called with exactly two candidates.");
   if (any_of(zip(Invokes[0]->data_ops(), Invokes[1]->data_ops()),
@@ -3021,7 +3010,7 @@ bool SimplifyCFGOpt::SpeculativelyExecuteBB(BranchInst *BI, BasicBlock *ThenBB,
   }
 
   // Metadata can be dependent on the condition we are hoisting above.
-  // Conservatively strip all metadata on the instruction. Drop the debug loc
+  // Strip all UB-implying metadata on the instruction. Drop the debug loc
   // to avoid making it appear as if the condition is a constant, which would
   // be misleading while debugging.
   // Similarly strip attributes that maybe dependent on condition we are
@@ -3032,7 +3021,7 @@ bool SimplifyCFGOpt::SpeculativelyExecuteBB(BranchInst *BI, BasicBlock *ThenBB,
       if (!isa<DbgAssignIntrinsic>(&I))
         I.setDebugLoc(DebugLoc());
     }
-    I.dropUndefImplyingAttrsAndUnknownMetadata();
+    I.dropUBImplyingAttrsAndMetadata();
 
     // Drop ephemeral values.
     if (EphTracker.contains(&I)) {
@@ -5453,7 +5442,7 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, DomTreeUpdater *DTU,
     }
     const APInt &CaseVal = Case.getCaseValue()->getValue();
     if (Known.Zero.intersects(CaseVal) || !Known.One.isSubsetOf(CaseVal) ||
-        (CaseVal.getMinSignedBits() > MaxSignificantBitsInCond)) {
+        (CaseVal.getSignificantBits() > MaxSignificantBitsInCond)) {
       DeadCases.push_back(Case.getCaseValue());
       if (DTU)
         --NumPerSuccessorCases[Successor];
@@ -5469,7 +5458,7 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, DomTreeUpdater *DTU,
   bool HasDefault =
       !isa<UnreachableInst>(SI->getDefaultDest()->getFirstNonPHIOrDbg());
   const unsigned NumUnknownBits =
-      Known.getBitWidth() - (Known.Zero | Known.One).countPopulation();
+      Known.getBitWidth() - (Known.Zero | Known.One).popcount();
   assert(NumUnknownBits <= Known.getBitWidth());
   if (HasDefault && DeadCases.empty() &&
       NumUnknownBits < 64 /* avoid overflow */ &&
@@ -5860,7 +5849,7 @@ static Value *foldSwitchToSelect(const SwitchCaseResultVectorTy &ResultVector,
 
       // Check if cases with the same result can cover all number
       // in touched bits.
-      if (BitMask.countPopulation() == Log2_32(CaseCount)) {
+      if (BitMask.popcount() == Log2_32(CaseCount)) {
         if (!MinCaseVal->isNullValue())
           Condition = Builder.CreateSub(Condition, MinCaseVal);
         Value *And = Builder.CreateAnd(Condition, ~BitMask, "switch.and");

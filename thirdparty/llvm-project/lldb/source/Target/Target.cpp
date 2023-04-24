@@ -46,6 +46,7 @@
 #include "lldb/Target/Language.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/Process.h"
+#include "lldb/Target/RegisterTypeBuilder.h"
 #include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/StackFrameRecognizer.h"
@@ -2358,6 +2359,14 @@ Target::GetScratchTypeSystemForLanguage(lldb::LanguageType language,
                                                             create_on_demand);
 }
 
+CompilerType Target::GetRegisterType(const std::string &name,
+                                     const lldb_private::RegisterFlags &flags,
+                                     uint32_t byte_size) {
+  RegisterTypeBuilderSP provider = PluginManager::GetRegisterTypeBuilder(*this);
+  assert(provider);
+  return provider->GetRegisterType(name, flags, byte_size);
+}
+
 std::vector<lldb::TypeSystemSP>
 Target::GetScratchTypeSystems(bool create_on_demand) {
   if (!m_valid)
@@ -3079,6 +3088,17 @@ bool Target::SetSectionUnloaded(const lldb::SectionSP &section_sp,
 
 void Target::ClearAllLoadedSections() { m_section_load_history.Clear(); }
 
+void Target::SaveScriptedLaunchInfo(lldb_private::ProcessInfo &process_info) {
+  if (process_info.IsScriptedProcess()) {
+    // Only copy scripted process launch options.
+    ProcessLaunchInfo &default_launch_info = const_cast<ProcessLaunchInfo &>(
+        GetGlobalProperties().GetProcessLaunchInfo());
+    default_launch_info.SetProcessPluginName("ScriptedProcess");
+    default_launch_info.SetScriptedMetadata(process_info.GetScriptedMetadata());
+    SetProcessLaunchInfo(default_launch_info);
+  }
+}
+
 Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
   m_stats.SetLaunchOrAttachTime();
   Status error;
@@ -3108,19 +3128,7 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
 
   launch_info.GetFlags().Set(eLaunchFlagDebug);
 
-  if (launch_info.IsScriptedProcess()) {
-    // Only copy scripted process launch options.
-    ProcessLaunchInfo &default_launch_info = const_cast<ProcessLaunchInfo &>(
-        GetGlobalProperties().GetProcessLaunchInfo());
-
-    default_launch_info.SetProcessPluginName("ScriptedProcess");
-    default_launch_info.SetScriptedProcessClassName(
-        launch_info.GetScriptedProcessClassName());
-    default_launch_info.SetScriptedProcessDictionarySP(
-        launch_info.GetScriptedProcessDictionarySP());
-
-    SetProcessLaunchInfo(launch_info);
-  }
+  SaveScriptedLaunchInfo(launch_info);
 
   // Get the value of synchronous execution here.  If you wait till after you
   // have started to run, then you could have hit a breakpoint, whose command
@@ -3149,8 +3157,8 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
   // its own hijacking listener or if the process is created by the target
   // manually, without the platform).
   if (!launch_info.GetHijackListener())
-    launch_info.SetHijackListener(
-        Listener::MakeListener("lldb.Target.Launch.hijack"));
+    launch_info.SetHijackListener(Listener::MakeListener(
+        Process::LaunchSynchronousHijackListenerName.data()));
 
   // If we're not already connected to the process, and if we have a platform
   // that can launch a process for debugging, go ahead and do that here.
@@ -3223,7 +3231,7 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
       // SyncResume hijacker.
       m_process_sp->ResumeSynchronous(stream);
     else
-      error = m_process_sp->PrivateResume();
+      error = m_process_sp->Resume();
     if (!error.Success()) {
       Status error2;
       error2.SetErrorStringWithFormat(
@@ -3326,18 +3334,19 @@ Status Target::Attach(ProcessAttachInfo &attach_info, Stream *stream) {
   ListenerSP hijack_listener_sp;
   const bool async = attach_info.GetAsync();
   if (!async) {
-    hijack_listener_sp =
-        Listener::MakeListener("lldb.Target.Attach.attach.hijack");
+    hijack_listener_sp = Listener::MakeListener(
+        Process::AttachSynchronousHijackListenerName.data());
     attach_info.SetHijackListener(hijack_listener_sp);
   }
 
   Status error;
   if (state != eStateConnected && platform_sp != nullptr &&
-      platform_sp->CanDebugProcess()) {
+      platform_sp->CanDebugProcess() && !attach_info.IsScriptedProcess()) {
     SetPlatform(platform_sp);
     process_sp = platform_sp->Attach(attach_info, GetDebugger(), this, error);
   } else {
     if (state != eStateConnected) {
+      SaveScriptedLaunchInfo(attach_info);
       const char *plugin_name = attach_info.GetProcessPluginName();
       process_sp =
           CreateProcess(attach_info.GetListenerForProcess(GetDebugger()),
@@ -4079,8 +4088,8 @@ TargetProperties::TargetProperties(Target *target)
         std::make_unique<TargetExperimentalProperties>();
     m_collection_sp->AppendProperty(
         ConstString(Properties::GetExperimentalSettingsName()),
-        ConstString("Experimental settings - setting these won't produce "
-                    "errors if the setting is not present."),
+        "Experimental settings - setting these won't produce "
+        "errors if the setting is not present.",
         true, m_experimental_properties_up->GetValueProperties());
   } else {
     m_collection_sp =
@@ -4090,12 +4099,12 @@ TargetProperties::TargetProperties(Target *target)
         std::make_unique<TargetExperimentalProperties>();
     m_collection_sp->AppendProperty(
         ConstString(Properties::GetExperimentalSettingsName()),
-        ConstString("Experimental settings - setting these won't produce "
-                    "errors if the setting is not present."),
+        "Experimental settings - setting these won't produce "
+        "errors if the setting is not present.",
         true, m_experimental_properties_up->GetValueProperties());
     m_collection_sp->AppendProperty(
-        ConstString("process"), ConstString("Settings specific to processes."),
-        true, Process::GetGlobalProperties().GetValueProperties());
+        ConstString("process"), "Settings specific to processes.", true,
+        Process::GetGlobalProperties().GetValueProperties());
     m_collection_sp->SetValueChangedCallback(
         ePropertySaveObjectsDir, [this] { CheckJITObjectsDir(); });
   }
@@ -4786,9 +4795,8 @@ Target::TargetEventData::TargetEventData(const lldb::TargetSP &target_sp,
 
 Target::TargetEventData::~TargetEventData() = default;
 
-ConstString Target::TargetEventData::GetFlavorString() {
-  static ConstString g_flavor("Target::TargetEventData");
-  return g_flavor;
+llvm::StringRef Target::TargetEventData::GetFlavorString() {
+  return "Target::TargetEventData";
 }
 
 void Target::TargetEventData::Dump(Stream *s) const {
