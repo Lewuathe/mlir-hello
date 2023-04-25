@@ -42,4 +42,12 @@ def PrintOp : Hello_Op<"print", [Pure]> {
     let assemblyFormat = "$input attr-dict `:` type($input)";
 }
 
+def WorldOp : Hello_Op<"world", [Pure]> {
+    let summary = "print Hello, World";
+    let description = [{
+        The "world" operation prints "Hello, World", and produces
+        no results.
+    }];
+}
+
 #endif // HELLO_OPS
