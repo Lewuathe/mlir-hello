@@ -158,6 +158,7 @@ void HelloToAffineLowerPass::runOnOperation() {
       return llvm::none_of(op->getOperandTypes(),
                            [](mlir::Type type) { return type.isa<mlir::TensorType>(); });
   });
+  target.addLegalOp<hello::WorldOp>();
 
   mlir::RewritePatternSet patterns(&getContext());
   patterns.add<ConstantOpLowering, PrintOpLowering>(&getContext());

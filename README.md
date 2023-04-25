@@ -61,7 +61,9 @@ to the operation as an attribute. For example:
   : () -> tensor<2x3xf64>
 ```
 
-Interfaces: NoSideEffect (MemoryEffectOpInterface)
+Traits: AlwaysSpeculatableImplTrait
+
+Interfaces: ConditionallySpeculatable, NoMemoryEffect (MemoryEffectOpInterface)
 
 Effects: MemoryEffects::Effect{}
 
@@ -91,7 +93,9 @@ operation ::= `hello.print` $input attr-dict `:` type($input)
 The "print" builtin operation prints a given input tensor, and produces
 no results.
 
-Interfaces: NoSideEffect (MemoryEffectOpInterface)
+Traits: AlwaysSpeculatableImplTrait
+
+Interfaces: ConditionallySpeculatable, NoMemoryEffect (MemoryEffectOpInterface)
 
 Effects: MemoryEffects::Effect{}
 
@@ -100,4 +104,17 @@ Effects: MemoryEffects::Effect{}
 | Operand | Description |
 | :-----: | ----------- |
 | `input` | tensor of 64-bit float values or memref of 64-bit float values
+
+### `hello.world` (::hello::WorldOp)
+
+print Hello, World
+
+The "world" operation prints "Hello, World", and produces
+no results.
+
+Traits: AlwaysSpeculatableImplTrait
+
+Interfaces: ConditionallySpeculatable, NoMemoryEffect (MemoryEffectOpInterface)
+
+Effects: MemoryEffects::Effect{}
 
