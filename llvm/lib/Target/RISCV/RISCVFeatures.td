@@ -86,6 +86,16 @@ def HasStdExtZifencei : Predicate<"Subtarget->hasStdExtZifencei()">,
                                    AssemblerPredicate<(all_of FeatureStdExtZifencei),
                                    "'Zifencei' (fence.i)">;
 
+def FeatureStdExtZicntr
+    : SubtargetFeature<"zicntr", "HasStdExtZicntr", "true",
+                       "'zicntr' (Base Counters and Timers)",
+                       [FeatureStdExtZicsr]>;
+
+def FeatureStdExtZihpm
+    : SubtargetFeature<"zihpm", "HasStdExtZihpm", "true",
+                       "'zihpm' (Hardware Performance Counters)",
+                       [FeatureStdExtZicsr]>;
+
 def FeatureStdExtZfhmin
     : SubtargetFeature<"zfhmin", "HasStdExtZfhmin", "true",
                        "'Zfhmin' (Half-Precision Floating-Point Minimal)",
@@ -497,10 +507,10 @@ def HasStdExtZvbc : Predicate<"Subtarget->hasStdExtZvbc()">,
 
 def FeatureStdExtZvkg
     : SubtargetFeature<"experimental-zvkg", "HasStdExtZvkg", "true",
-                       "'Zvkg' (Vector GCM instructions for Cryptography.)">;
+                       "'Zvkg' (Vector GCM instructions for Cryptography)">;
 def HasStdExtZvkg : Predicate<"Subtarget->hasStdExtZvkg()">,
                               AssemblerPredicate<(all_of FeatureStdExtZvkg),
-                              "'Zvkg' (Vector GCM instructions for Cryptography.)">;
+                              "'Zvkg' (Vector GCM instructions for Cryptography)">;
 
 def FeatureStdExtZvkn
     : SubtargetFeature<"experimental-zvkn", "HasStdExtZvkn", "true",
@@ -521,15 +531,15 @@ def FeatureStdExtZvkng
 
 def FeatureStdExtZvknha
     : SubtargetFeature<"experimental-zvknha", "HasStdExtZvknha", "true",
-                       "'Zvknha' (Vector SHA-2. (SHA-256 only))">;
+                       "'Zvknha' (Vector SHA-2 (SHA-256 only))">;
 
 def FeatureStdExtZvknhb
     : SubtargetFeature<"experimental-zvknhb", "HasStdExtZvknhb", "true",
-                       "'Zvknhb' (Vector SHA-2. (SHA-256 and SHA-512))",
+                       "'Zvknhb' (Vector SHA-2 (SHA-256 and SHA-512))",
                        [FeatureStdExtZvknha]>;
 def HasStdExtZvknha : Predicate<"Subtarget->hasStdExtZvknha()">,
                                 AssemblerPredicate<(all_of FeatureStdExtZvknha),
-                                "'Zvknha' (Vector SHA-2. (SHA-256 only))">;
+                                "'Zvknha' (Vector SHA-2 (SHA-256 only))">;
 
 def FeatureStdExtZvks
     : SubtargetFeature<"experimental-zvks", "HasStdExtZvks", "true",
@@ -538,10 +548,10 @@ def FeatureStdExtZvks
 
 def FeatureStdExtZvksed
     : SubtargetFeature<"experimental-zvksed", "HasStdExtZvksed", "true",
-                       "'Zvksed' (SM4 Block Cipher Instructions.)">;
+                       "'Zvksed' (SM4 Block Cipher Instructions)">;
 def HasStdExtZvksed : Predicate<"Subtarget->hasStdExtZvksed()">,
                                 AssemblerPredicate<(all_of FeatureStdExtZvksed),
-                                "'Zvksed' (SM4 Block Cipher Instructions.)">;
+                                "'Zvksed' (SM4 Block Cipher Instructions)">;
 
 def FeatureStdExtZvksg
     : SubtargetFeature<"experimental-zvksg", "HasStdExtZvksg", "true",
@@ -550,14 +560,14 @@ def FeatureStdExtZvksg
 
 def FeatureStdExtZvksh
     : SubtargetFeature<"experimental-zvksh", "HasStdExtZvksh", "true",
-                       "'Zvksh' (SM3 Hash Function Instructions.)">;
+                       "'Zvksh' (SM3 Hash Function Instructions)">;
 def HasStdExtZvksh : Predicate<"Subtarget->hasStdExtZvksh()">,
                                AssemblerPredicate<(all_of FeatureStdExtZvksh),
-                               "'Zvksh' (SM3 Hash Function Instructions.)">;
+                               "'Zvksh' (SM3 Hash Function Instructions)">;
 
 def FeatureStdExtZvkt
     : SubtargetFeature<"experimental-zvkt", "HasStdExtZvkt", "true",
-                       "'Zvkt' (Vector Data-Independent Execution Latency )">;
+                       "'Zvkt' (Vector Data-Independent Execution Latency)">;
 
 def FeatureStdExtZicond
     : SubtargetFeature<"experimental-zicond", "HasStdExtZicond", "true",
@@ -705,6 +715,11 @@ def FeatureSaveRestore : SubtargetFeature<"save-restore", "EnableSaveRestore",
 def FeatureUnalignedScalarMem
    : SubtargetFeature<"unaligned-scalar-mem", "EnableUnalignedScalarMem",
                       "true", "Has reasonably performant unaligned scalar "
+                      "loads and stores">;
+
+def FeatureUnalignedVectorMem
+   : SubtargetFeature<"unaligned-vector-mem", "EnableUnalignedVectorMem",
+                      "true", "Has reasonably performant unaligned vector "
                       "loads and stores">;
 
 def TuneNoOptimizedZeroStrideLoad

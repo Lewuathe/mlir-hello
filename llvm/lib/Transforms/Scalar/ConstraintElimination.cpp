@@ -327,6 +327,13 @@ static Decomposition decompose(Value *V,
     if (match(V, m_NSWAdd(m_Value(Op0), m_Value(Op1))))
       return MergeResults(Op0, Op1, IsSigned);
 
+    ConstantInt *CI;
+    if (match(V, m_NSWMul(m_Value(Op0), m_ConstantInt(CI)))) {
+      auto Result = decompose(Op0, Preconditions, IsSigned, DL);
+      Result.mul(CI->getSExtValue());
+      return Result;
+    }
+
     return V;
   }
 
@@ -961,7 +968,8 @@ static bool checkAndReplaceCondition(
     NumCondsRemoved++;
     Changed = true;
   }
-  if (CSToUse.isConditionImplied(ConstraintSystem::negate(R.Coefficients))) {
+  auto Negated = ConstraintSystem::negate(R.Coefficients);
+  if (!Negated.empty() && CSToUse.isConditionImplied(Negated)) {
     if (!DebugCounter::shouldExecute(EliminatedCounter))
       return false;
 

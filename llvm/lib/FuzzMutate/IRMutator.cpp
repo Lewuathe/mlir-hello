@@ -45,7 +45,10 @@ void IRMutationStrategy::mutate(Module &M, RandomIRBuilder &IB) {
 }
 
 void IRMutationStrategy::mutate(Function &F, RandomIRBuilder &IB) {
-  mutate(*makeSampler(IB.Rand, make_pointer_range(F)).getSelection(), IB);
+  auto Range = make_filter_range(make_pointer_range(F),
+                                 [](BasicBlock *BB) { return !BB->isEHPad(); });
+
+  mutate(*makeSampler(IB.Rand, Range).getSelection(), IB);
 }
 
 void IRMutationStrategy::mutate(BasicBlock &BB, RandomIRBuilder &IB) {
@@ -243,7 +246,7 @@ void InstModificationIRStrategy::mutate(Instruction &Inst,
     break;
 
   case Instruction::FCmp:
-    CI = cast<ICmpInst>(&Inst);
+    CI = cast<FCmpInst>(&Inst);
     for (unsigned p = CmpInst::FIRST_FCMP_PREDICATE;
          p <= CmpInst::LAST_FCMP_PREDICATE; p++) {
       Modifications.push_back(
@@ -566,7 +569,6 @@ void SinkInstructionStrategy::mutate(BasicBlock &BB, RandomIRBuilder &IB) {
 }
 
 void ShuffleBlockStrategy::mutate(BasicBlock &BB, RandomIRBuilder &IB) {
-
   SmallPtrSet<Instruction *, 8> AliveInsts;
   for (auto &I : make_early_inc_range(make_range(
            BB.getFirstInsertionPt(), BB.getTerminator()->getIterator()))) {

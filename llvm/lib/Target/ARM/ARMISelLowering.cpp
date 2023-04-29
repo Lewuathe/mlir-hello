@@ -2081,6 +2081,8 @@ ARMTargetLowering::getEffectiveCallingConv(CallingConv::ID CC,
     return CC;
   case CallingConv::PreserveMost:
     return CallingConv::PreserveMost;
+  case CallingConv::PreserveAll:
+    return CallingConv::PreserveAll;
   case CallingConv::ARM_AAPCS_VFP:
   case CallingConv::Swift:
   case CallingConv::SwiftTail:
@@ -2138,6 +2140,8 @@ CCAssignFn *ARMTargetLowering::CCAssignFnForNode(CallingConv::ID CC,
   case CallingConv::GHC:
     return (Return ? RetCC_ARM_APCS : CC_ARM_APCS_GHC);
   case CallingConv::PreserveMost:
+    return (Return ? RetCC_ARM_AAPCS : CC_ARM_AAPCS);
+  case CallingConv::PreserveAll:
     return (Return ? RetCC_ARM_AAPCS : CC_ARM_AAPCS);
   case CallingConv::CFGuard_Check:
     return (Return ? RetCC_ARM_AAPCS : CC_ARM_Win32_CFGuard_Check);
@@ -5048,7 +5052,7 @@ SDValue ARMTargetLowering::LowerUnsignedALUO(SDValue Op,
 static SDValue LowerADDSUBSAT(SDValue Op, SelectionDAG &DAG,
                               const ARMSubtarget *Subtarget) {
   EVT VT = Op.getValueType();
-  if (!Subtarget->hasV6Ops() || !Subtarget->hasDSP())
+  if (!Subtarget->hasV6Ops() || !Subtarget->hasDSP() || Subtarget->isThumb1Only())
     return SDValue();
   if (!VT.isSimple())
     return SDValue();
@@ -13785,6 +13789,11 @@ bool ARMTargetLowering::shouldFoldConstantShiftPairToMask(
     return true;
 
   return false;
+}
+
+bool ARMTargetLowering::shouldFoldSelectWithIdentityConstant(unsigned BinOpcode,
+                                                             EVT VT) const {
+  return Subtarget->hasMVEIntegerOps() && isTypeLegal(VT);
 }
 
 bool ARMTargetLowering::preferIncOfAddToSubOfNot(EVT VT) const {
