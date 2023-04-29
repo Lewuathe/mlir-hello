@@ -1087,7 +1087,7 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
 
     { ISD::MUL,  MVT::v16i8,   {  5, 18, 6,12 } }, // extend/pmullw/pack
     { ISD::MUL,  MVT::v32i8,   {  6, 11,10,19 } }, // unpack/pmullw
-    { ISD::MUL,  MVT::v16i16,  {  2,  5, 1, 1 } }, // pmullw
+    { ISD::MUL,  MVT::v16i16,  {  2,  5, 1, 2 } }, // pmullw
     { ISD::MUL,  MVT::v8i32,   {  4, 10, 1, 2 } }, // pmulld
     { ISD::MUL,  MVT::v4i32,   {  2, 10, 1, 2 } }, // pmulld
     { ISD::MUL,  MVT::v4i64,   {  6, 10, 8,13 } }, // 3*pmuludq/3*shift/2*add
@@ -1377,7 +1377,7 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
   static const CostKindTblEntry X64CostTbl[] = { // 64-bit targets
     { ISD::ADD,  MVT::i64,  {  1 } }, // Core (Merom) from http://www.agner.org/
     { ISD::SUB,  MVT::i64,  {  1 } }, // Core (Merom) from http://www.agner.org/
-    { ISD::MUL,  MVT::i64,  {  2 } }, // Nehalem from http://www.agner.org/
+    { ISD::MUL,  MVT::i64,  {  2,  6,  1,  2 } },
   };
 
   if (ST->is64Bit())
@@ -1395,6 +1395,8 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
     { ISD::SUB,  MVT::i32, {  1 } }, // Pentium III from http://www.agner.org/
 
     { ISD::MUL,  MVT::i8,  {  3,  4, 1, 1 } },
+    { ISD::MUL,  MVT::i16, {  2,  4, 1, 1 } },
+    { ISD::MUL,  MVT::i32, {  1,  4, 1, 1 } },
 
     { ISD::FNEG, MVT::f64, {  2,  2, 1, 3 } }, // (x87)
     { ISD::FADD, MVT::f64, {  2,  3, 1, 1 } }, // (x87)
@@ -1610,7 +1612,7 @@ InstructionCost X86TTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
             LegalVT.getVectorNumElements() * std::max(NumOfSrcs, E);
         unsigned NumOfSrcRegs = NormalizedVF / LegalVT.getVectorNumElements();
         unsigned NumOfDestRegs = NormalizedVF / LegalVT.getVectorNumElements();
-        SmallVector<int> NormalizedMask(NormalizedVF, UndefMaskElem);
+        SmallVector<int> NormalizedMask(NormalizedVF, PoisonMaskElem);
         copy(Mask, NormalizedMask.begin());
         unsigned PrevSrcReg = 0;
         ArrayRef<int> PrevRegMask;
@@ -1632,7 +1634,7 @@ InstructionCost X86TTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
                 return;
               }
               if (SrcReg != DestReg &&
-                  any_of(RegMask, [](int I) { return I != UndefMaskElem; })) {
+                  any_of(RegMask, [](int I) { return I != PoisonMaskElem; })) {
                 // Just a copy of the source register.
                 Cost += TTI::TCC_Basic;
               }
@@ -4859,7 +4861,11 @@ InstructionCost X86TTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
       // This isn't exactly right. We're using slow unaligned 32-byte accesses
       // as a proxy for a double-pumped AVX memory interface such as on
       // Sandybridge.
+      // Sub-32-bit loads/stores will be slower either with PINSR*/PEXTR* or
+      // will be scalarized.
       if (CurrOpSizeBytes == 32 && ST->isUnalignedMem32Slow())
+        Cost += 2;
+      else if (CurrOpSizeBytes < 4)
         Cost += 2;
       else
         Cost += 1;

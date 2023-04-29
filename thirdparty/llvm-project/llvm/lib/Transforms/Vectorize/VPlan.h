@@ -25,7 +25,6 @@
 
 #include "VPlanValue.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -38,7 +37,6 @@
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/FMF.h"
-#include "llvm/Transforms/Utils/LoopVersioning.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -62,6 +60,7 @@ class VPlan;
 class VPReplicateRecipe;
 class VPlanSlp;
 class Value;
+class LoopVersioning;
 
 namespace Intrinsic {
 typedef unsigned ID;
@@ -410,7 +409,7 @@ struct VPTransformState {
   ///
   /// This is currently only used to add no-alias metadata based on the
   /// memchecks.  The actually versioning is performed manually.
-  std::unique_ptr<LoopVersioning> LVer;
+  LoopVersioning *LVer = nullptr;
 };
 
 /// VPBlockBase is the building block of the Hierarchical Control-Flow Graph.
@@ -2210,13 +2209,14 @@ public:
 /// to produce efficient output IR, including which branches, basic-blocks and
 /// output IR instructions to generate, and their cost. VPlan holds a
 /// Hierarchical-CFG of VPBasicBlocks and VPRegionBlocks rooted at an Entry
-/// VPBlock.
+/// VPBasicBlock.
 class VPlan {
   friend class VPlanPrinter;
   friend class VPSlotTracker;
 
-  /// Hold the single entry to the Hierarchical CFG of the VPlan.
-  VPBlockBase *Entry;
+  /// Hold the single entry to the Hierarchical CFG of the VPlan, i.e. the
+  /// preheader of the vector loop.
+  VPBasicBlock *Entry;
 
   /// Holds the VFs applicable to this VPlan.
   SmallSetVector<ElementCount, 2> VFs;
@@ -2255,7 +2255,7 @@ class VPlan {
   MapVector<PHINode *, VPLiveOut *> LiveOuts;
 
 public:
-  VPlan(VPBlockBase *Entry = nullptr) : Entry(Entry) {
+  VPlan(VPBasicBlock *Entry = nullptr) : Entry(Entry) {
     if (Entry)
       Entry->setPlan(this);
   }
@@ -2270,10 +2270,10 @@ public:
   /// Generate the IR code for this VPlan.
   void execute(VPTransformState *State);
 
-  VPBlockBase *getEntry() { return Entry; }
-  const VPBlockBase *getEntry() const { return Entry; }
+  VPBasicBlock *getEntry() { return Entry; }
+  const VPBasicBlock *getEntry() const { return Entry; }
 
-  VPBlockBase *setEntry(VPBlockBase *Block) {
+  VPBasicBlock *setEntry(VPBasicBlock *Block) {
     Entry = Block;
     Block->setPlan(this);
     return Entry;
@@ -2326,7 +2326,7 @@ public:
   void setName(const Twine &newName) { Name = newName.str(); }
 
   void addVPValue(Value *V, VPValue *VPV) {
-    assert((Value2VPValueEnabled || !VPV->getDefiningRecipe()) &&
+    assert((Value2VPValueEnabled || VPV->isLiveIn()) &&
            "Value2VPValue mapping may be out of date!");
     assert(V && "Trying to add a null Value to VPlan");
     assert(!Value2VPValue.count(V) && "Value already exists in VPlan");
@@ -2339,7 +2339,7 @@ public:
     assert(V && "Trying to get the VPValue of a null Value");
     assert(Value2VPValue.count(V) && "Value does not exist in VPlan");
     assert((Value2VPValueEnabled || OverrideAllowed ||
-            !Value2VPValue[V]->getDefiningRecipe()) &&
+            Value2VPValue[V]->isLiveIn()) &&
            "Value2VPValue mapping may be out of date!");
     return Value2VPValue[V];
   }

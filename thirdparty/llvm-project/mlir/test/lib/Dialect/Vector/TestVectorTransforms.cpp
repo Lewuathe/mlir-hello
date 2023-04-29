@@ -261,8 +261,8 @@ struct TestVectorTransferUnrollingPatterns
     UnrollVectorOptions opts;
     opts.setNativeShape(ArrayRef<int64_t>{2, 2})
         .setFilterConstraint([](Operation *op) {
-          return success(
-              isa<vector::TransferReadOp, vector::TransferWriteOp>(op));
+          return success(isa<vector::TransferReadOp, vector::TransferWriteOp,
+                             vector::GatherOp>(op));
         });
     if (reverseUnrollOrder.getValue()) {
       opts.setUnrollTraversalOrderFn(
@@ -272,6 +272,8 @@ struct TestVectorTransferUnrollingPatterns
               numLoops = readOp.getVectorType().getRank();
             else if (auto writeOp = dyn_cast<vector::TransferWriteOp>(op))
               numLoops = writeOp.getVectorType().getRank();
+            else if (auto gatherOp = dyn_cast<vector::GatherOp>(op))
+              numLoops = gatherOp.getVectorType().getRank();
             else
               return std::nullopt;
             auto order = llvm::reverse(llvm::seq<int64_t>(0, numLoops));
@@ -602,6 +604,26 @@ struct TestVectorExtractStridedSliceLowering
   }
 };
 
+struct TestVectorBreakDownBitCast
+    : public PassWrapper<TestVectorBreakDownBitCast,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TestVectorBreakDownBitCast)
+
+  StringRef getArgument() const final {
+    return "test-vector-break-down-bitcast";
+  }
+  StringRef getDescription() const final {
+    return "Test pattern that breaks down vector.bitcast ops ";
+  }
+  void runOnOperation() override {
+    RewritePatternSet patterns(&getContext());
+    populateBreakDownVectorBitCastOpPatterns(patterns, [](BitCastOp op) {
+      return op.getSourceVectorType().getShape().back() > 4;
+    });
+    (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
+  }
+};
+
 struct TestCreateVectorBroadcast
     : public PassWrapper<TestCreateVectorBroadcast,
                          OperationPass<func::FuncOp>> {
@@ -685,6 +707,8 @@ void registerTestVectorLowerings() {
   PassRegistration<TestVectorDistribution>();
 
   PassRegistration<TestVectorExtractStridedSliceLowering>();
+
+  PassRegistration<TestVectorBreakDownBitCast>();
 
   PassRegistration<TestCreateVectorBroadcast>();
 
