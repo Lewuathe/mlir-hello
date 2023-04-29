@@ -130,10 +130,16 @@ func.func @roundf() {
   call @func_roundf(%cInf) : (f32) -> ()
   // CHECK-NEXT: -inf
   call @func_roundf(%cNegInf) : (f32) -> ()
-  // CHECK-NEXT: nan
-  call @func_roundf(%cNan) : (f32) -> ()
-  // CHECK-NEXT: -nan
-  call @func_roundf(%cNegNan) : (f32) -> ()
+  // Per IEEE 754-2008, sign is not required when printing a negative NaN, so
+  // print as an int to ensure input NaN is left unchanged.
+  // CHECK-NEXT: 2143289344
+  // CHECK-NEXT: 2143289344
+  call @func_roundf$bitcast_result_to_int(%cNan) : (f32) -> ()
+  vector.print %cNanInt : i32
+  // CHECK-NEXT: -4194304
+  // CHECK-NEXT: -4194304
+  call @func_roundf$bitcast_result_to_int(%cNegNan) : (f32) -> ()
+  vector.print %cNegNanInt : i32
 
   // Very large values (greater than INT_64_MAX)
   %c2To100 = arith.constant 1.268e30 : f32 // 2^100
@@ -372,10 +378,16 @@ func.func @roundeven() {
   call @func_roundeven(%cInf) : (f32) -> ()
   // CHECK-NEXT: -inf
   call @func_roundeven(%cNegInf) : (f32) -> ()
-  // CHECK-NEXT: nan
-  call @func_roundeven(%cNan) : (f32) -> ()
-  // CHECK-NEXT: -nan
-  call @func_roundeven(%cNegNan) : (f32) -> ()
+  // Per IEEE 754-2008, sign is not required when printing a negative NaN, so
+  // print as an int to ensure input NaN is left unchanged.
+  // CHECK-NEXT: 2143289344
+  // CHECK-NEXT: 2143289344
+  call @func_roundeven$bitcast_result_to_int(%cNan) : (f32) -> ()
+  vector.print %cNanInt : i32
+  // CHECK-NEXT: -4194304
+  // CHECK-NEXT: -4194304
+  call @func_roundeven$bitcast_result_to_int(%cNegNan) : (f32) -> ()
+  vector.print %cNegNanInt : i32
 
 
   // Values above and below 2^23 = 8388608
@@ -409,7 +421,6 @@ func.func @roundeven() {
   %cVec = arith.constant dense<[0.5]> : vector<1xf32>
   // CHECK-NEXT: ( 0 )
   call @func_roundeven$vector(%cVec) : (vector<1xf32>) -> ()
-
   return
 }
 

@@ -607,8 +607,8 @@ LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
                    llvm::StringRef path) {
   Status error;
 
-  static ConstString g_dylibext(".dylib");
-  static ConstString g_solibext(".so");
+  static constexpr llvm::StringLiteral g_dylibext(".dylib");
+  static constexpr llvm::StringLiteral g_solibext(".so");
 
   if (!baton)
     return FileSystem::eEnumerateDirectoryResultQuit;
@@ -1679,6 +1679,7 @@ void Debugger::HandleProcessEvent(const EventSP &event_sp) {
     // Display running state changes first before any STDIO
     if (got_state_changed && !state_is_stopped) {
       Process::HandleProcessStateChangedEvent(event_sp, output_stream_sp.get(),
+                                              DoNoSelectMostRelevantFrame,
                                               pop_process_io_handler);
     }
 
@@ -1718,6 +1719,7 @@ void Debugger::HandleProcessEvent(const EventSP &event_sp) {
     // Now display any stopped state changes after any STDIO
     if (got_state_changed && state_is_stopped) {
       Process::HandleProcessStateChangedEvent(event_sp, output_stream_sp.get(),
+                                              DoNoSelectMostRelevantFrame,
                                               pop_process_io_handler);
     }
 

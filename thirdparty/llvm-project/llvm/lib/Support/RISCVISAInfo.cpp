@@ -107,8 +107,10 @@ static const RISCVSupportedExtension SupportedExtensions[] = {
     {"zicbom", RISCVExtensionVersion{1, 0}},
     {"zicboz", RISCVExtensionVersion{1, 0}},
     {"zicbop", RISCVExtensionVersion{1, 0}},
+    {"zicntr", RISCVExtensionVersion{1, 0}},
     {"zicsr", RISCVExtensionVersion{2, 0}},
     {"zifencei", RISCVExtensionVersion{2, 0}},
+    {"zihpm", RISCVExtensionVersion{1, 0}},
 
     {"zawrs", RISCVExtensionVersion{1, 0}},
 
@@ -687,8 +689,6 @@ RISCVISAInfo::parseArchString(StringRef Arch, bool EnableExperimentalExtension,
   Exts = Exts.drop_front(ConsumeLength);
   Exts.consume_front("_");
 
-  // TODO: Use version number when setting target features
-
   auto StdExtsItr = StdExts.begin();
   auto StdExtsEnd = StdExts.end();
   auto GoToNextExt = [](StringRef::iterator &I, unsigned ConsumeLength) {
@@ -736,7 +736,6 @@ RISCVISAInfo::parseArchString(StringRef Arch, bool EnableExperimentalExtension,
     }
 
     // The order is OK, then push it into features.
-    // TODO: Use version number when setting target features
     // Currently LLVM supports only "mafdcvh".
     if (!isSupportedExtension(StringRef(&C, 1))) {
       if (IgnoreUnknown) {
@@ -913,35 +912,30 @@ Error RISCVISAInfo::checkDependency() {
   return Error::success();
 }
 
-static const char *ImpliedExtsF[] = {"zicsr"};
 static const char *ImpliedExtsD[] = {"f"};
+static const char *ImpliedExtsF[] = {"zicsr"};
 static const char *ImpliedExtsV[] = {"zvl128b", "zve64d", "f", "d"};
-static const char *ImpliedExtsZfhmin[] = {"f"};
-static const char *ImpliedExtsZfh[] = {"f"};
-static const char *ImpliedExtsZfinx[] = {"zicsr"};
+static const char *ImpliedExtsXTHeadVdot[] = {"v"};
+static const char *ImpliedExtsXsfvcp[] = {"zve32x"};
+static const char *ImpliedExtsZcb[] = {"zca"};
 static const char *ImpliedExtsZdinx[] = {"zfinx"};
-static const char *ImpliedExtsZhinxmin[] = {"zfinx"};
+static const char *ImpliedExtsZfa[] = {"f"};
+static const char *ImpliedExtsZfh[] = {"f"};
+static const char *ImpliedExtsZfhmin[] = {"f"};
+static const char *ImpliedExtsZfinx[] = {"zicsr"};
 static const char *ImpliedExtsZhinx[] = {"zfinx"};
-static const char *ImpliedExtsZve64d[] = {"zve64f"};
-static const char *ImpliedExtsZve64f[] = {"zve64x", "zve32f"};
-static const char *ImpliedExtsZve64x[] = {"zve32x", "zvl64b"};
-static const char *ImpliedExtsZve32f[] = {"zve32x"};
-static const char *ImpliedExtsZve32x[] = {"zvl32b", "zicsr"};
-static const char *ImpliedExtsZvl65536b[] = {"zvl32768b"};
-static const char *ImpliedExtsZvl32768b[] = {"zvl16384b"};
-static const char *ImpliedExtsZvl16384b[] = {"zvl8192b"};
-static const char *ImpliedExtsZvl8192b[] = {"zvl4096b"};
-static const char *ImpliedExtsZvl4096b[] = {"zvl2048b"};
-static const char *ImpliedExtsZvl2048b[] = {"zvl1024b"};
-static const char *ImpliedExtsZvl1024b[] = {"zvl512b"};
-static const char *ImpliedExtsZvl512b[] = {"zvl256b"};
-static const char *ImpliedExtsZvl256b[] = {"zvl128b"};
-static const char *ImpliedExtsZvl128b[] = {"zvl64b"};
-static const char *ImpliedExtsZvl64b[] = {"zvl32b"};
+static const char *ImpliedExtsZhinxmin[] = {"zfinx"};
+static const char *ImpliedExtsZicntr[] = {"zicsr"};
+static const char *ImpliedExtsZihpm[] = {"zicsr"};
 static const char *ImpliedExtsZk[] = {"zkn", "zkt", "zkr"};
 static const char *ImpliedExtsZkn[] = {"zbkb", "zbkc", "zbkx",
                                        "zkne", "zknd", "zknh"};
 static const char *ImpliedExtsZks[] = {"zbkb", "zbkc", "zbkx", "zksed", "zksh"};
+static const char *ImpliedExtsZve32f[] = {"zve32x"};
+static const char *ImpliedExtsZve32x[] = {"zvl32b", "zicsr"};
+static const char *ImpliedExtsZve64d[] = {"zve64f"};
+static const char *ImpliedExtsZve64f[] = {"zve64x", "zve32f"};
+static const char *ImpliedExtsZve64x[] = {"zve32x", "zvl64b"};
 static const char *ImpliedExtsZvfh[] = {"zve32f"};
 static const char *ImpliedExtsZvkn[] = {"zvbb", "zvbc", "zvkned", "zvknhb",
                                         "zvkt"};
@@ -950,10 +944,17 @@ static const char *ImpliedExtsZvknhb[] = {"zvknha"};
 static const char *ImpliedExtsZvks[] = {"zvbb", "zvbc", "zvksed", "zvksh",
                                         "zvkt"};
 static const char *ImpliedExtsZvksg[] = {"zvks", "zvkg"};
-static const char *ImpliedExtsXsfvcp[] = {"zve32x"};
-static const char *ImpliedExtsXTHeadVdot[] = {"v"};
-static const char *ImpliedExtsZcb[] = {"zca"};
-static const char *ImpliedExtsZfa[] = {"f"};
+static const char *ImpliedExtsZvl1024b[] = {"zvl512b"};
+static const char *ImpliedExtsZvl128b[] = {"zvl64b"};
+static const char *ImpliedExtsZvl16384b[] = {"zvl8192b"};
+static const char *ImpliedExtsZvl2048b[] = {"zvl1024b"};
+static const char *ImpliedExtsZvl256b[] = {"zvl128b"};
+static const char *ImpliedExtsZvl32768b[] = {"zvl16384b"};
+static const char *ImpliedExtsZvl4096b[] = {"zvl2048b"};
+static const char *ImpliedExtsZvl512b[] = {"zvl256b"};
+static const char *ImpliedExtsZvl64b[] = {"zvl32b"};
+static const char *ImpliedExtsZvl65536b[] = {"zvl32768b"};
+static const char *ImpliedExtsZvl8192b[] = {"zvl4096b"};
 
 struct ImpliedExtsEntry {
   StringLiteral Name;
@@ -981,6 +982,8 @@ static constexpr ImpliedExtsEntry ImpliedExts[] = {
     {{"zfinx"}, {ImpliedExtsZfinx}},
     {{"zhinx"}, {ImpliedExtsZhinx}},
     {{"zhinxmin"}, {ImpliedExtsZhinxmin}},
+    {{"zicntr"}, {ImpliedExtsZicntr}},
+    {{"zihpm"}, {ImpliedExtsZihpm}},
     {{"zk"}, {ImpliedExtsZk}},
     {{"zkn"}, {ImpliedExtsZkn}},
     {{"zks"}, {ImpliedExtsZks}},

@@ -2825,7 +2825,10 @@ SDValue DAGCombiner::visitADDLike(SDNode *N) {
     // And if the target does not like this form then turn into:
     //   sub y, (xor x, -1)
     if (!TLI.preferIncOfAddToSubOfNot(VT) && N0.getOpcode() == ISD::ADD &&
-        N0.hasOneUse()) {
+        N0.hasOneUse() &&
+        // Limit this to after legalization if the add has wrap flags
+        (Level >= AfterLegalizeDAG || (!N->getFlags().hasNoUnsignedWrap() &&
+                                       !N->getFlags().hasNoSignedWrap()))) {
       SDValue Not = DAG.getNode(ISD::XOR, DL, VT, N0.getOperand(0),
                                 DAG.getAllOnesConstant(DL, VT));
       return DAG.getNode(ISD::SUB, DL, VT, N0.getOperand(1), Not);
@@ -3041,7 +3044,10 @@ SDValue DAGCombiner::visitADDLikeCommutative(SDValue N0, SDValue N1,
   // And if the target does not like this form then turn into:
   //   sub y, (xor x, -1)
   if (!TLI.preferIncOfAddToSubOfNot(VT) && N0.getOpcode() == ISD::ADD &&
-      N0.hasOneUse() && isOneOrOneSplat(N0.getOperand(1))) {
+      N0.hasOneUse() && isOneOrOneSplat(N0.getOperand(1)) &&
+      // Limit this to after legalization if the add has wrap flags
+      (Level >= AfterLegalizeDAG || (!N0->getFlags().hasNoUnsignedWrap() &&
+                                     !N0->getFlags().hasNoSignedWrap()))) {
     SDValue Not = DAG.getNode(ISD::XOR, DL, VT, N0.getOperand(0),
                               DAG.getAllOnesConstant(DL, VT));
     return DAG.getNode(ISD::SUB, DL, VT, N1, Not);
@@ -3928,11 +3934,6 @@ SDValue DAGCombiner::visitSUB(SDNode *N) {
   // If the relocation model supports it, consider symbol offsets.
   if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(N0))
     if (!LegalOperations && TLI.isOffsetFoldingLegal(GA)) {
-      // fold (sub Sym, c) -> Sym-c
-      if (N1C && GA->getOpcode() == ISD::GlobalAddress)
-        return DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N1C), VT,
-                                    GA->getOffset() -
-                                        (uint64_t)N1C->getSExtValue());
       // fold (sub Sym+c1, Sym+c2) -> c1-c2
       if (GlobalAddressSDNode *GB = dyn_cast<GlobalAddressSDNode>(N1))
         if (GA->getGlobal() == GB->getGlobal())
@@ -12308,11 +12309,7 @@ static SDValue tryToFoldExtendOfConstant(SDNode *N, const TargetLowering &TLI,
   EVT VT = N->getValueType(0);
   SDLoc DL(N);
 
-  assert((Opcode == ISD::SIGN_EXTEND || Opcode == ISD::ZERO_EXTEND ||
-          Opcode == ISD::ANY_EXTEND ||
-          Opcode == ISD::SIGN_EXTEND_VECTOR_INREG ||
-          Opcode == ISD::ZERO_EXTEND_VECTOR_INREG ||
-          Opcode == ISD::ANY_EXTEND_VECTOR_INREG) &&
+  assert((ISD::isExtOpcode(Opcode) || ISD::isExtVecInRegOpcode(Opcode)) &&
          "Expected EXTEND dag node in input!");
 
   // fold (sext c1) -> c1
@@ -14040,9 +14037,7 @@ SDValue DAGCombiner::visitSIGN_EXTEND_INREG(SDNode *N) {
   // fold (sext_in_reg (*_extend_vector_inreg x)) -> (sext_vector_inreg x)
   // if x is small enough or if we know that x has more than 1 sign bit and the
   // sign_extend_inreg is extending from one of them.
-  if (N0.getOpcode() == ISD::ANY_EXTEND_VECTOR_INREG ||
-      N0.getOpcode() == ISD::SIGN_EXTEND_VECTOR_INREG ||
-      N0.getOpcode() == ISD::ZERO_EXTEND_VECTOR_INREG) {
+  if (ISD::isExtVecInRegOpcode(N0.getOpcode())) {
     SDValue N00 = N0.getOperand(0);
     unsigned N00Bits = N00.getScalarValueSizeInBits();
     unsigned DstElts = N0.getValueType().getVectorMinNumElements();
@@ -14210,9 +14205,7 @@ foldExtendVectorInregToExtendOfSubvector(SDNode *N, const TargetLowering &TLI,
                                Src.getValueType().getVectorElementType(),
                                VT.getVectorElementCount());
 
-  assert((InregOpcode == ISD::SIGN_EXTEND_VECTOR_INREG ||
-          InregOpcode == ISD::ZERO_EXTEND_VECTOR_INREG ||
-          InregOpcode == ISD::ANY_EXTEND_VECTOR_INREG) &&
+  assert(ISD::isExtVecInRegOpcode(InregOpcode) &&
          "Expected EXTEND_VECTOR_INREG dag node in input!");
 
   // Profitability check: our operand must be an one-use CONCAT_VECTORS.
@@ -19419,6 +19412,8 @@ void DAGCombiner::getStoreMergeCandidates(
     // Don't mix temporal stores with non-temporal stores.
     if (St->isNonTemporal() != Other->isNonTemporal())
       return false;
+    if (!TLI.areTwoSDNodeTargetMMOFlagsMergeable(*St, *Other))
+      return false;
     SDValue OtherBC = peekThroughBitcasts(Other->getValue());
     // Allow merging constants of different types as integers.
     bool NoTypeMatch = (MemVT.isInteger()) ? !MemVT.bitsEq(Other->getMemoryVT())
@@ -19443,6 +19438,9 @@ void DAGCombiner::getStoreMergeCandidates(
         return false;
       // Don't mix temporal loads with non-temporal loads.
       if (cast<LoadSDNode>(Val)->isNonTemporal() != OtherLd->isNonTemporal())
+        return false;
+      if (!TLI.areTwoSDNodeTargetMMOFlagsMergeable(*cast<LoadSDNode>(Val),
+                                                   *OtherLd))
         return false;
       if (!(LBasePtr.equalBaseIndex(LPtr, DAG)))
         return false;
@@ -20068,9 +20066,13 @@ bool DAGCombiner::tryStoreMergeOfLoads(SmallVectorImpl<MemOpLink> &StoreNodes,
     if (IsNonTemporalLoad)
       LdMMOFlags |= MachineMemOperand::MONonTemporal;
 
+    LdMMOFlags |= TLI.getTargetMMOFlags(*FirstLoad);
+
     MachineMemOperand::Flags StMMOFlags = IsNonTemporalStore
                                               ? MachineMemOperand::MONonTemporal
                                               : MachineMemOperand::MONone;
+
+    StMMOFlags |= TLI.getTargetMMOFlags(*StoreNodes[0].MemNode);
 
     SDValue NewLoad, NewStore;
     if (UseVectorTy || !DoIntegerTruncate) {
@@ -24153,9 +24155,7 @@ static SDValue combineTruncationShuffle(ShuffleVectorSDNode *SVN,
   SDValue N0 = peekThroughBitcasts(SVN->getOperand(0));
 
   unsigned Opcode = N0.getOpcode();
-  if (Opcode != ISD::ANY_EXTEND_VECTOR_INREG &&
-      Opcode != ISD::SIGN_EXTEND_VECTOR_INREG &&
-      Opcode != ISD::ZERO_EXTEND_VECTOR_INREG)
+  if (!ISD::isExtVecInRegOpcode(Opcode))
     return SDValue();
 
   SDValue N00 = N0.getOperand(0);

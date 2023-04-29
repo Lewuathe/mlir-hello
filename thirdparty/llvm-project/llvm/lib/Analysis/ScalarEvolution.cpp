@@ -2340,25 +2340,42 @@ bool ScalarEvolution::willNotOverflow(Instruction::BinaryOps BinOp, bool Signed,
   // Can we use context to prove the fact we need?
   if (!CtxI)
     return false;
-  // We can prove that add(x, constant) doesn't wrap if isKnownPredicateAt can
-  // guarantee that x <= max_int - constant at the given context.
-  // TODO: Support other operations.
-  if (BinOp != Instruction::Add)
+  // TODO: Support mul.
+  if (BinOp == Instruction::Mul)
     return false;
   auto *RHSC = dyn_cast<SCEVConstant>(RHS);
   // TODO: Lift this limitation.
   if (!RHSC)
     return false;
   APInt C = RHSC->getAPInt();
-  // TODO: Also lift this limitation.
-  if (Signed && C.isNegative())
-    return false;
   unsigned NumBits = C.getBitWidth();
-  APInt Max =
-      Signed ? APInt::getSignedMaxValue(NumBits) : APInt::getMaxValue(NumBits);
-  APInt Limit = Max - C;
+  bool IsSub = (BinOp == Instruction::Sub);
+  bool IsNegativeConst = (Signed && C.isNegative());
+  // Compute the direction and magnitude by which we need to check overflow.
+  bool OverflowDown = IsSub ^ IsNegativeConst;
+  APInt Magnitude = C;
+  if (IsNegativeConst) {
+    if (C == APInt::getSignedMinValue(NumBits))
+      // TODO: SINT_MIN on inversion gives the same negative value, we don't
+      // want to deal with that.
+      return false;
+    Magnitude = -C;
+  }
+
   ICmpInst::Predicate Pred = Signed ? ICmpInst::ICMP_SLE : ICmpInst::ICMP_ULE;
-  return isKnownPredicateAt(Pred, LHS, getConstant(Limit), CtxI);
+  if (OverflowDown) {
+    // To avoid overflow down, we need to make sure that MIN + Magnitude <= LHS.
+    APInt Min = Signed ? APInt::getSignedMinValue(NumBits)
+                       : APInt::getMinValue(NumBits);
+    APInt Limit = Min + Magnitude;
+    return isKnownPredicateAt(Pred, getConstant(Limit), LHS, CtxI);
+  } else {
+    // To avoid overflow up, we need to make sure that LHS <= MAX - Magnitude.
+    APInt Max = Signed ? APInt::getSignedMaxValue(NumBits)
+                       : APInt::getMaxValue(NumBits);
+    APInt Limit = Max - Magnitude;
+    return isKnownPredicateAt(Pred, LHS, getConstant(Limit), CtxI);
+  }
 }
 
 std::optional<SCEV::NoWrapFlags>
@@ -4473,6 +4490,18 @@ void ScalarEvolution::insertValueToMap(Value *V, const SCEV *S) {
   }
 }
 
+/// Determine whether this instruction is either not SCEVable or will always
+/// produce a SCEVUnknown. We do not have to walk past such instructions when
+/// invalidating.
+static bool isAlwaysUnknown(const Instruction *I) {
+  switch (I->getOpcode()) {
+  case Instruction::Load:
+    return true;
+  default:
+    return false;
+  }
+}
+
 /// Return an existing SCEV if it exists, otherwise analyze the expression and
 /// create a new one.
 const SCEV *ScalarEvolution::getSCEV(Value *V) {
@@ -4480,7 +4509,11 @@ const SCEV *ScalarEvolution::getSCEV(Value *V) {
 
   if (const SCEV *S = getExistingSCEV(V))
     return S;
-  return createSCEVIter(V);
+  const SCEV *S = createSCEVIter(V);
+  assert((!isa<Instruction>(V) || !isAlwaysUnknown(cast<Instruction>(V)) ||
+          isa<SCEVUnknown>(S)) &&
+         "isAlwaysUnknown() instruction is not SCEVUnknown");
+  return S;
 }
 
 const SCEV *ScalarEvolution::getExistingSCEV(Value *V) {
@@ -4781,6 +4814,8 @@ static void PushDefUseChildren(Instruction *I,
   // Push the def-use children onto the Worklist stack.
   for (User *U : I->users()) {
     auto *UserInsn = cast<Instruction>(U);
+    if (isAlwaysUnknown(UserInsn))
+      continue;
     if (Visited.insert(UserInsn).second)
       Worklist.push_back(UserInsn);
   }
@@ -5873,90 +5908,6 @@ const SCEV *ScalarEvolution::createAddRecFromPHI(PHINode *PN) {
   return nullptr;
 }
 
-// Checks if the SCEV S is available at BB.  S is considered available at BB
-// if S can be materialized at BB without introducing a fault.
-static bool IsAvailableOnEntry(const Loop *L, DominatorTree &DT, const SCEV *S,
-                               BasicBlock *BB) {
-  struct CheckAvailable {
-    bool TraversalDone = false;
-    bool Available = true;
-
-    const Loop *L = nullptr;  // The loop BB is in (can be nullptr)
-    BasicBlock *BB = nullptr;
-    DominatorTree &DT;
-
-    CheckAvailable(const Loop *L, BasicBlock *BB, DominatorTree &DT)
-      : L(L), BB(BB), DT(DT) {}
-
-    bool setUnavailable() {
-      TraversalDone = true;
-      Available = false;
-      return false;
-    }
-
-    bool follow(const SCEV *S) {
-      switch (S->getSCEVType()) {
-      case scConstant:
-      case scVScale:
-      case scPtrToInt:
-      case scTruncate:
-      case scZeroExtend:
-      case scSignExtend:
-      case scAddExpr:
-      case scMulExpr:
-      case scUMaxExpr:
-      case scSMaxExpr:
-      case scUMinExpr:
-      case scSMinExpr:
-      case scSequentialUMinExpr:
-        // These expressions are available if their operand(s) is/are.
-        return true;
-
-      case scAddRecExpr: {
-        // We allow add recurrences that are on the loop BB is in, or some
-        // outer loop.  This guarantees availability because the value of the
-        // add recurrence at BB is simply the "current" value of the induction
-        // variable.  We can relax this in the future; for instance an add
-        // recurrence on a sibling dominating loop is also available at BB.
-        const auto *ARLoop = cast<SCEVAddRecExpr>(S)->getLoop();
-        if (L && (ARLoop == L || ARLoop->contains(L)))
-          return true;
-
-        return setUnavailable();
-      }
-
-      case scUnknown: {
-        // For SCEVUnknown, we check for simple dominance.
-        const auto *SU = cast<SCEVUnknown>(S);
-        Value *V = SU->getValue();
-
-        if (isa<Argument>(V))
-          return false;
-
-        if (isa<Instruction>(V) && DT.dominates(cast<Instruction>(V), BB))
-          return false;
-
-        return setUnavailable();
-      }
-
-      case scUDivExpr:
-      case scCouldNotCompute:
-        // We do not try to smart about these at all.
-        return setUnavailable();
-      }
-      llvm_unreachable("Unknown SCEV kind!");
-    }
-
-    bool isDone() { return TraversalDone; }
-  };
-
-  CheckAvailable CA(L, BB, DT);
-  SCEVTraversal<CheckAvailable> ST(CA);
-
-  ST.visitAll(S);
-  return CA.Available;
-}
-
 // Try to match a control flow sequence that branches out at BI and merges back
 // at Merge into a "C ? LHS : RHS" select pattern.  Return true on a successful
 // match.
@@ -5994,13 +5945,6 @@ const SCEV *ScalarEvolution::createNodeFromSelectLikePHI(PHINode *PN) {
   auto IsReachable =
       [&](BasicBlock *BB) { return DT.isReachableFromEntry(BB); };
   if (PN->getNumIncomingValues() == 2 && all_of(PN->blocks(), IsReachable)) {
-    const Loop *L = LI.getLoopFor(PN->getParent());
-
-    // We don't want to break LCSSA, even in a SCEV expression tree.
-    for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i)
-      if (LI.getLoopFor(PN->getIncomingBlock(i)) != L)
-        return nullptr;
-
     // Try to match
     //
     //  br %cond, label %left, label %right
@@ -6021,8 +5965,8 @@ const SCEV *ScalarEvolution::createNodeFromSelectLikePHI(PHINode *PN) {
 
     if (BI && BI->isConditional() &&
         BrPHIToSelect(DT, BI, PN, Cond, LHS, RHS) &&
-        IsAvailableOnEntry(L, DT, getSCEV(LHS), PN->getParent()) &&
-        IsAvailableOnEntry(L, DT, getSCEV(RHS), PN->getParent()))
+        properlyDominates(getSCEV(LHS), PN->getParent()) &&
+        properlyDominates(getSCEV(RHS), PN->getParent()))
       return createNodeForSelectOrPHI(PN, Cond, LHS, RHS);
   }
 
@@ -6033,11 +5977,11 @@ const SCEV *ScalarEvolution::createNodeForPHI(PHINode *PN) {
   if (const SCEV *S = createAddRecFromPHI(PN))
     return S;
 
-  if (const SCEV *S = createNodeFromSelectLikePHI(PN))
-    return S;
-
   if (Value *V = simplifyInstruction(PN, {getDataLayout(), &TLI, &DT, &AC}))
     return getSCEV(V);
+
+  if (const SCEV *S = createNodeFromSelectLikePHI(PN))
+    return S;
 
   // If it's not a loop phi, we can't handle it yet.
   return getUnknown(PN);
@@ -7264,62 +7208,43 @@ bool ScalarEvolution::isAddRecNeverPoison(const Instruction *I, const Loop *L) {
   if (isSCEVExprNeverPoison(I))
     return true;
 
-  // For an add recurrence specifically, we assume that infinite loops without
-  // side effects are undefined behavior, and then reason as follows:
+  // If the loop only has one exit, then we know that, if the loop is entered,
+  // any instruction dominating that exit will be executed. If any such
+  // instruction would result in UB, the addrec cannot be poison.
   //
-  // If the add recurrence is poison in any iteration, it is poison on all
-  // future iterations (since incrementing poison yields poison). If the result
-  // of the add recurrence is fed into the loop latch condition and the loop
-  // does not contain any throws or exiting blocks other than the latch, we now
-  // have the ability to "choose" whether the backedge is taken or not (by
-  // choosing a sufficiently evil value for the poison feeding into the branch)
-  // for every iteration including and after the one in which \p I first became
-  // poison.  There are two possibilities (let's call the iteration in which \p
-  // I first became poison as K):
-  //
-  //  1. In the set of iterations including and after K, the loop body executes
-  //     no side effects.  In this case executing the backege an infinte number
-  //     of times will yield undefined behavior.
-  //
-  //  2. In the set of iterations including and after K, the loop body executes
-  //     at least one side effect.  In this case, that specific instance of side
-  //     effect is control dependent on poison, which also yields undefined
-  //     behavior.
+  // This is basically the same reasoning as in isSCEVExprNeverPoison(), but
+  // also handles uses outside the loop header (they just need to dominate the
+  // single exit).
 
   auto *ExitingBB = L->getExitingBlock();
-  auto *LatchBB = L->getLoopLatch();
-  if (!ExitingBB || !LatchBB || ExitingBB != LatchBB)
+  if (!ExitingBB || !loopHasNoAbnormalExits(L))
     return false;
 
-  SmallPtrSet<const Instruction *, 16> Pushed;
-  SmallVector<const Instruction *, 8> PoisonStack;
+  SmallPtrSet<const Value *, 16> KnownPoison;
+  SmallVector<const Instruction *, 8> Worklist;
 
   // We start by assuming \c I, the post-inc add recurrence, is poison.  Only
   // things that are known to be poison under that assumption go on the
-  // PoisonStack.
-  Pushed.insert(I);
-  PoisonStack.push_back(I);
+  // Worklist.
+  KnownPoison.insert(I);
+  Worklist.push_back(I);
 
-  bool LatchControlDependentOnPoison = false;
-  while (!PoisonStack.empty() && !LatchControlDependentOnPoison) {
-    const Instruction *Poison = PoisonStack.pop_back_val();
+  while (!Worklist.empty()) {
+    const Instruction *Poison = Worklist.pop_back_val();
 
     for (const Use &U : Poison->uses()) {
-      const User *PoisonUser = U.getUser();
-      if (propagatesPoison(U)) {
-        if (Pushed.insert(cast<Instruction>(PoisonUser)).second)
-          PoisonStack.push_back(cast<Instruction>(PoisonUser));
-      } else if (auto *BI = dyn_cast<BranchInst>(PoisonUser)) {
-        assert(BI->isConditional() && "Only possibility!");
-        if (BI->getParent() == LatchBB) {
-          LatchControlDependentOnPoison = true;
-          break;
-        }
-      }
+      const Instruction *PoisonUser = cast<Instruction>(U.getUser());
+      if (mustTriggerUB(PoisonUser, KnownPoison) &&
+          DT.dominates(PoisonUser->getParent(), ExitingBB))
+        return true;
+
+      if (propagatesPoison(U) && L->contains(PoisonUser))
+        if (KnownPoison.insert(PoisonUser).second)
+          Worklist.push_back(PoisonUser);
     }
   }
 
-  return LatchControlDependentOnPoison && loopHasNoAbnormalExits(L);
+  return false;
 }
 
 ScalarEvolution::LoopProperties
@@ -7444,18 +7369,18 @@ ScalarEvolution::getOperandsToCreate(Value *V, SmallVectorImpl<Value *> &Ops) {
         auto NewBO = MatchBinaryOp(BO->LHS, getDataLayout(), AC, DT,
                                    dyn_cast<Instruction>(V));
         if (!NewBO ||
-            (U->getOpcode() == Instruction::Add &&
+            (BO->Opcode == Instruction::Add &&
              (NewBO->Opcode != Instruction::Add &&
               NewBO->Opcode != Instruction::Sub)) ||
-            (U->getOpcode() == Instruction::Mul &&
+            (BO->Opcode == Instruction::Mul &&
              NewBO->Opcode != Instruction::Mul)) {
           Ops.push_back(BO->LHS);
           break;
         }
         // CreateSCEV calls getNoWrapFlagsFromUB, which under certain conditions
         // requires a SCEV for the LHS.
-        if (NewBO->Op && (NewBO->IsNSW || NewBO->IsNUW)) {
-          auto *I = dyn_cast<Instruction>(NewBO->Op);
+        if (BO->Op && (BO->IsNSW || BO->IsNUW)) {
+          auto *I = dyn_cast<Instruction>(BO->Op);
           if (I && programUndefinedIfPoison(I)) {
             Ops.push_back(BO->LHS);
             break;
@@ -7477,7 +7402,7 @@ ScalarEvolution::getOperandsToCreate(Value *V, SmallVectorImpl<Value *> &Ops) {
       break;
     case Instruction::And:
     case Instruction::Or:
-      if (!IsConstArg && BO->LHS->getType()->isIntegerTy(1))
+      if (!IsConstArg && !BO->LHS->getType()->isIntegerTy(1))
         return nullptr;
       break;
     case Instruction::LShr:
@@ -8039,27 +7964,45 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
 //                   Iteration Count Computation Code
 //
 
-const SCEV *ScalarEvolution::getTripCountFromExitCount(const SCEV *ExitCount,
-                                                       bool Extend) {
+const SCEV *ScalarEvolution::getTripCountFromExitCount(const SCEV *ExitCount) {
   if (isa<SCEVCouldNotCompute>(ExitCount))
     return getCouldNotCompute();
 
   auto *ExitCountType = ExitCount->getType();
   assert(ExitCountType->isIntegerTy());
+  auto *EvalTy = Type::getIntNTy(ExitCountType->getContext(),
+                                 1 + ExitCountType->getScalarSizeInBits());
+  return getTripCountFromExitCount(ExitCount, EvalTy, nullptr);
+}
 
-  if (!Extend)
-    return getAddExpr(ExitCount, getOne(ExitCountType));
+const SCEV *ScalarEvolution::getTripCountFromExitCount(const SCEV *ExitCount,
+                                                       Type *EvalTy,
+                                                       const Loop *L) {
+  if (isa<SCEVCouldNotCompute>(ExitCount))
+    return getCouldNotCompute();
 
-  ConstantRange ExitCountRange =
+  unsigned ExitCountSize = getTypeSizeInBits(ExitCount->getType());
+  unsigned EvalSize = EvalTy->getPrimitiveSizeInBits();
+
+  auto CanAddOneWithoutOverflow = [&]() {
+    ConstantRange ExitCountRange =
       getRangeRef(ExitCount, RangeSignHint::HINT_RANGE_UNSIGNED);
-  if (!ExitCountRange.contains(
-          APInt::getMaxValue(ExitCountRange.getBitWidth())))
-    return getAddExpr(ExitCount, getOne(ExitCountType));
+    if (!ExitCountRange.contains(APInt::getMaxValue(ExitCountSize)))
+      return true;
 
-  auto *WiderType = Type::getIntNTy(ExitCountType->getContext(),
-                                    1 + ExitCountType->getScalarSizeInBits());
-  return getAddExpr(getNoopOrZeroExtend(ExitCount, WiderType),
-                    getOne(WiderType));
+    return L && isLoopEntryGuardedByCond(L, ICmpInst::ICMP_NE, ExitCount,
+                                         getMinusOne(ExitCount->getType()));
+  };
+
+  // If we need to zero extend the backedge count, check if we can add one to
+  // it prior to zero extending without overflow. Provided this is safe, it
+  // allows better simplification of the +1.
+  if (EvalSize > ExitCountSize && CanAddOneWithoutOverflow())
+    return getZeroExtendExpr(
+        getAddExpr(ExitCount, getOne(ExitCount->getType())), EvalTy);
+
+  // Get the total trip count from the count by adding 1.  This may wrap.
+  return getAddExpr(getTruncateOrZeroExtend(ExitCount, EvalTy), getOne(EvalTy));
 }
 
 static unsigned getConstantTripCount(const SCEVConstant *ExitCount) {
@@ -8442,6 +8385,8 @@ void ScalarEvolution::visitAndClearUsers(
     SmallVectorImpl<const SCEV *> &ToForget) {
   while (!Worklist.empty()) {
     Instruction *I = Worklist.pop_back_val();
+    if (!isSCEVable(I->getType()))
+      continue;
 
     ValueExprMapType::iterator It =
         ValueExprMap.find_as(static_cast<Value *>(I));
@@ -10009,17 +9954,6 @@ const SCEV *ScalarEvolution::computeSCEVAtScope(const SCEV *V, const Loop *L) {
           if (RV)
             return getSCEV(RV);
         }
-      }
-
-      // If there is a single-input Phi, evaluate it at our scope. If we can
-      // prove that this replacement does not break LCSSA form, use new value.
-      if (PN->getNumOperands() == 1) {
-        const SCEV *Input = getSCEV(PN->getOperand(0));
-        const SCEV *InputAtScope = getSCEVAtScope(Input, L);
-        // TODO: We can generalize it using LI.replacementPreservesLCSSAForm,
-        // for the simplest case just support constants.
-        if (isa<SCEVConstant>(InputAtScope))
-          return InputAtScope;
       }
     }
 

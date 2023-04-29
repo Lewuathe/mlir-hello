@@ -1,3 +1,7 @@
+if(NOT LIBC_TARGET_ARCHITECTURE_IS_GPU)
+  return()
+endif()
+
 add_header_library(
   rpc
   HDRS
@@ -16,5 +20,6 @@ add_object_library(
   HDRS
     rpc_client.h
   DEPENDS
+    libc.src.__support.GPU.utils
     .rpc
 )

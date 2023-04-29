@@ -1405,6 +1405,17 @@ void SelectionDAGBuilder::salvageUnresolvedDbgValue(DanglingDebugInfo &DDI) {
                     << "\n");
 }
 
+void SelectionDAGBuilder::handleKillDebugValue(DILocalVariable *Var,
+                                               DIExpression *Expr,
+                                               DebugLoc DbgLoc,
+                                               unsigned Order) {
+  Value *Poison = PoisonValue::get(Type::getInt1Ty(*Context));
+  DIExpression *NewExpr =
+      const_cast<DIExpression *>(DIExpression::convertToUndefExpression(Expr));
+  handleDebugValue(Poison, Var, NewExpr, DbgLoc, Order,
+                   /*IsVariadic*/ false);
+}
+
 bool SelectionDAGBuilder::handleDebugValue(ArrayRef<const Value *> Values,
                                            DILocalVariable *Var,
                                            DIExpression *Expr, DebugLoc DbgLoc,
@@ -5440,7 +5451,7 @@ static SDValue ExpandPowI(const SDLoc &DL, SDValue LHS, SDValue RHS,
   // it's beneficial on the target, otherwise we end up lowering to a call to
   // __powidf2 (for example).
   if (ConstantSDNode *RHSC = dyn_cast<ConstantSDNode>(RHS)) {
-    unsigned Val = RHSC->getSExtValue();
+    int Val = RHSC->getSExtValue();
 
     // powi(x, 0) -> 1.0
     if (Val == 0)
@@ -5449,7 +5460,7 @@ static SDValue ExpandPowI(const SDLoc &DL, SDValue LHS, SDValue RHS,
     if (DAG.getTargetLoweringInfo().isBeneficialToExpandPowI(
             Val, DAG.shouldOptForSize())) {
       // Get the exponent as a positive value.
-      if ((int)Val < 0)
+      if (Val < 0)
         Val = -Val;
       // We use the simple binary decomposition method to generate the multiply
       // sequence.  There are more optimal ways to do this (for example,
@@ -6226,11 +6237,14 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     DILocalVariable *Variable = DI.getVariable();
     DIExpression *Expression = DI.getExpression();
     dropDanglingDebugInfo(Variable, Expression);
+
+    if (DI.isKillLocation()) {
+      handleKillDebugValue(Variable, Expression, DI.getDebugLoc(), SDNodeOrder);
+      return;
+    }
+
     SmallVector<Value *, 4> Values(DI.getValues());
     if (Values.empty())
-      return;
-
-    if (llvm::is_contained(Values, nullptr))
       return;
 
     bool IsVariadic = DI.hasArgList();
