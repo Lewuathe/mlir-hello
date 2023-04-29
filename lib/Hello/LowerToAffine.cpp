@@ -100,7 +100,7 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
       if (dimension == valueShape.size()) {
         rewriter.create<mlir::affine::AffineStoreOp>(
             loc, rewriter.create<mlir::arith::ConstantOp>(loc, *valueIt++), alloc,
-            llvm::makeArrayRef(indices));
+            llvm::ArrayRef(indices));
         return;
       }
 
