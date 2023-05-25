@@ -3384,15 +3384,22 @@ Instruction *InstCombinerImpl::foldICmpEqIntrinsicWithConstant(
     }
     break;
 
+  case Intrinsic::umax:
   case Intrinsic::uadd_sat: {
     // uadd.sat(a, b) == 0  ->  (a | b) == 0
-    if (C.isZero()) {
+    // umax(a, b) == 0  ->  (a | b) == 0
+    if (C.isZero() && II->hasOneUse()) {
       Value *Or = Builder.CreateOr(II->getArgOperand(0), II->getArgOperand(1));
       return new ICmpInst(Pred, Or, Constant::getNullValue(Ty));
     }
     break;
   }
 
+  case Intrinsic::ssub_sat:
+    // ssub.sat(a, b) == 0 -> a == b
+    if (C.isZero())
+      return new ICmpInst(Pred, II->getArgOperand(0), II->getArgOperand(1));
+    break;
   case Intrinsic::usub_sat: {
     // usub.sat(a, b) == 0  ->  a <= b
     if (C.isZero()) {
@@ -3591,6 +3598,21 @@ Instruction *InstCombinerImpl::foldICmpIntrinsicWithConstant(ICmpInst &Cmp,
     }
     break;
   }
+  case Intrinsic::ssub_sat:
+    // ssub.sat(a, b) spred 0 -> a spred b
+    if (ICmpInst::isSigned(Pred)) {
+      if (C.isZero())
+        return new ICmpInst(Pred, II->getArgOperand(0), II->getArgOperand(1));
+      // X s<= 0 is cannonicalized to X s< 1
+      if (Pred == ICmpInst::ICMP_SLT && C.isOne())
+        return new ICmpInst(ICmpInst::ICMP_SLE, II->getArgOperand(0),
+                            II->getArgOperand(1));
+      // X s>= 0 is cannonicalized to X s> -1
+      if (Pred == ICmpInst::ICMP_SGT && C.isAllOnes())
+        return new ICmpInst(ICmpInst::ICMP_SGE, II->getArgOperand(0),
+                            II->getArgOperand(1));
+    }
+    break;
   default:
     break;
   }
@@ -7130,10 +7152,12 @@ Instruction *InstCombinerImpl::visitFCmpInst(FCmpInst &I) {
   // If we're just checking for a NaN (ORD/UNO) and have a non-NaN operand,
   // then canonicalize the operand to 0.0.
   if (Pred == CmpInst::FCMP_ORD || Pred == CmpInst::FCMP_UNO) {
-    if (!match(Op0, m_PosZeroFP()) && isKnownNeverNaN(Op0, &TLI))
+    if (!match(Op0, m_PosZeroFP()) && isKnownNeverNaN(Op0, DL, &TLI, 0,
+                                                      &AC, &I, &DT, &ORE))
       return replaceOperand(I, 0, ConstantFP::getZero(OpType));
 
-    if (!match(Op1, m_PosZeroFP()) && isKnownNeverNaN(Op1, &TLI))
+    if (!match(Op1, m_PosZeroFP()) &&
+        isKnownNeverNaN(Op1, DL, &TLI, 0, &AC, &I, &DT, &ORE))
       return replaceOperand(I, 1, ConstantFP::getZero(OpType));
   }
 

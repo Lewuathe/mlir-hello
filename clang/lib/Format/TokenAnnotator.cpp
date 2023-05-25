@@ -144,6 +144,8 @@ private:
     if (Previous.Previous) {
       if (Previous.Previous->Tok.isLiteral())
         return false;
+      if (Previous.Previous->is(tok::r_brace))
+        return false;
       if (Previous.Previous->is(tok::r_paren) && Contexts.size() > 1 &&
           (!Previous.Previous->MatchingParen ||
            !Previous.Previous->MatchingParen->is(
@@ -970,6 +972,10 @@ private:
     case tok::colon:
       if (!Tok->Previous)
         return false;
+      // Goto labels and case labels are already identified in
+      // UnwrappedLineParser.
+      if (Tok->isTypeFinalized())
+        break;
       // Colons from ?: are handled in parseConditional().
       if (Style.isJavaScript()) {
         if (Contexts.back().ColonIsForRangeExpr || // colon in for loop
@@ -1008,7 +1014,7 @@ private:
           // In Verilog a case label doesn't have the case keyword. We
           // assume a colon following an expression is a case label.
           // Colons from ?: are annotated in parseConditional().
-          Tok->setType(TT_GotoLabelColon);
+          Tok->setType(TT_CaseLabelColon);
           if (Line.Level > 1 || (!Line.InPPDirective && Line.Level > 0))
             --Line.Level;
         }
@@ -2161,6 +2167,10 @@ private:
   /// This is a heuristic based on whether \p Tok is an identifier following
   /// something that is likely a type.
   bool isStartOfName(const FormatToken &Tok) {
+    // Handled in ExpressionParser for Verilog.
+    if (Style.isVerilog())
+      return false;
+
     if (Tok.isNot(tok::identifier) || !Tok.Previous)
       return false;
 
@@ -3304,6 +3314,8 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) const {
       if (Prev->is(BK_BracedInit) && Prev->opensScope()) {
         Current->SpacesRequiredBefore =
             (Style.Cpp11BracedListStyle && !Style.SpacesInParentheses) ? 0 : 1;
+      } else if (Prev->is(TT_VerilogMultiLineListLParen)) {
+        Current->SpacesRequiredBefore = 0;
       } else {
         Current->SpacesRequiredBefore = Style.SpacesBeforeTrailingComments;
       }
@@ -4541,13 +4553,12 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
            Style.BitFieldColonSpacing == FormatStyle::BFCS_After;
   }
   if (Right.is(tok::colon)) {
-    if (Right.is(TT_GotoLabelColon) ||
-        (!Style.isVerilog() &&
-         Line.First->isOneOf(tok::kw_default, tok::kw_case))) {
+    if (Right.is(TT_CaseLabelColon))
       return Style.SpaceBeforeCaseColon;
-    }
-    const FormatToken *Next = Right.getNextNonComment();
-    if (!Next || Next->is(tok::semi))
+    if (Right.is(TT_GotoLabelColon))
+      return false;
+    // `private:` and `public:`.
+    if (!Right.getNextNonComment())
       return false;
     if (Right.is(TT_ObjCMethodExpr))
       return false;

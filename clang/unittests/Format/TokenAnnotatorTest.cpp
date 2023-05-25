@@ -40,6 +40,8 @@ protected:
   EXPECT_EQ((FormatTok)->getType(), Type) << *(FormatTok)
 #define EXPECT_TOKEN_PRECEDENCE(FormatTok, Prec)                               \
   EXPECT_EQ((FormatTok)->getPrecedence(), Prec) << *(FormatTok)
+#define EXPECT_BRACE_KIND(FormatTok, Kind)                                     \
+  EXPECT_EQ(FormatTok->getBlockKind(), Kind) << *(FormatTok)
 #define EXPECT_TOKEN(FormatTok, Kind, Type)                                    \
   do {                                                                         \
     EXPECT_TOKEN_KIND(FormatTok, Kind);                                        \
@@ -478,6 +480,23 @@ TEST_F(TokenAnnotatorTest, UnderstandsGreaterAfterTemplateCloser) {
   EXPECT_TOKEN(Tokens[5], tok::less, TT_TemplateOpener);
   EXPECT_TOKEN(Tokens[7], tok::greater, TT_TemplateCloser);
   EXPECT_TOKEN(Tokens[8], tok::greater, TT_BinaryOperator);
+}
+
+TEST_F(TokenAnnotatorTest, UnderstandsNonTemplateAngleBrackets) {
+  auto Tokens = annotate("return a < b && c > d;");
+  ASSERT_EQ(Tokens.size(), 10u) << Tokens;
+  EXPECT_TOKEN(Tokens[2], tok::less, TT_BinaryOperator);
+  EXPECT_TOKEN(Tokens[6], tok::greater, TT_BinaryOperator);
+
+  Tokens = annotate("a < 0 ? b : a > 0 ? c : d;");
+  ASSERT_EQ(Tokens.size(), 15u) << Tokens;
+  EXPECT_TOKEN(Tokens[1], tok::less, TT_BinaryOperator);
+  EXPECT_TOKEN(Tokens[7], tok::greater, TT_BinaryOperator);
+
+  Tokens = annotate("ratio{-1, 2} < ratio{-1, 3} == -1 / 3 > -1 / 2;");
+  ASSERT_EQ(Tokens.size(), 27u) << Tokens;
+  EXPECT_TOKEN(Tokens[7], tok::less, TT_BinaryOperator);
+  EXPECT_TOKEN(Tokens[20], tok::greater, TT_BinaryOperator);
 }
 
 TEST_F(TokenAnnotatorTest, UnderstandsWhitespaceSensitiveMacros) {
@@ -1615,13 +1634,20 @@ TEST_F(TokenAnnotatorTest, UnderstandsVerilogOperators) {
   Tokens = Annotate("extern function [1 : 0] x;");
   ASSERT_EQ(Tokens.size(), 10u) << Tokens;
   EXPECT_TOKEN(Tokens[4], tok::colon, TT_BitFieldColon);
+  Tokens = Annotate("module test\n"
+                    "    (input wire [7 : 0] a[7 : 0]);\n"
+                    "endmodule");
+  ASSERT_EQ(Tokens.size(), 20u) << Tokens;
+  EXPECT_TOKEN(Tokens[4], tok::identifier, TT_VerilogDimensionedTypeName);
+  EXPECT_TOKEN(Tokens[7], tok::colon, TT_BitFieldColon);
+  EXPECT_TOKEN(Tokens[13], tok::colon, TT_BitFieldColon);
   // Test case labels and ternary operators.
   Tokens = Annotate("case (x)\n"
                     "  x:\n"
                     "    x;\n"
                     "endcase\n");
   ASSERT_EQ(Tokens.size(), 10u) << Tokens;
-  EXPECT_TOKEN(Tokens[5], tok::colon, TT_GotoLabelColon);
+  EXPECT_TOKEN(Tokens[5], tok::colon, TT_CaseLabelColon);
   Tokens = Annotate("case (x)\n"
                     "  x ? x : x:\n"
                     "    x;\n"
@@ -1629,7 +1655,7 @@ TEST_F(TokenAnnotatorTest, UnderstandsVerilogOperators) {
   ASSERT_EQ(Tokens.size(), 14u) << Tokens;
   EXPECT_TOKEN(Tokens[5], tok::question, TT_ConditionalExpr);
   EXPECT_TOKEN(Tokens[7], tok::colon, TT_ConditionalExpr);
-  EXPECT_TOKEN(Tokens[9], tok::colon, TT_GotoLabelColon);
+  EXPECT_TOKEN(Tokens[9], tok::colon, TT_CaseLabelColon);
   // Non-blocking assignments.
   Tokens = Annotate("a <= b;");
   ASSERT_EQ(Tokens.size(), 5u) << Tokens;
@@ -1677,6 +1703,15 @@ TEST_F(TokenAnnotatorTest, UnderstandsVerilogOperators) {
   Tokens = Annotate("case (x) endcase;");
   ASSERT_EQ(Tokens.size(), 7u) << Tokens;
   EXPECT_TOKEN(Tokens[1], tok::l_paren, TT_ConditionLParen);
+
+  // Sensitivity list. The TT_Unknown type is clearly not binding for the
+  // future, please adapt if those tokens get annotated.  This test is only here
+  // to prevent the comma from being annotated as TT_VerilogInstancePortComma.
+  Tokens = Annotate("always @(posedge x, posedge y);");
+  ASSERT_EQ(Tokens.size(), 11u) << Tokens;
+  EXPECT_TOKEN(Tokens[2], tok::l_paren, TT_Unknown);
+  EXPECT_TOKEN(Tokens[5], tok::comma, TT_Unknown);
+  EXPECT_TOKEN(Tokens[8], tok::r_paren, TT_Unknown);
 }
 
 TEST_F(TokenAnnotatorTest, UnderstandConstructors) {
@@ -1750,6 +1785,37 @@ TEST_F(TokenAnnotatorTest, CSharpNullableTypes) {
   Tokens = annotate("cond ? cond2 ? : id1 : id2", Style);
   EXPECT_EQ(Tokens.size(), 9u) << Tokens;
   EXPECT_TOKEN(Tokens[1], tok::question, TT_ConditionalExpr);
+}
+
+TEST_F(TokenAnnotatorTest, UnderstandsLabels) {
+  auto Tokens = annotate("{ x: break; }");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[2], tok::colon, TT_GotoLabelColon);
+  Tokens = annotate("{ case x: break; }");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::colon, TT_CaseLabelColon);
+  Tokens = annotate("{ x: { break; } }");
+  ASSERT_EQ(Tokens.size(), 9u) << Tokens;
+  EXPECT_TOKEN(Tokens[2], tok::colon, TT_GotoLabelColon);
+  Tokens = annotate("{ case x: { break; } }");
+  ASSERT_EQ(Tokens.size(), 10u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::colon, TT_CaseLabelColon);
+}
+
+TEST_F(TokenAnnotatorTest, UnderstandsNestedBlocks) {
+  // The closing braces are not annotated. It doesn't seem to cause a problem.
+  // So we only test for the opening braces.
+  auto Tokens = annotate("{\n"
+                         "  {\n"
+                         "    { int a = 0; }\n"
+                         "  }\n"
+                         "  {}\n"
+                         "}");
+  ASSERT_EQ(Tokens.size(), 14u) << Tokens;
+  EXPECT_BRACE_KIND(Tokens[0], BK_Block);
+  EXPECT_BRACE_KIND(Tokens[1], BK_Block);
+  EXPECT_BRACE_KIND(Tokens[2], BK_Block);
+  EXPECT_BRACE_KIND(Tokens[10], BK_Block);
 }
 
 } // namespace

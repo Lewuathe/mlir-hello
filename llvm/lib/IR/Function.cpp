@@ -702,17 +702,30 @@ void Function::addDereferenceableOrNullParamAttr(unsigned ArgNo,
 
 DenormalMode Function::getDenormalMode(const fltSemantics &FPType) const {
   if (&FPType == &APFloat::IEEEsingle()) {
-    Attribute Attr = getFnAttribute("denormal-fp-math-f32");
-    StringRef Val = Attr.getValueAsString();
-    if (!Val.empty())
-      return parseDenormalFPAttribute(Val);
-
+    DenormalMode Mode = getDenormalModeF32Raw();
     // If the f32 variant of the attribute isn't specified, try to use the
     // generic one.
+    if (Mode.isValid())
+      return Mode;
   }
 
+  return getDenormalModeRaw();
+}
+
+DenormalMode Function::getDenormalModeRaw() const {
   Attribute Attr = getFnAttribute("denormal-fp-math");
-  return parseDenormalFPAttribute(Attr.getValueAsString());
+  StringRef Val = Attr.getValueAsString();
+  return parseDenormalFPAttribute(Val);
+}
+
+DenormalMode Function::getDenormalModeF32Raw() const {
+  Attribute Attr = getFnAttribute("denormal-fp-math-f32");
+  if (Attr.isValid()) {
+    StringRef Val = Attr.getValueAsString();
+    return parseDenormalFPAttribute(Val);
+  }
+
+  return DenormalMode::getInvalid();
 }
 
 const std::string &Function::getGC() const {
@@ -1086,6 +1099,9 @@ static void DecodeIITType(unsigned &NextElt, ArrayRef<unsigned char> Infos,
   case IIT_I4:
     OutputTable.push_back(IITDescriptor::get(IITDescriptor::Integer, 4));
     return;
+  case IIT_AARCH64_SVCOUNT:
+    OutputTable.push_back(IITDescriptor::get(IITDescriptor::AArch64Svcount, 0));
+    return;
   case IIT_I8:
     OutputTable.push_back(IITDescriptor::get(IITDescriptor::Integer, 8));
     return;
@@ -1327,6 +1343,8 @@ static Type *DecodeFixedType(ArrayRef<Intrinsic::IITDescriptor> &Infos,
   case IITDescriptor::Double: return Type::getDoubleTy(Context);
   case IITDescriptor::Quad: return Type::getFP128Ty(Context);
   case IITDescriptor::PPCQuad: return Type::getPPC_FP128Ty(Context);
+  case IITDescriptor::AArch64Svcount:
+    return TargetExtType::get(Context, "aarch64.svcount");
 
   case IITDescriptor::Integer:
     return IntegerType::get(Context, D.Integer_Width);
@@ -1501,6 +1519,9 @@ static bool matchIntrinsicType(
     case IITDescriptor::Quad: return !Ty->isFP128Ty();
     case IITDescriptor::PPCQuad: return !Ty->isPPC_FP128Ty();
     case IITDescriptor::Integer: return !Ty->isIntegerTy(D.Integer_Width);
+    case IITDescriptor::AArch64Svcount:
+      return !isa<TargetExtType>(Ty) ||
+             cast<TargetExtType>(Ty)->getName() != "aarch64.svcount";
     case IITDescriptor::Vector: {
       VectorType *VT = dyn_cast<VectorType>(Ty);
       return !VT || VT->getElementCount() != D.Vector_Width ||
