@@ -1147,6 +1147,10 @@ void SelectionDAGBuilder::visit(const Instruction &I) {
          It != End; ++It) {
       auto *Var = FnVarLocs->getDILocalVariable(It->VariableID);
       dropDanglingDebugInfo(Var, It->Expr);
+      if (It->Values.isKillLocation(It->Expr)) {
+        handleKillDebugValue(Var, It->Expr, It->DL, SDNodeOrder);
+        continue;
+      }
       SmallVector<Value *> Values(It->Values.location_ops());
       if (!handleDebugValue(Values, Var, It->Expr, It->DL, SDNodeOrder,
                             It->Values.hasArgList()))
@@ -2021,7 +2025,7 @@ void SelectionDAGBuilder::visitRet(const ReturnInst &I) {
     SmallVector<EVT, 4> ValueVTs, MemVTs;
     SmallVector<uint64_t, 4> Offsets;
     ComputeValueVTs(TLI, DL, I.getOperand(0)->getType(), ValueVTs, &MemVTs,
-                    &Offsets);
+                    &Offsets, 0);
     unsigned NumValues = ValueVTs.size();
 
     SmallVector<SDValue, 4> Chains(NumValues);
@@ -4157,7 +4161,7 @@ void SelectionDAGBuilder::visitLoad(const LoadInst &I) {
   Type *Ty = I.getType();
   SmallVector<EVT, 4> ValueVTs, MemVTs;
   SmallVector<uint64_t, 4> Offsets;
-  ComputeValueVTs(TLI, DAG.getDataLayout(), Ty, ValueVTs, &MemVTs, &Offsets);
+  ComputeValueVTs(TLI, DAG.getDataLayout(), Ty, ValueVTs, &MemVTs, &Offsets, 0);
   unsigned NumValues = ValueVTs.size();
   if (NumValues == 0)
     return;
@@ -4230,7 +4234,7 @@ void SelectionDAGBuilder::visitLoad(const LoadInst &I) {
     Chains[ChainI] = L.getValue(1);
 
     if (MemVTs[i] != ValueVTs[i])
-      L = DAG.getZExtOrTrunc(L, dl, ValueVTs[i]);
+      L = DAG.getPtrExtOrTrunc(L, dl, ValueVTs[i]);
 
     Values[i] = L;
   }
@@ -4256,7 +4260,7 @@ void SelectionDAGBuilder::visitStoreToSwiftError(const StoreInst &I) {
   SmallVector<uint64_t, 4> Offsets;
   const Value *SrcV = I.getOperand(0);
   ComputeValueVTs(DAG.getTargetLoweringInfo(), DAG.getDataLayout(),
-                  SrcV->getType(), ValueVTs, &Offsets);
+                  SrcV->getType(), ValueVTs, &Offsets, 0);
   assert(ValueVTs.size() == 1 && Offsets[0] == 0 &&
          "expect a single EVT for swifterror");
 
@@ -4292,7 +4296,7 @@ void SelectionDAGBuilder::visitLoadFromSwiftError(const LoadInst &I) {
   SmallVector<EVT, 4> ValueVTs;
   SmallVector<uint64_t, 4> Offsets;
   ComputeValueVTs(DAG.getTargetLoweringInfo(), DAG.getDataLayout(), Ty,
-                  ValueVTs, &Offsets);
+                  ValueVTs, &Offsets, 0);
   assert(ValueVTs.size() == 1 && Offsets[0] == 0 &&
          "expect a single EVT for swifterror");
 
@@ -4329,7 +4333,7 @@ void SelectionDAGBuilder::visitStore(const StoreInst &I) {
   SmallVector<EVT, 4> ValueVTs, MemVTs;
   SmallVector<uint64_t, 4> Offsets;
   ComputeValueVTs(DAG.getTargetLoweringInfo(), DAG.getDataLayout(),
-                  SrcV->getType(), ValueVTs, &MemVTs, &Offsets);
+                  SrcV->getType(), ValueVTs, &MemVTs, &Offsets, 0);
   unsigned NumValues = ValueVTs.size();
   if (NumValues == 0)
     return;
@@ -5451,7 +5455,7 @@ static SDValue ExpandPowI(const SDLoc &DL, SDValue LHS, SDValue RHS,
   // it's beneficial on the target, otherwise we end up lowering to a call to
   // __powidf2 (for example).
   if (ConstantSDNode *RHSC = dyn_cast<ConstantSDNode>(RHS)) {
-    int Val = RHSC->getSExtValue();
+    unsigned Val = RHSC->getSExtValue();
 
     // powi(x, 0) -> 1.0
     if (Val == 0)
@@ -5460,7 +5464,7 @@ static SDValue ExpandPowI(const SDLoc &DL, SDValue LHS, SDValue RHS,
     if (DAG.getTargetLoweringInfo().isBeneficialToExpandPowI(
             Val, DAG.shouldOptForSize())) {
       // Get the exponent as a positive value.
-      if (Val < 0)
+      if ((int)Val < 0)
         Val = -Val;
       // We use the simple binary decomposition method to generate the multiply
       // sequence.  There are more optimal ways to do this (for example,
@@ -6125,12 +6129,14 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     return;
   }
   case Intrinsic::dbg_declare: {
+    const auto &DI = cast<DbgDeclareInst>(I);
     // Debug intrinsics are handled separately in assignment tracking mode.
-    if (AssignmentTrackingEnabled)
+    // Some intrinsics are handled right after Argument lowering.
+    if (AssignmentTrackingEnabled ||
+        FuncInfo.PreprocessedDbgDeclares.count(&DI))
       return;
     // Assume dbg.declare can not currently use DIArgList, i.e.
     // it is non-variadic.
-    const auto &DI = cast<DbgVariableIntrinsic>(I);
     assert(!DI.hasArgList() && "Only dbg.value should currently use DIArgList");
     DILocalVariable *Variable = DI.getVariable();
     DIExpression *Expression = DI.getExpression();
@@ -6148,29 +6154,6 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     }
 
     bool isParameter = Variable->isParameter() || isa<Argument>(Address);
-
-    // Check if this variable can be described by a frame index, typically
-    // either as a static alloca or a byval parameter.
-    int FI = std::numeric_limits<int>::max();
-    if (const auto *AI =
-            dyn_cast<AllocaInst>(Address->stripInBoundsConstantOffsets())) {
-      if (AI->isStaticAlloca()) {
-        auto I = FuncInfo.StaticAllocaMap.find(AI);
-        if (I != FuncInfo.StaticAllocaMap.end())
-          FI = I->second;
-      }
-    } else if (const auto *Arg = dyn_cast<Argument>(
-                   Address->stripInBoundsConstantOffsets())) {
-      FI = FuncInfo.getArgumentFrameIndex(Arg);
-    }
-
-    // llvm.dbg.declare is handled as a frame index in the MachineFunction
-    // variable table.
-    if (FI != std::numeric_limits<int>::max()) {
-      LLVM_DEBUG(dbgs() << "Skipping " << DI
-                        << " (variable info stashed in MF side table)\n");
-      return;
-    }
 
     SDValue &N = NodeMap[Address];
     if (!N.getNode() && isa<Argument>(Address))
@@ -9920,7 +9903,7 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
   SmallVector<EVT, 4> RetTys;
   SmallVector<uint64_t, 4> Offsets;
   auto &DL = CLI.DAG.getDataLayout();
-  ComputeValueVTs(*this, DL, CLI.RetTy, RetTys, &Offsets);
+  ComputeValueVTs(*this, DL, CLI.RetTy, RetTys, &Offsets, 0);
 
   if (CLI.IsPostTypeLegalization) {
     // If we are lowering a libcall after legalization, split the return type.
@@ -10912,12 +10895,12 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
 
   // If any argument copy elisions occurred and we have debug info, update the
   // stale frame indices used in the dbg.declare variable info table.
-  MachineFunction::VariableDbgInfoMapTy &DbgDeclareInfo = MF->getVariableDbgInfo();
-  if (!DbgDeclareInfo.empty() && !ArgCopyElisionFrameIndexMap.empty()) {
-    for (MachineFunction::VariableDbgInfo &VI : DbgDeclareInfo) {
-      auto I = ArgCopyElisionFrameIndexMap.find(VI.Slot);
+  if (!ArgCopyElisionFrameIndexMap.empty()) {
+    for (MachineFunction::VariableDbgInfo &VI :
+         MF->getInStackSlotVariableDbgInfo()) {
+      auto I = ArgCopyElisionFrameIndexMap.find(VI.getStackSlot());
       if (I != ArgCopyElisionFrameIndexMap.end())
-        VI.Slot = I->second;
+        VI.updateStackSlot(I->second);
     }
   }
 

@@ -52,6 +52,22 @@ using namespace mlir;
 using namespace llvm;
 
 namespace {
+class BytecodeVersionParser : public cl::parser<std::optional<int64_t>> {
+public:
+  BytecodeVersionParser(cl::Option &O)
+      : cl::parser<std::optional<int64_t>>(O) {}
+
+  bool parse(cl::Option &O, StringRef /*argName*/, StringRef arg,
+             std::optional<int64_t> &v) {
+    long long w;
+    if (getAsSignedInteger(arg, 10, w))
+      return O.error("Invalid argument '" + arg +
+                     "', only integer is supported.");
+    v = w;
+    return false;
+  }
+};
+
 /// This class is intended to manage the handling of command line options for
 /// creating a *-opt config. This is a singleton.
 struct MlirOptMainConfigCLOptions : public MlirOptMainConfig {
@@ -74,6 +90,13 @@ struct MlirOptMainConfigCLOptions : public MlirOptMainConfig {
         "emit-bytecode", cl::desc("Emit bytecode when generating output"),
         cl::location(emitBytecodeFlag), cl::init(false));
 
+    static cl::opt<std::optional<int64_t>, /*ExternalStorage=*/true,
+                   BytecodeVersionParser>
+        bytecodeVersion(
+            "emit-bytecode-version",
+            cl::desc("Use specified bytecode when generating output"),
+            cl::location(emitBytecodeVersion), cl::init(std::nullopt));
+
     static cl::opt<std::string, /*ExternalStorage=*/true> irdlFile(
         "irdl-file",
         cl::desc("IRDL file to register before processing the input"),
@@ -89,6 +112,10 @@ struct MlirOptMainConfigCLOptions : public MlirOptMainConfig {
         cl::desc("Disable implicit addition of a top-level module op during "
                  "parsing"),
         cl::location(useExplicitModuleFlag), cl::init(false));
+
+    static cl::opt<bool, /*ExternalStorage=*/true> runReproducer(
+        "run-reproducer", cl::desc("Run the pipeline stored in the reproducer"),
+        cl::location(runReproducerFlag), cl::init(false));
 
     static cl::opt<bool, /*ExternalStorage=*/true> showDialects(
         "show-dialects",
@@ -213,7 +240,8 @@ performActions(raw_ostream &os,
   FallbackAsmResourceMap fallbackResourceMap;
   ParserConfig parseConfig(context, /*verifyAfterParse=*/true,
                            &fallbackResourceMap);
-  reproOptions.attachResourceParser(parseConfig);
+  if (config.shouldRunReproducer())
+    reproOptions.attachResourceParser(parseConfig);
 
   // Parse the input file and reset the context threading state.
   TimingScope parserTiming = timing.nest("Parser");
@@ -230,7 +258,9 @@ performActions(raw_ostream &os,
   if (failed(applyPassManagerCLOptions(pm)))
     return failure();
   pm.enableTiming(timing);
-  if (failed(reproOptions.apply(pm)) || failed(config.setupPassPipeline(pm)))
+  if (config.shouldRunReproducer() && failed(reproOptions.apply(pm)))
+    return failure();
+  if (failed(config.setupPassPipeline(pm)))
     return failure();
 
   // Run the pipeline.
@@ -241,13 +271,18 @@ performActions(raw_ostream &os,
   TimingScope outputTiming = timing.nest("Output");
   if (config.shouldEmitBytecode()) {
     BytecodeWriterConfig writerConfig(fallbackResourceMap);
-    writeBytecodeToFile(op.get(), os, writerConfig);
-  } else {
-    AsmState asmState(op.get(), OpPrintingFlags(), /*locationMap=*/nullptr,
-                      &fallbackResourceMap);
-    op.get()->print(os, asmState);
-    os << '\n';
+    if (auto v = config.bytecodeVersionToEmit())
+      writerConfig.setDesiredBytecodeVersion(*v);
+    return writeBytecodeToFile(op.get(), os, writerConfig);
   }
+
+  if (config.bytecodeVersionToEmit().has_value())
+    return emitError(UnknownLoc::get(pm.getContext()))
+           << "bytecode version while not emitting bytecode";
+  AsmState asmState(op.get(), OpPrintingFlags(), /*locationMap=*/nullptr,
+                    &fallbackResourceMap);
+  op.get()->print(os, asmState);
+  os << '\n';
   return success();
 }
 

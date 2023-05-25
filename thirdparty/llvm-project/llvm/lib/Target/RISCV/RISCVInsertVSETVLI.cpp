@@ -85,6 +85,18 @@ static bool isScalarMoveInstr(const MachineInstr &MI) {
   }
 }
 
+static bool isVSlideInstr(const MachineInstr &MI) {
+  switch (getRVVMCOpcode(MI.getOpcode())) {
+  default:
+    return false;
+  case RISCV::VSLIDEDOWN_VX:
+  case RISCV::VSLIDEDOWN_VI:
+  case RISCV::VSLIDEUP_VX:
+  case RISCV::VSLIDEUP_VI:
+    return true;
+  }
+}
+
 /// Get the EEW for a load or store instruction.  Return std::nullopt if MI is
 /// not a load or store which ignores SEW.
 static std::optional<unsigned> getEEWForLoadStore(const MachineInstr &MI) {
@@ -348,18 +360,28 @@ public:
   unsigned getSEW() const { return SEW; }
   RISCVII::VLMUL getVLMUL() const { return VLMul; }
 
-  bool hasNonZeroAVL() const {
+  bool hasNonZeroAVL(const MachineRegisterInfo &MRI) const {
     if (hasAVLImm())
       return getAVLImm() > 0;
-    if (hasAVLReg())
-      return getAVLReg() == RISCV::X0;
+    if (hasAVLReg()) {
+      if (getAVLReg() == RISCV::X0)
+        return true;
+      if (MachineInstr *MI = MRI.getVRegDef(getAVLReg());
+          MI && MI->getOpcode() == RISCV::ADDI &&
+          MI->getOperand(1).isReg() && MI->getOperand(2).isImm() &&
+          MI->getOperand(1).getReg() == RISCV::X0 &&
+          MI->getOperand(2).getImm() != 0)
+        return true;
+      return false;
+    }
     return false;
   }
 
-  bool hasEquallyZeroAVL(const VSETVLIInfo &Other) const {
+  bool hasEquallyZeroAVL(const VSETVLIInfo &Other,
+                         const MachineRegisterInfo &MRI) const {
     if (hasSameAVL(Other))
       return true;
-    return (hasNonZeroAVL() && Other.hasNonZeroAVL());
+    return (hasNonZeroAVL(MRI) && Other.hasNonZeroAVL(MRI));
   }
 
   bool hasSameAVL(const VSETVLIInfo &Other) const {
@@ -435,7 +457,8 @@ public:
   // Determine whether the vector instructions requirements represented by
   // Require are compatible with the previous vsetvli instruction represented
   // by this.  MI is the instruction whose requirements we're considering.
-  bool isCompatible(const DemandedFields &Used, const VSETVLIInfo &Require) const {
+  bool isCompatible(const DemandedFields &Used, const VSETVLIInfo &Require,
+                    const MachineRegisterInfo &MRI) const {
     assert(isValid() && Require.isValid() &&
            "Can't compare invalid VSETVLIInfos");
     assert(!Require.SEWLMULRatioOnly &&
@@ -457,7 +480,7 @@ public:
     if (Used.VLAny && !hasSameAVL(Require))
       return false;
 
-    if (Used.VLZeroness && !hasEquallyZeroAVL(Require))
+    if (Used.VLZeroness && !hasEquallyZeroAVL(Require, MRI))
       return false;
 
     return areCompatibleVTYPEs(encodeVTYPE(), Require.encodeVTYPE(), Used);
@@ -818,6 +841,11 @@ void RISCVInsertVSETVLI::insertVSETVLI(MachineBasicBlock &MBB,
       .addImm(Info.encodeVTYPE());
 }
 
+static bool isLMUL1OrSmaller(RISCVII::VLMUL LMUL) {
+  auto [LMul, Fractional] = RISCVVType::decodeVLMUL(LMUL);
+  return Fractional || LMul == 1;
+}
+
 /// Return true if a VSETVLI is required to transition from CurInfo to Require
 /// before MI.
 bool RISCVInsertVSETVLI::needVSETVLI(const MachineInstr &MI,
@@ -845,7 +873,26 @@ bool RISCVInsertVSETVLI::needVSETVLI(const MachineInstr &MI,
     }
   }
 
-  if (CurInfo.isCompatible(Used, Require))
+  // A slidedown/slideup with an IMPLICIT_DEF merge op can freely clobber
+  // elements not copied from the source vector (e.g. masked off, tail, or
+  // slideup's prefix). Notes:
+  // * We can't modify SEW here since the slide amount is in units of SEW.
+  // * VL=1 is special only because we have existing support for zero vs
+  //   non-zero VL.  We could generalize this if we had a VL > C predicate.
+  // * The LMUL1 restriction is for machines whose latency may depend on VL.
+  // * As above, this is only legal for IMPLICIT_DEF, not TA.
+  if (isVSlideInstr(MI) && Require.hasAVLImm() && Require.getAVLImm() == 1 &&
+      isLMUL1OrSmaller(CurInfo.getVLMUL())) {
+    auto *VRegDef = MRI->getVRegDef(MI.getOperand(1).getReg());
+    if (VRegDef && VRegDef->isImplicitDef()) {
+      Used.VLAny = false;
+      Used.VLZeroness = true;
+      Used.LMUL = false;
+      Used.TailPolicy = false;
+    }
+  }
+
+  if (CurInfo.isCompatible(Used, Require, *MRI))
     return false;
 
   // We didn't find a compatible value. If our AVL is a virtual register,
@@ -893,7 +940,7 @@ void RISCVInsertVSETVLI::transferBefore(VSETVLIInfo &Info, const MachineInstr &M
   // prevent extending live range of an avl register operand.
   // TODO: We can probably relax this for immediates.
   if (isScalarMoveInstr(MI) && PrevInfo.isValid() &&
-      PrevInfo.hasEquallyZeroAVL(Info) &&
+      PrevInfo.hasEquallyZeroAVL(Info, *MRI) &&
       Info.hasSameVLMAX(PrevInfo)) {
     if (PrevInfo.hasAVLImm())
       Info.setAVLImm(PrevInfo.getAVLImm());
