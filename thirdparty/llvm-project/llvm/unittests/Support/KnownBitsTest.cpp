@@ -28,7 +28,11 @@ using BinaryIntFn =
 using BinaryCheckFn =
     llvm::function_ref<bool(const KnownBits &, const KnownBits &)>;
 
+static bool checkOptimalityUnary(const KnownBits &) { return true; }
 static bool checkCorrectnessOnlyUnary(const KnownBits &) { return false; }
+static bool checkOptimalityBinary(const KnownBits &, const KnownBits &) {
+  return true;
+}
 static bool checkCorrectnessOnlyBinary(const KnownBits &, const KnownBits &) {
   return false;
 }
@@ -62,9 +66,9 @@ static testing::AssertionResult isOptimal(const KnownBits &Exact,
   return Result;
 }
 
-static void testUnaryOpExhaustive(
-    UnaryBitsFn BitsFn, UnaryIntFn IntFn,
-    UnaryCheckFn CheckOptimalityFn = [](const KnownBits &) { return true; }) {
+static void
+testUnaryOpExhaustive(UnaryBitsFn BitsFn, UnaryIntFn IntFn,
+                      UnaryCheckFn CheckOptimalityFn = checkOptimalityUnary) {
   unsigned Bits = 4;
   ForeachKnownBits(Bits, [&](const KnownBits &Known) {
     KnownBits Computed = BitsFn(Known);
@@ -89,11 +93,10 @@ static void testUnaryOpExhaustive(
   });
 }
 
-static void testBinaryOpExhaustive(
-    BinaryBitsFn BitsFn, BinaryIntFn IntFn,
-    BinaryCheckFn CheckOptimalityFn = [](const KnownBits &, const KnownBits &) {
-      return true;
-    }) {
+static void
+testBinaryOpExhaustive(BinaryBitsFn BitsFn, BinaryIntFn IntFn,
+                       BinaryCheckFn CheckOptimalityFn = checkOptimalityBinary,
+                       bool RefinePoisonToZero = false) {
   unsigned Bits = 4;
   ForeachKnownBits(Bits, [&](const KnownBits &Known1) {
     ForeachKnownBits(Bits, [&](const KnownBits &Known2) {
@@ -117,6 +120,10 @@ static void testBinaryOpExhaustive(
       // legal for always poison results.
       if (CheckOptimalityFn(Known1, Known2) && !Exact.hasConflict()) {
         EXPECT_TRUE(isOptimal(Exact, Computed, {Known1, Known2}));
+      }
+      // In some cases we choose to return zero if the result is always poison.
+      if (RefinePoisonToZero && Exact.hasConflict()) {
+        EXPECT_TRUE(Computed.isZero());
       }
     });
   });
@@ -342,7 +349,46 @@ TEST(KnownBitsTest, BinaryExhaustive) {
         if (N2.uge(N2.getBitWidth()))
           return std::nullopt;
         return N1.shl(N2);
-      });
+      },
+      checkOptimalityBinary, /* RefinePoisonToZero */ true);
+  testBinaryOpExhaustive(
+      [](const KnownBits &Known1, const KnownBits &Known2) {
+        return KnownBits::shl(Known1, Known2, /* NUW */ true);
+      },
+      [](const APInt &N1, const APInt &N2) -> std::optional<APInt> {
+        bool Overflow;
+        APInt Res = N1.ushl_ov(N2, Overflow);
+        if (Overflow)
+          return std::nullopt;
+        return Res;
+      },
+      checkOptimalityBinary, /* RefinePoisonToZero */ true);
+  testBinaryOpExhaustive(
+      [](const KnownBits &Known1, const KnownBits &Known2) {
+        return KnownBits::shl(Known1, Known2, /* NUW */ false, /* NSW */ true);
+      },
+      [](const APInt &N1, const APInt &N2) -> std::optional<APInt> {
+        bool Overflow;
+        APInt Res = N1.sshl_ov(N2, Overflow);
+        if (Overflow)
+          return std::nullopt;
+        return Res;
+      },
+      checkOptimalityBinary, /* RefinePoisonToZero */ true);
+  testBinaryOpExhaustive(
+      [](const KnownBits &Known1, const KnownBits &Known2) {
+        return KnownBits::shl(Known1, Known2, /* NUW */ true, /* NSW */ true);
+      },
+      [](const APInt &N1, const APInt &N2) -> std::optional<APInt> {
+        bool OverflowUnsigned, OverflowSigned;
+        APInt Res = N1.ushl_ov(N2, OverflowUnsigned);
+        (void)N1.sshl_ov(N2, OverflowSigned);
+        if (OverflowUnsigned || OverflowSigned)
+          return std::nullopt;
+        return Res;
+      },
+      checkOptimalityBinary, /* RefinePoisonToZero */ true);
+
   testBinaryOpExhaustive(
       [](const KnownBits &Known1, const KnownBits &Known2) {
         return KnownBits::lshr(Known1, Known2);
@@ -351,7 +397,8 @@ TEST(KnownBitsTest, BinaryExhaustive) {
         if (N2.uge(N2.getBitWidth()))
           return std::nullopt;
         return N1.lshr(N2);
-      });
+      },
+      checkOptimalityBinary, /* RefinePoisonToZero */ true);
   testBinaryOpExhaustive(
       [](const KnownBits &Known1, const KnownBits &Known2) {
         return KnownBits::ashr(Known1, Known2);
@@ -360,7 +407,8 @@ TEST(KnownBitsTest, BinaryExhaustive) {
         if (N2.uge(N2.getBitWidth()))
           return std::nullopt;
         return N1.ashr(N2);
-      });
+      },
+      checkOptimalityBinary, /* RefinePoisonToZero */ true);
 
   testBinaryOpExhaustive(
       [](const KnownBits &Known1, const KnownBits &Known2) {
