@@ -108,10 +108,10 @@ void foo1a() {
 
 void foo1b() {
   int *r = new int[7];
-  int *p = new int[4];  // expected-warning{{'p' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change 'r' and 'q' to 'std::span' to propagate bounds information between them$}}}}
+  int *p = new int[4];  // expected-warning{{'p' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change ('r' and 'q'|'q' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   p = r;
   int tmp = p[9];  // expected-note{{used in buffer access here}}
-  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change 'p' and 'r' to 'std::span' to propagate bounds information between them$}}}}
+  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change ('p' and 'r'|'r' and 'p') to 'std::span' to propagate bounds information between them$}}}}
   q = r;
   tmp = q[9];  // expected-note{{used in buffer access here}}
 }
@@ -128,7 +128,7 @@ void foo1c() {
 
 void foo2a() {
   int *r = new int[7];
-  int *p = new int[5];  // expected-warning{{'p' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change 'r' and 'q' to 'std::span' to propagate bounds information between them$}}}}
+  int *p = new int[5];  // expected-warning{{'p' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change ('r' and 'q'|'q' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   int *q = new int[4];
   p = q;
   int tmp = p[8];  // expected-note{{used in buffer access here}}
@@ -146,8 +146,8 @@ void foo2b() {
 
 void foo2c() {
   int *r = new int[7];
-  int *p = new int[5];  // expected-warning{{'p' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change 'r' and 'q' to 'std::span' to propagate bounds information between them$}}}}
-  int *q = new int[4];  // expected-warning{{'q' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change 'p' and 'r' to 'std::span' to propagate bounds information between them$}}}}
+  int *p = new int[5];  // expected-warning{{'p' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change ('r' and 'q'|'q' and 'r') to 'std::span' to propagate bounds information between them$}}}}
+  int *q = new int[4];  // expected-warning{{'q' is an unsafe pointer used for buffer access}} expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change ('p' and 'r'|'r' and 'p') to 'std::span' to propagate bounds information between them$}}}}
   p = q;
   int tmp = p[8];  // expected-note{{used in buffer access here}}
   q = r;
@@ -166,7 +166,7 @@ void foo3a() {
 void foo3b() {
   int *r = new int[7];
   int *p = new int[5];
-  int *q = new int[4];  // expected-warning{{'q' is an unsafe pointer used for buffer access}} //expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change 'r' and 'p' to 'std::span' to propagate bounds information between them$}}}}
+  int *q = new int[4];  // expected-warning{{'q' is an unsafe pointer used for buffer access}} //expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change ('r' and 'p'|'p' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   q = p;
   int tmp = q[8];  // expected-note{{used in buffer access here}}
   q = r;
@@ -283,7 +283,7 @@ void test_unfixable() {
 }
 
 void test_cyclic_deps() {
-  int *r = new int[10];  // expected-warning{{'r' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'r' to 'std::span' to preserve bounds information, and change 'q' and 'p' to 'std::span' to propagate bounds information between them$}}}}
+  int *r = new int[10];  // expected-warning{{'r' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'r' to 'std::span' to preserve bounds information, and change ('q' and 'p'|'p' and 'q') to 'std::span' to propagate bounds information between them$}}}}
   int *q;
   q = r;
   int *p;
@@ -307,7 +307,7 @@ void test_cyclic_deps1() {
   int *r = new int[10];
   int *q;
   q = r;
-  int *p;  // expected-warning{{'p' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change 'r' and 'q' to 'std::span' to propagate bounds information between them$}}}}
+  int *p;  // expected-warning{{'p' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change ('r' and 'q'|'q' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   p = q;
   p[3] = 9; // expected-note{{used in buffer access here}}
   r = p;
@@ -315,7 +315,7 @@ void test_cyclic_deps1() {
 
 void test_cyclic_deps2() {
   int *r = new int[10];
-  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change 'r' and 'p' to 'std::span' to propagate bounds information between them$}}}}
+  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change ('r' and 'p'|'p' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   q = r;
   int *p;
   p = q;
@@ -325,9 +325,9 @@ void test_cyclic_deps2() {
 
 void test_cyclic_deps3() {
   int *r = new int[10];
-  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change 'r' and 'p' to 'std::span' to propagate bounds information between them$}}}}
+  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change ('r' and 'p'|'p' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   q = r;
-  int *p;  // expected-warning{{'p' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change 'q' and 'r' to 'std::span' to propagate bounds information between them$}}}}
+  int *p;  // expected-warning{{'p' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change ('q' and 'r'|'r' and 'q') to 'std::span' to propagate bounds information between them$}}}}
   p = q;
   q[3] = 9; // expected-note{{used in buffer access here}}
   p[4] = 7; // expected-note{{used in buffer access here}}
@@ -335,10 +335,10 @@ void test_cyclic_deps3() {
 }
 
 void test_cyclic_deps4() {
-  int *r = new int[10];  // expected-warning{{'r' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'r' to 'std::span' to preserve bounds information, and change 'q' and 'p' to 'std::span' to propagate bounds information between them$}}}}
-  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change 'r' and 'p' to 'std::span' to propagate bounds information between them$}}}}
+  int *r = new int[10];  // expected-warning{{'r' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'r' to 'std::span' to preserve bounds information, and change ('q' and 'p'|'p' and 'q') to 'std::span' to propagate bounds information between them$}}}}
+  int *q;  // expected-warning{{'q' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'q' to 'std::span' to preserve bounds information, and change ('r' and 'p'|'p' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   q = r;
-  int *p;  // expected-warning{{'p' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change 'r' and 'q' to 'std::span' to propagate bounds information between them$}}}}
+  int *p;  // expected-warning{{'p' is an unsafe pointer used for buffer access}}  expected-note-re{{{{^change type of 'p' to 'std::span' to preserve bounds information, and change ('r' and 'q'|'q' and 'r') to 'std::span' to propagate bounds information between them$}}}}
   p = q;
   q[3] = 9; // expected-note{{used in buffer access here}}
   p[4] = 7; // expected-note{{used in buffer access here}}
