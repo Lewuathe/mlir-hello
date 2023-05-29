@@ -10,9 +10,8 @@
 #ifndef _PSTL_GLUE_ALGORITHM_IMPL_H
 #define _PSTL_GLUE_ALGORITHM_IMPL_H
 
+#include <__config>
 #include <functional>
-
-#include "pstl_config.h"
 
 #include "algorithm_fwd.h"
 #include "execution_defs.h"
@@ -21,79 +20,7 @@
 
 #include "execution_impl.h"
 
-_PSTL_HIDE_FROM_ABI_PUSH
-
 namespace std {
-
-// [alg.any_of]
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Predicate>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, bool>
-any_of(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Predicate __pred) {
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first);
-
-  return __pstl::__internal::__pattern_any_of(
-      __dispatch_tag, std::forward<_ExecutionPolicy>(__exec), __first, __last, __pred);
-}
-
-// [alg.all_of]
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Pred>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, bool>
-all_of(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Pred __pred) {
-  return !std::any_of(std::forward<_ExecutionPolicy>(__exec), __first, __last, std::not_fn(__pred));
-}
-
-// [alg.none_of]
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Predicate>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, bool>
-none_of(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Predicate __pred) {
-  return !std::any_of(std::forward<_ExecutionPolicy>(__exec), __first, __last, __pred);
-}
-
-// [alg.foreach]
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Function>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, void>
-for_each(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Function __f) {
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first);
-
-  __pstl::__internal::__pattern_walk1(__dispatch_tag, std::forward<_ExecutionPolicy>(__exec), __first, __last, __f);
-}
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Size, class _Function>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator>
-for_each_n(_ExecutionPolicy&& __exec, _ForwardIterator __first, _Size __n, _Function __f) {
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first);
-
-  return __pstl::__internal::__pattern_walk1_n(
-      __dispatch_tag, std::forward<_ExecutionPolicy>(__exec), __first, __n, __f);
-}
-
-// [alg.find]
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Predicate>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator>
-find_if(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Predicate __pred) {
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first);
-
-  return __pstl::__internal::__pattern_find_if(
-      __dispatch_tag, std::forward<_ExecutionPolicy>(__exec), __first, __last, __pred);
-}
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Predicate>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator>
-find_if_not(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Predicate __pred) {
-  return std::find_if(std::forward<_ExecutionPolicy>(__exec), __first, __last, std::not_fn(__pred));
-}
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Tp>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator>
-find(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, const _Tp& __value) {
-  return std::find_if(
-      std::forward<_ExecutionPolicy>(__exec), __first, __last, __pstl::__internal::__equal_value<_Tp>(__value));
-}
 
 // [alg.find.end]
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate>
@@ -251,42 +178,6 @@ __pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardItera
 
 // [alg.copy]
 
-template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator2>
-copy(_ExecutionPolicy&& __exec, _ForwardIterator1 __first, _ForwardIterator1 __last, _ForwardIterator2 __result) {
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first, __result);
-
-  using __is_vector = typename decltype(__dispatch_tag)::__is_vector;
-
-  return __pstl::__internal::__pattern_walk2_brick(
-      __dispatch_tag,
-      std::forward<_ExecutionPolicy>(__exec),
-      __first,
-      __last,
-      __result,
-      [](_ForwardIterator1 __begin, _ForwardIterator1 __end, _ForwardIterator2 __res) {
-        return __pstl::__internal::__brick_copy(__begin, __end, __res, __is_vector{});
-      });
-}
-
-template <class _ExecutionPolicy, class _ForwardIterator1, class _Size, class _ForwardIterator2>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator2>
-copy_n(_ExecutionPolicy&& __exec, _ForwardIterator1 __first, _Size __n, _ForwardIterator2 __result) {
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first, __result);
-
-  using __is_vector = typename decltype(__dispatch_tag)::__is_vector;
-
-  return __pstl::__internal::__pattern_walk2_brick_n(
-      __dispatch_tag,
-      std::forward<_ExecutionPolicy>(__exec),
-      __first,
-      __n,
-      __result,
-      [](_ForwardIterator1 __begin, _Size __sz, _ForwardIterator2 __res) {
-        return __pstl::__internal::__brick_copy_n(__begin, __sz, __res, __is_vector{});
-      });
-}
-
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _Predicate>
 __pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator2>
 copy_if(_ExecutionPolicy&& __exec,
@@ -323,27 +214,6 @@ __pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardItera
 }
 
 // [alg.transform]
-
-template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _UnaryOperation>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator2>
-transform(_ExecutionPolicy&& __exec,
-          _ForwardIterator1 __first,
-          _ForwardIterator1 __last,
-          _ForwardIterator2 __result,
-          _UnaryOperation __op) {
-  typedef typename iterator_traits<_ForwardIterator1>::reference _InputType;
-  typedef typename iterator_traits<_ForwardIterator2>::reference _OutputType;
-
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first, __result);
-
-  return __pstl::__internal::__pattern_walk2(
-      __dispatch_tag,
-      std::forward<_ExecutionPolicy>(__exec),
-      __first,
-      __last,
-      __result,
-      [__op](_InputType __x, _OutputType __y) mutable { __y = __op(__x); });
-}
 
 template <class _ExecutionPolicy,
           class _ForwardIterator1,
@@ -450,28 +320,6 @@ __pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardItera
       __result,
       __pstl::__internal::__equal_value<_Tp>(__old_value),
       __new_value);
-}
-
-// [alg.fill]
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Tp>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, void>
-fill(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, const _Tp& __value) {
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first);
-
-  __pstl::__internal::__pattern_fill(__dispatch_tag, std::forward<_ExecutionPolicy>(__exec), __first, __last, __value);
-}
-
-template <class _ExecutionPolicy, class _ForwardIterator, class _Size, class _Tp>
-__pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, _ForwardIterator>
-fill_n(_ExecutionPolicy&& __exec, _ForwardIterator __first, _Size __count, const _Tp& __value) {
-  if (__count <= 0)
-    return __first;
-
-  auto __dispatch_tag = __pstl::__internal::__select_backend(__exec, __first);
-
-  return __pstl::__internal::__pattern_fill_n(
-      __dispatch_tag, std::forward<_ExecutionPolicy>(__exec), __first, __count, __value);
 }
 
 // [alg.generate]
@@ -1260,7 +1108,5 @@ __pstl::__internal::__enable_if_execution_policy<_ExecutionPolicy, bool> lexicog
 }
 
 } // namespace std
-
-_PSTL_HIDE_FROM_ABI_POP
 
 #endif /* _PSTL_GLUE_ALGORITHM_IMPL_H */

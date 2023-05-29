@@ -222,7 +222,7 @@ SmallVector<IntT> convertArrayToIndices(ArrayRef<Attribute> attrs) {
   SmallVector<IntT> indices;
   indices.reserve(attrs.size());
   for (Attribute attr : attrs)
-    indices.push_back(attr.cast<IntegerAttr>().getInt());
+    indices.push_back(cast<IntegerAttr>(attr).getInt());
   return indices;
 }
 
@@ -235,5 +235,18 @@ SmallVector<IntT> convertArrayToIndices(ArrayAttr attrs) {
 
 } // namespace LLVM
 } // namespace mlir
+
+namespace llvm {
+
+// Allow llvm::cast style functions.
+template <typename To>
+struct CastInfo<To, mlir::LLVM::GEPArg>
+    : public CastInfo<To, mlir::LLVM::GEPArg::PointerUnion> {};
+
+template <typename To>
+struct CastInfo<To, const mlir::LLVM::GEPArg>
+    : public CastInfo<To, const mlir::LLVM::GEPArg::PointerUnion> {};
+
+} // namespace llvm
 
 #endif // MLIR_DIALECT_LLVMIR_LLVMDIALECT_H_

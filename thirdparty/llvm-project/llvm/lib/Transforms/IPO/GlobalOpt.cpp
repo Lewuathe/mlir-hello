@@ -665,6 +665,9 @@ static bool AllUsesOfValueWillTrapIfNull(const Value *V,
       }
     } else if (const BitCastInst *CI = dyn_cast<BitCastInst>(U)) {
       if (!AllUsesOfValueWillTrapIfNull(CI, PHIs)) return false;
+    } else if (const AddrSpaceCastInst *CI = dyn_cast<AddrSpaceCastInst>(U)) {
+      if (!AllUsesOfValueWillTrapIfNull(CI, PHIs))
+        return false;
     } else if (const GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(U)) {
       if (!AllUsesOfValueWillTrapIfNull(GEPI, PHIs)) return false;
     } else if (const PHINode *PN = dyn_cast<PHINode>(U)) {
@@ -845,7 +848,8 @@ static bool OptimizeAwayTrappingUsesOfLoads(
       assert((isa<PHINode>(GlobalUser) || isa<SelectInst>(GlobalUser) ||
               isa<ConstantExpr>(GlobalUser) || isa<CmpInst>(GlobalUser) ||
               isa<BitCastInst>(GlobalUser) ||
-              isa<GetElementPtrInst>(GlobalUser)) &&
+              isa<GetElementPtrInst>(GlobalUser) ||
+              isa<AddrSpaceCastInst>(GlobalUser)) &&
              "Only expect load and stores!");
     }
   }
@@ -1145,9 +1149,6 @@ optimizeOnceStoredGlobal(GlobalVariable *GV, Value *StoredOnceVal,
           nullptr /* F */,
           GV->getInitializer()->getType()->getPointerAddressSpace())) {
     if (Constant *SOVC = dyn_cast<Constant>(StoredOnceVal)) {
-      if (GV->getInitializer()->getType() != SOVC->getType())
-        SOVC = ConstantExpr::getBitCast(SOVC, GV->getInitializer()->getType());
-
       // Optimize away any trapping uses of the loaded value.
       if (OptimizeAwayTrappingUsesOfLoads(GV, SOVC, DL, GetTLI))
         return true;

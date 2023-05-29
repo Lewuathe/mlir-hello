@@ -845,6 +845,9 @@ private:
         Region->AllocatedUser -
         (Region->Stats.PoppedBlocks - Region->Stats.PushedBlocks) * BlockSize;
 
+    if (UNLIKELY(BytesInFreeList == 0))
+      return 0;
+
     bool MaySkip = false;
 
     // Always update `BytesInFreeListAtLastCheckpoint` with the smallest value
@@ -1102,6 +1105,10 @@ private:
                                             ReleaseOffset);
     PageReleaseContext Context(BlockSize, /*NumberOfRegions=*/1U,
                                ReleaseRangeSize, ReleaseOffset);
+    // We may not be able to do the page release in a rare case that we may
+    // fail on PageMap allocation.
+    if (UNLIKELY(!Context.ensurePageMapAllocated()))
+      return 0;
 
     for (BatchGroup &BG : GroupToRelease) {
       const uptr BatchGroupBase =

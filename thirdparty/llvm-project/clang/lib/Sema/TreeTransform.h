@@ -19,8 +19,8 @@
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
-#include "clang/AST/ExprConcepts.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/ExprConcepts.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
 #include "clang/AST/OpenMPClause.h"
@@ -31,6 +31,7 @@
 #include "clang/Basic/DiagnosticParse.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Sema/Designator.h"
+#include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Ownership.h"
 #include "clang/Sema/ParsedTemplate.h"
@@ -11401,7 +11402,8 @@ TreeTransform<Derived>::TransformBinaryOperator(BinaryOperator *E) {
   if (LHS.isInvalid())
     return ExprError();
 
-  ExprResult RHS = getDerived().TransformExpr(E->getRHS());
+  ExprResult RHS =
+      getDerived().TransformInitializer(E->getRHS(), /*NotCopyInit=*/false);
   if (RHS.isInvalid())
     return ExprError();
 
@@ -11949,7 +11951,8 @@ TreeTransform<Derived>::TransformCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
 
   ExprResult Second;
   if (E->getNumArgs() == 2) {
-    Second = getDerived().TransformExpr(E->getArg(1));
+    Second =
+        getDerived().TransformInitializer(E->getArg(1), /*NotCopyInit=*/false);
     if (Second.isInvalid())
       return ExprError();
   }

@@ -314,8 +314,7 @@ public:
   bool instrumentLandingPads(SmallVectorImpl<Instruction *> &RetVec);
   Value *getNextTagWithCall(IRBuilder<> &IRB);
   Value *getStackBaseTag(IRBuilder<> &IRB);
-  Value *getAllocaTag(IRBuilder<> &IRB, Value *StackTag, AllocaInst *AI,
-                      unsigned AllocaNo);
+  Value *getAllocaTag(IRBuilder<> &IRB, Value *StackTag, unsigned AllocaNo);
   Value *getUARTag(IRBuilder<> &IRB);
 
   Value *getHwasanThreadSlotPtr(IRBuilder<> &IRB, Type *Ty);
@@ -628,45 +627,43 @@ void HWAddressSanitizer::initializeCallbacks(Module &M) {
 
     HwasanMemoryAccessCallbackSized[AccessIsWrite] = M.getOrInsertFunction(
         ClMemoryAccessCallbackPrefix + TypeStr + "N" + EndingStr,
-        FunctionType::get(IRB.getVoidTy(), {IntptrTy, IntptrTy}, false));
+        FunctionType::get(VoidTy, {IntptrTy, IntptrTy}, false));
 
     for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
          AccessSizeIndex++) {
       HwasanMemoryAccessCallback[AccessIsWrite][AccessSizeIndex] =
-          M.getOrInsertFunction(
-              ClMemoryAccessCallbackPrefix + TypeStr +
-                  itostr(1ULL << AccessSizeIndex) + EndingStr,
-              FunctionType::get(IRB.getVoidTy(), {IntptrTy}, false));
+          M.getOrInsertFunction(ClMemoryAccessCallbackPrefix + TypeStr +
+                                    itostr(1ULL << AccessSizeIndex) + EndingStr,
+                                FunctionType::get(VoidTy, {IntptrTy}, false));
     }
   }
 
-  HwasanTagMemoryFunc = M.getOrInsertFunction(
-      "__hwasan_tag_memory", IRB.getVoidTy(), Int8PtrTy, Int8Ty, IntptrTy);
+  HwasanTagMemoryFunc = M.getOrInsertFunction("__hwasan_tag_memory", VoidTy,
+                                              Int8PtrTy, Int8Ty, IntptrTy);
   HwasanGenerateTagFunc =
       M.getOrInsertFunction("__hwasan_generate_tag", Int8Ty);
 
-  HwasanRecordFrameRecordFunc = M.getOrInsertFunction(
-      "__hwasan_add_frame_record", IRB.getVoidTy(), Int64Ty);
+  HwasanRecordFrameRecordFunc =
+      M.getOrInsertFunction("__hwasan_add_frame_record", VoidTy, Int64Ty);
 
-  ShadowGlobal = M.getOrInsertGlobal("__hwasan_shadow",
-                                     ArrayType::get(IRB.getInt8Ty(), 0));
+  ShadowGlobal =
+      M.getOrInsertGlobal("__hwasan_shadow", ArrayType::get(Int8Ty, 0));
 
   const std::string MemIntrinCallbackPrefix =
       (CompileKernel && !ClKasanMemIntrinCallbackPrefix)
           ? std::string("")
           : ClMemoryAccessCallbackPrefix;
-  HWAsanMemmove = M.getOrInsertFunction(MemIntrinCallbackPrefix + "memmove",
-                                        IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-                                        IRB.getInt8PtrTy(), IntptrTy);
-  HWAsanMemcpy = M.getOrInsertFunction(MemIntrinCallbackPrefix + "memcpy",
-                                       IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-                                       IRB.getInt8PtrTy(), IntptrTy);
+  HWAsanMemmove =
+      M.getOrInsertFunction(MemIntrinCallbackPrefix + "memmove", Int8PtrTy,
+                            Int8PtrTy, Int8PtrTy, IntptrTy);
+  HWAsanMemcpy =
+      M.getOrInsertFunction(MemIntrinCallbackPrefix + "memcpy", Int8PtrTy,
+                            Int8PtrTy, Int8PtrTy, IntptrTy);
   HWAsanMemset = M.getOrInsertFunction(MemIntrinCallbackPrefix + "memset",
-                                       IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-                                       IRB.getInt32Ty(), IntptrTy);
+                                       Int8PtrTy, Int8PtrTy, Int32Ty, IntptrTy);
 
   HWAsanHandleVfork =
-      M.getOrInsertFunction("__hwasan_handle_vfork", IRB.getVoidTy(), IntptrTy);
+      M.getOrInsertFunction("__hwasan_handle_vfork", VoidTy, IntptrTy);
 }
 
 Value *HWAddressSanitizer::getOpaqueNoopCast(IRBuilder<> &IRB, Value *Val) {
@@ -838,8 +835,8 @@ void HWAddressSanitizer::instrumentMemAccessInline(Value *Ptr, bool IsWrite,
   IRBuilder<> IRB(InsertBefore);
 
   Value *PtrLong = IRB.CreatePointerCast(Ptr, IntptrTy);
-  Value *PtrTag = IRB.CreateTrunc(IRB.CreateLShr(PtrLong, PointerTagShift),
-                                  IRB.getInt8Ty());
+  Value *PtrTag =
+      IRB.CreateTrunc(IRB.CreateLShr(PtrLong, PointerTagShift), Int8Ty);
   Value *AddrLong = untagPointer(IRB, PtrLong);
   Value *Shadow = memToShadow(AddrLong, IRB);
   Value *MemTag = IRB.CreateLoad(Int8Ty, Shadow);
@@ -888,7 +885,7 @@ void HWAddressSanitizer::instrumentMemAccessInline(Value *Ptr, bool IsWrite,
   case Triple::x86_64:
     // The signal handler will find the data address in rdi.
     Asm = InlineAsm::get(
-        FunctionType::get(IRB.getVoidTy(), {PtrLong->getType()}, false),
+        FunctionType::get(VoidTy, {PtrLong->getType()}, false),
         "int3\nnopl " +
             itostr(0x40 + (AccessInfo & HWASanAccessInfo::RuntimeMask)) +
             "(%rax)",
@@ -899,7 +896,7 @@ void HWAddressSanitizer::instrumentMemAccessInline(Value *Ptr, bool IsWrite,
   case Triple::aarch64_be:
     // The signal handler will find the data address in x0.
     Asm = InlineAsm::get(
-        FunctionType::get(IRB.getVoidTy(), {PtrLong->getType()}, false),
+        FunctionType::get(VoidTy, {PtrLong->getType()}, false),
         "brk #" + itostr(0x900 + (AccessInfo & HWASanAccessInfo::RuntimeMask)),
         "{x0}",
         /*hasSideEffects=*/true);
@@ -907,7 +904,7 @@ void HWAddressSanitizer::instrumentMemAccessInline(Value *Ptr, bool IsWrite,
   case Triple::riscv64:
     // The signal handler will find the data address in x10.
     Asm = InlineAsm::get(
-        FunctionType::get(IRB.getVoidTy(), {PtrLong->getType()}, false),
+        FunctionType::get(VoidTy, {PtrLong->getType()}, false),
         "ebreak\naddiw x0, x11, " +
             itostr(0x40 + (AccessInfo & HWASanAccessInfo::RuntimeMask)),
         "{x10}",
@@ -934,17 +931,15 @@ bool HWAddressSanitizer::ignoreMemIntrinsic(MemIntrinsic *MI) {
 void HWAddressSanitizer::instrumentMemIntrinsic(MemIntrinsic *MI) {
   IRBuilder<> IRB(MI);
   if (isa<MemTransferInst>(MI)) {
-    IRB.CreateCall(
-        isa<MemMoveInst>(MI) ? HWAsanMemmove : HWAsanMemcpy,
-        {IRB.CreatePointerCast(MI->getOperand(0), IRB.getInt8PtrTy()),
-         IRB.CreatePointerCast(MI->getOperand(1), IRB.getInt8PtrTy()),
-         IRB.CreateIntCast(MI->getOperand(2), IntptrTy, false)});
+    IRB.CreateCall(isa<MemMoveInst>(MI) ? HWAsanMemmove : HWAsanMemcpy,
+                   {IRB.CreatePointerCast(MI->getOperand(0), Int8PtrTy),
+                    IRB.CreatePointerCast(MI->getOperand(1), Int8PtrTy),
+                    IRB.CreateIntCast(MI->getOperand(2), IntptrTy, false)});
   } else if (isa<MemSetInst>(MI)) {
-    IRB.CreateCall(
-        HWAsanMemset,
-        {IRB.CreatePointerCast(MI->getOperand(0), IRB.getInt8PtrTy()),
-         IRB.CreateIntCast(MI->getOperand(1), IRB.getInt32Ty(), false),
-         IRB.CreateIntCast(MI->getOperand(2), IntptrTy, false)});
+    IRB.CreateCall(HWAsanMemset,
+                   {IRB.CreatePointerCast(MI->getOperand(0), Int8PtrTy),
+                    IRB.CreateIntCast(MI->getOperand(1), Int32Ty, false),
+                    IRB.CreateIntCast(MI->getOperand(2), IntptrTy, false)});
   }
   MI->eraseFromParent();
 }
@@ -989,10 +984,10 @@ void HWAddressSanitizer::tagAlloca(IRBuilder<> &IRB, AllocaInst *AI, Value *Tag,
   if (!UseShortGranules)
     Size = AlignedSize;
 
-  Value *JustTag = IRB.CreateTrunc(Tag, IRB.getInt8Ty());
+  Tag = IRB.CreateTrunc(Tag, Int8Ty);
   if (InstrumentWithCalls) {
     IRB.CreateCall(HwasanTagMemoryFunc,
-                   {IRB.CreatePointerCast(AI, Int8PtrTy), JustTag,
+                   {IRB.CreatePointerCast(AI, Int8PtrTy), Tag,
                     ConstantInt::get(IntptrTy, AlignedSize)});
   } else {
     size_t ShadowSize = Size >> Mapping.Scale;
@@ -1005,14 +1000,14 @@ void HWAddressSanitizer::tagAlloca(IRBuilder<> &IRB, AllocaInst *AI, Value *Tag,
     // llvm.memset right here into either a sequence of stores, or a call to
     // hwasan_tag_memory.
     if (ShadowSize)
-      IRB.CreateMemSet(ShadowPtr, JustTag, ShadowSize, Align(1));
+      IRB.CreateMemSet(ShadowPtr, Tag, ShadowSize, Align(1));
     if (Size != AlignedSize) {
       const uint8_t SizeRemainder = Size % Mapping.getObjectAlignment().value();
       IRB.CreateStore(ConstantInt::get(Int8Ty, SizeRemainder),
                       IRB.CreateConstGEP1_32(Int8Ty, ShadowPtr, ShadowSize));
-      IRB.CreateStore(JustTag, IRB.CreateConstGEP1_32(
-                                   Int8Ty, IRB.CreateBitCast(AI, Int8PtrTy),
-                                   AlignedSize - 1));
+      IRB.CreateStore(Tag, IRB.CreateConstGEP1_32(
+                               Int8Ty, IRB.CreatePointerCast(AI, Int8PtrTy),
+                               AlignedSize - 1));
     }
   }
 }
@@ -1041,7 +1036,8 @@ unsigned HWAddressSanitizer::retagMask(unsigned AllocaNo) {
 Value *HWAddressSanitizer::applyTagMask(IRBuilder<> &IRB, Value *OldTag) {
   if (TagMaskByte == 0xFF)
     return OldTag; // No need to clear the tag byte.
-  return IRB.CreateAnd(OldTag, ConstantInt::get(IntptrTy, TagMaskByte));
+  return IRB.CreateAnd(OldTag,
+                       ConstantInt::get(OldTag->getType(), TagMaskByte));
 }
 
 Value *HWAddressSanitizer::getNextTagWithCall(IRBuilder<> &IRB) {
@@ -1065,11 +1061,11 @@ Value *HWAddressSanitizer::getStackBaseTag(IRBuilder<> &IRB) {
 }
 
 Value *HWAddressSanitizer::getAllocaTag(IRBuilder<> &IRB, Value *StackTag,
-                                        AllocaInst *AI, unsigned AllocaNo) {
+                                        unsigned AllocaNo) {
   if (ClGenerateTagsWithCalls)
     return getNextTagWithCall(IRB);
-  return IRB.CreateXor(StackTag,
-                       ConstantInt::get(IntptrTy, retagMask(AllocaNo)));
+  return IRB.CreateXor(
+      StackTag, ConstantInt::get(StackTag->getType(), retagMask(AllocaNo)));
 }
 
 Value *HWAddressSanitizer::getUARTag(IRBuilder<> &IRB) {
@@ -1126,8 +1122,7 @@ Value *HWAddressSanitizer::getHwasanThreadSlotPtr(IRBuilder<> &IRB, Type *Ty) {
     Function *ThreadPointerFunc =
         Intrinsic::getDeclaration(M, Intrinsic::thread_pointer);
     Value *SlotPtr = IRB.CreatePointerCast(
-        IRB.CreateConstGEP1_32(IRB.getInt8Ty(),
-                               IRB.CreateCall(ThreadPointerFunc), 0x30),
+        IRB.CreateConstGEP1_32(Int8Ty, IRB.CreateCall(ThreadPointerFunc), 0x30),
         Ty->getPointerTo(0));
     return SlotPtr;
   }
@@ -1153,8 +1148,7 @@ Value *HWAddressSanitizer::getSP(IRBuilder<> &IRB) {
         M, Intrinsic::frameaddress,
         IRB.getInt8PtrTy(M->getDataLayout().getAllocaAddrSpace()));
     CachedSP = IRB.CreatePtrToInt(
-        IRB.CreateCall(GetStackPointerFn,
-                       {Constant::getNullValue(IRB.getInt32Ty())}),
+        IRB.CreateCall(GetStackPointerFn, {Constant::getNullValue(Int32Ty)}),
         IntptrTy);
   }
   return CachedSP;
@@ -1302,9 +1296,10 @@ bool HWAddressSanitizer::instrumentStack(memtag::StackInfo &SInfo,
     IRBuilder<> IRB(AI->getNextNode());
 
     // Replace uses of the alloca with tagged address.
-    Value *Tag = getAllocaTag(IRB, StackTag, AI, N);
+    Value *Tag = getAllocaTag(IRB, StackTag, N);
     Value *AILong = IRB.CreatePointerCast(AI, IntptrTy);
-    Value *Replacement = tagPointer(IRB, AI->getType(), AILong, Tag);
+    Value *AINoTagLong = untagPointer(IRB, AILong);
+    Value *Replacement = tagPointer(IRB, AI->getType(), AINoTagLong, Tag);
     std::string Name =
         AI->hasName() ? AI->getName().str() : "alloca." + itostr(N);
     Replacement->setName(Name + ".hwasan");
@@ -1331,7 +1326,7 @@ bool HWAddressSanitizer::instrumentStack(memtag::StackInfo &SInfo,
     llvm::for_each(Info.LifetimeStart, HandleLifetime);
     llvm::for_each(Info.LifetimeEnd, HandleLifetime);
 
-    AI->replaceUsesWithIf(Replacement, [AICast, AILong](Use &U) {
+    AI->replaceUsesWithIf(Replacement, [AICast, AILong](const Use &U) {
       auto *User = U.getUser();
       return User != AILong && User != AICast && !isLifetimeIntrinsic(User);
     });
@@ -1351,7 +1346,7 @@ bool HWAddressSanitizer::instrumentStack(memtag::StackInfo &SInfo,
     auto TagEnd = [&](Instruction *Node) {
       IRB.SetInsertPoint(Node);
       // When untagging, use the `AlignedSize` because we need to set the tags
-      // for the entire alloca to zero. If we used `Size` here, we would
+      // for the entire alloca to original. If we used `Size` here, we would
       // keep the last granule tagged, and store zero in the last byte of the
       // last granule, due to how short granules are implemented.
       tagAlloca(IRB, AI, UARTag, AlignedSize);
@@ -1590,11 +1585,14 @@ void HWAddressSanitizer::instrumentGlobals() {
   Hasher.final(Hash);
   uint8_t Tag = Hash[0];
 
+  assert(TagMaskByte >= 16);
+
   for (GlobalVariable *GV : Globals) {
-    Tag &= TagMaskByte;
-    // Skip tag 0 in order to avoid collisions with untagged memory.
-    if (Tag == 0)
-      Tag = 1;
+    // Don't allow globals to be tagged with something that looks like a
+    // short-granule tag, otherwise we lose inter-granule overflow detection, as
+    // the fast path shadow-vs-address check succeeds.
+    if (Tag < 16 || Tag > TagMaskByte)
+      Tag = 16;
     instrumentGlobal(GV, Tag++);
   }
 }

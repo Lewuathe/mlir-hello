@@ -8,20 +8,12 @@
 
 // REQUIRES: has-clang-tidy
 
-// FIXME: This should pass with the PSTL enables
-// XFAIL: with-pstl
-
 // The GCC compiler flags are not always compatible with clang-tidy.
 // UNSUPPORTED: gcc
 
 // TODO: run clang-tidy with modules enabled once they are supported
 // RUN: %{clang-tidy} %s --warnings-as-errors=* -header-filter=.* --checks='-*,libcpp-*' --load=%{test-tools}/clang_tidy_checks/libcxx-tidy.plugin -- %{compile_flags} -fno-modules
 // RUN: %{clang-tidy} %s --warnings-as-errors=* -header-filter=.* --config-file=%S/../../.clang-tidy -- -Wweak-vtables %{compile_flags} -fno-modules
-
-// Prevent <ext/hash_map> from generating deprecated warnings for this test.
-#if defined(__DEPRECATED)
-#    undef __DEPRECATED
-#endif
 
 /*
 BEGIN-SCRIPT
@@ -142,6 +134,7 @@ END-SCRIPT
 #endif
 #include <map>
 #include <math.h>
+#include <mdspan>
 #include <memory>
 #include <memory_resource>
 #if !defined(_LIBCPP_HAS_NO_THREADS)
@@ -265,6 +258,4 @@ END-SCRIPT
 #if __cplusplus >= 201103L
 #   include <experimental/vector>
 #endif
-#include <ext/hash_map>
-#include <ext/hash_set>
 // GENERATED-MARKER

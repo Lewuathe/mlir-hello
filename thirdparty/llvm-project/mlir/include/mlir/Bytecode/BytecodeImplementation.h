@@ -83,7 +83,7 @@ public:
     Attribute baseResult;
     if (failed(readAttribute(baseResult)))
       return failure();
-    if ((result = baseResult.dyn_cast<T>()))
+    if ((result = dyn_cast<T>(baseResult)))
       return success();
     return emitError() << "expected " << llvm::getTypeName<T>()
                        << ", but got: " << baseResult;
@@ -100,7 +100,7 @@ public:
     Type baseResult;
     if (failed(readType(baseResult)))
       return failure();
-    if ((result = baseResult.dyn_cast<T>()))
+    if ((result = dyn_cast<T>(baseResult)))
       return success();
     return emitError() << "expected " << llvm::getTypeName<T>()
                        << ", but got: " << baseResult;
@@ -233,6 +233,9 @@ public:
   /// guaranteed to not die before the end of the bytecode process. The blob is
   /// written as-is, with no additional compression or compaction.
   virtual void writeOwnedBlob(ArrayRef<char> blob) = 0;
+
+  /// Return the bytecode version being emitted for.
+  virtual int64_t getBytecodeVersion() const = 0;
 };
 
 //===--------------------------------------------------------------------===//

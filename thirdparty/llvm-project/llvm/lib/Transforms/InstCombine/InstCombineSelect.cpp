@@ -1238,8 +1238,8 @@ static Instruction *canonicalizeSPF(SelectInst &Sel, ICmpInst &Cmp,
   return nullptr;
 }
 
-static bool replaceInInstruction(Value *V, Value *Old, Value *New,
-                                 InstCombiner &IC, unsigned Depth = 0) {
+bool InstCombinerImpl::replaceInInstruction(Value *V, Value *Old, Value *New,
+                                            unsigned Depth) {
   // Conservatively limit replacement to two instructions upwards.
   if (Depth == 2)
     return false;
@@ -1251,10 +1251,11 @@ static bool replaceInInstruction(Value *V, Value *Old, Value *New,
   bool Changed = false;
   for (Use &U : I->operands()) {
     if (U == Old) {
-      IC.replaceUse(U, New);
+      replaceUse(U, New);
+      Worklist.add(I);
       Changed = true;
     } else {
-      Changed |= replaceInInstruction(U, Old, New, IC, Depth + 1);
+      Changed |= replaceInInstruction(U, Old, New, Depth + 1);
     }
   }
   return Changed;
@@ -1310,7 +1311,7 @@ Instruction *InstCombinerImpl::foldSelectValueEquivalence(SelectInst &Sel,
     // FIXME: Support vectors.
     if (match(CmpRHS, m_ImmConstant()) && !match(CmpLHS, m_ImmConstant()) &&
         !Cmp.getType()->isVectorTy())
-      if (replaceInInstruction(TrueVal, CmpLHS, CmpRHS, *this))
+      if (replaceInInstruction(TrueVal, CmpLHS, CmpRHS))
         return &Sel;
   }
   if (TrueVal != CmpRHS &&
@@ -2923,20 +2924,31 @@ Instruction *InstCombinerImpl::foldSelectOfBools(SelectInst &SI) {
   auto *Zero = ConstantInt::getFalse(SelType);
   Value *A, *B, *C, *D;
 
+  auto dropPoisonGeneratingFlagsAndMetadata =
+      [](ArrayRef<Instruction *> Insts) {
+        for (auto *I : Insts)
+          I->dropPoisonGeneratingFlagsAndMetadata();
+      };
   // Folding select to and/or i1 isn't poison safe in general. impliesPoison
   // checks whether folding it does not convert a well-defined value into
   // poison.
   if (match(TrueVal, m_One())) {
-    if (impliesPoison(FalseVal, CondVal)) {
-      // Change: A = select B, true, C --> A = or B, C
-      return BinaryOperator::CreateOr(CondVal, FalseVal);
-    }
-
     if (auto *LHS = dyn_cast<FCmpInst>(CondVal))
       if (auto *RHS = dyn_cast<FCmpInst>(FalseVal))
         if (Value *V = foldLogicOfFCmps(LHS, RHS, /*IsAnd*/ false,
                                         /*IsSelectLogical*/ true))
           return replaceInstUsesWith(SI, V);
+
+    // Some patterns can be matched by both of the above and following
+    // combinations. Because we need to drop poison generating
+    // flags and metadatas for the following combination, it has less priority
+    // than the above combination.
+    SmallVector<Instruction *> IgnoredInsts;
+    if (impliesPoisonIgnoreFlagsOrMetadata(FalseVal, CondVal, IgnoredInsts)) {
+      dropPoisonGeneratingFlagsAndMetadata(IgnoredInsts);
+      // Change: A = select B, true, C --> A = or B, C
+      return BinaryOperator::CreateOr(CondVal, FalseVal);
+    }
 
     // (A && B) || (C && B) --> (A || C) && B
     if (match(CondVal, m_LogicalAnd(m_Value(A), m_Value(B))) &&
@@ -2968,16 +2980,22 @@ Instruction *InstCombinerImpl::foldSelectOfBools(SelectInst &SI) {
   }
 
   if (match(FalseVal, m_Zero())) {
-    if (impliesPoison(TrueVal, CondVal)) {
-      // Change: A = select B, C, false --> A = and B, C
-      return BinaryOperator::CreateAnd(CondVal, TrueVal);
-    }
-
     if (auto *LHS = dyn_cast<FCmpInst>(CondVal))
       if (auto *RHS = dyn_cast<FCmpInst>(TrueVal))
         if (Value *V = foldLogicOfFCmps(LHS, RHS, /*IsAnd*/ true,
                                         /*IsSelectLogical*/ true))
           return replaceInstUsesWith(SI, V);
+
+    // Some patterns can be matched by both of the above and following
+    // combinations. Because we need to drop poison generating
+    // flags and metadatas for the following combination, it has less priority
+    // than the above combination.
+    SmallVector<Instruction *> IgnoredInsts;
+    if (impliesPoisonIgnoreFlagsOrMetadata(TrueVal, CondVal, IgnoredInsts)) {
+      dropPoisonGeneratingFlagsAndMetadata(IgnoredInsts);
+      // Change: A = select B, C, false --> A = and B, C
+      return BinaryOperator::CreateAnd(CondVal, TrueVal);
+    }
 
     // (A || B) && (C || B) --> (A && C) || B
     if (match(CondVal, m_LogicalOr(m_Value(A), m_Value(B))) &&
@@ -3289,79 +3307,6 @@ static Instruction *foldBitCeil(SelectInst &SI, IRBuilderBase &Builder) {
       Builder.CreateAnd(Neg, ConstantInt::get(SelType, BitWidth - 1));
   return BinaryOperator::Create(Instruction::Shl, ConstantInt::get(SelType, 1),
                                 Masked);
-}
-
-// Transform:
-//
-//   1 << (C - ctlz(X >> 1))
-//
-// into
-//
-//   (1 << (C - 1)) >> ctlz(X)
-//
-// The caller must guarantee that X is nonzero.
-//
-// TODO: Relax the requirement that X be nonzero.  We just need to require X to
-// be nonzero or the second argument of CTLZ to be true (that is, returning
-// poison on zero).
-static Instruction *foldBitFloorNonzero(Value *N, Value *X,
-                                        InstCombiner::BuilderTy &Builder) {
-  Type *NType = N->getType();
-  unsigned BitWidth = NType->getScalarSizeInBits();
-
-  // Match C - ctlz(X >> 1), where C is in (0, BitWidth].
-  // TODO: Handle C in [0, BitWidth] (with 0 included in the range), in which
-  // case 1 << C - ctlz(X >> 1) is equivalent to
-  // (1 << ((C - 1) & (BitWidth - 1))) >> ctlz(X).
-  const APInt *C = nullptr;
-  Value *CTLZ;
-  if (!match(N, m_OneUse(m_Shl(m_One(),
-                               m_OneUse(m_Sub(m_APInt(C), m_Value(CTLZ)))))) ||
-      !(C->ugt(0) && C->ule(BitWidth)) ||
-      !match(CTLZ, m_OneUse(m_Intrinsic<Intrinsic::ctlz>(
-                       m_OneUse(m_LShr(m_Specific(X), m_One())), m_Zero()))))
-    return nullptr;
-
-  APInt ShiftedBit = APInt::getOneBitSet(BitWidth, C->getZExtValue() - 1);
-
-  // Build ShiftedBit >> CTLZ.
-  Value *NewCTLZ =
-      Builder.CreateIntrinsic(Intrinsic::ctlz, {CTLZ->getType()},
-                              {X, cast<Instruction>(CTLZ)->getOperand(1)});
-  auto *Shift = cast<Instruction>(
-      Builder.CreateLShr(ConstantInt::get(NType, ShiftedBit), NewCTLZ));
-  Shift->setIsExact();
-  return Shift;
-}
-
-// Transform:
-//
-//   X == 0 ? 0 : (1 << (C1 - ctlz(X >> 1)))
-//
-// into
-//
-//   X == 0 ? 0 : (C2 >> ctlz(X))
-//
-// where C2 is computed by foldBitFloorNonzero based on C1.  The caller is
-// responsible for replacing one of the select operands.
-static Instruction *foldBitFloor(SelectInst &SI,
-                                 InstCombiner::BuilderTy &Builder) {
-  Value *TrueVal = SI.getTrueValue();
-  Value *FalseVal = SI.getFalseValue();
-
-  ICmpInst::Predicate Pred;
-  Value *Cond0;
-  if (!match(SI.getCondition(), m_ICmp(Pred, m_Value(Cond0), m_Zero())) ||
-      !ICmpInst::isEquality(Pred))
-    return nullptr;
-
-  if (Pred == ICmpInst::ICMP_NE)
-    std::swap(TrueVal, FalseVal);
-
-  if (!match(TrueVal, m_Zero()))
-    return nullptr;
-
-  return foldBitFloorNonzero(FalseVal, Cond0, Builder);
 }
 
 Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
@@ -3793,9 +3738,6 @@ Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
 
   if (Instruction *I = foldBitCeil(SI, Builder))
     return I;
-
-  if (Instruction *I = foldBitFloor(SI, Builder))
-    return replaceOperand(SI, match(SI.getTrueValue(), m_Zero()) ? 2 : 1, I);
 
   return nullptr;
 }
