@@ -47,6 +47,11 @@ Non-comprehensive list of changes in this release
 Update on required toolchains to build LLVM
 -------------------------------------------
 
+With LLVM 17.x we raised the version requirement of CMake used to build LLVM.
+The new requirements are as follows:
+
+* CMake >= 3.20.0
+
 Changes to the LLVM IR
 ----------------------
 
@@ -69,6 +74,9 @@ Changes to LLVM infrastructure
 * Alloca merging in the inliner has been removed, since it only worked with the
   legacy inliner pass. Backend stack coloring should handle cases alloca
   merging initially set out to handle.
+
+* InstructionSimplify APIs now require instructions be inserted into a
+  parent function.
 
 Changes to building LLVM
 ------------------------
@@ -101,6 +109,9 @@ Changes to the ARM Backend
 - The hard-float ABI is now available in Armv8.1-M configurations that
   have integer MVE instructions (and therefore have FP registers) but
   no scalar or vector floating point computation.
+
+- The ``.arm`` directive now aligns code to the next 4-byte boundary, and
+  the ``.thumb`` directive aligns code to the next 2-byte boundary.
 
 Changes to the AVR Backend
 --------------------------

@@ -3,6 +3,7 @@
 
 set(SANITIZER_SOURCES_NOTERMINATION
   sanitizer_allocator.cpp
+  sanitizer_common_range.cpp
   sanitizer_common.cpp
   sanitizer_deadlock_detector1.cpp
   sanitizer_deadlock_detector2.cpp
@@ -127,6 +128,7 @@ set(SANITIZER_IMPL_HEADERS
   sanitizer_common_interceptors.inc
   sanitizer_common_interceptors_format.inc
   sanitizer_common_interceptors_ioctl.inc
+  sanitizer_common_interceptors_memintrinsics.inc
   sanitizer_common_interface.inc
   sanitizer_common_interface_posix.inc
   sanitizer_common_syscalls.inc
