@@ -41,10 +41,15 @@ def TransformOpInterface : OpInterface<"TransformOpInterface"> {
         transformation represented by the current op is targeted. Returns a
         special status object indicating whether the transformation succeeded
         or failed, and, if it failed, whether the failure is recoverable or not.
+
+        IR must be created, modified and deleted with the provided rewriter.
+        implementations are responsible for setting the insertion point of the
+        rewriter to the desired location.
       }],
       /*returnType=*/"::mlir::DiagnosedSilenceableFailure",
       /*name=*/"apply",
       /*arguments=*/(ins
+          "::mlir::transform::TransformRewriter &":$rewriter,
           "::mlir::transform::TransformResults &":$transformResults,
           "::mlir::transform::TransformState &":$state
     )>,
@@ -99,6 +104,11 @@ def TransformOpInterface : OpInterface<"TransformOpInterface"> {
       diag << $_op->getName() << " failed to apply";
       diag.attachNote(target->getLoc()) << "when applied to this op";
       return diag;
+    }
+
+    /// Returns all operands that are handles and being consumed by this op.
+    ::llvm::SmallVector<OpOperand *> getConsumedHandleOpOperands() {
+      return ::mlir::transform::detail::getConsumedHandleOpOperands($_op);
     }
   }];
 
@@ -181,15 +191,15 @@ def TransformEachOpTrait : NativeOpTrait<"TransformEachOpTrait"> {
   let cppNamespace = "::mlir::transform";
 }
 
-def TransformWithPatternsOpTrait : NativeOpTrait<"TransformWithPatternsOpTrait"> {
-  let cppNamespace = "::mlir::transform";
-}
-
 def NavigationTransformOpTrait : NativeOpTrait<"NavigationTransformOpTrait"> {
   let cppNamespace = "::mlir::transform";
 }
 
 def ParamProducerTransformOpTrait : NativeOpTrait<"ParamProducerTransformOpTrait"> {
+  let cppNamespace = "::mlir::transform";
+}
+
+def ReportTrackingListenerFailuresOpTrait : NativeOpTrait<"ReportTrackingListenerFailuresOpTrait"> {
   let cppNamespace = "::mlir::transform";
 }
 
@@ -224,6 +234,27 @@ def FindPayloadReplacementOpInterface
       /*returnType=*/"::llvm::SmallVector<::mlir::Value>",
       /*name=*/"getNextOperands",
       /*arguments=*/(ins)
+    >,
+  ];
+}
+
+def PatternDescriptorOpInterface : OpInterface<"PatternDescriptorOpInterface"> {
+  let description = [{
+    This interface should be implemented by ops that select patterns of a
+    `transform.apply_patterns` op. It provides a method to populate a rewrite
+    pattern set with patterns.
+  }];
+
+  let cppNamespace = "::mlir::transform";
+
+  let methods = [
+    InterfaceMethod<
+      /*desc=*/[{
+        Populate patterns into the given pattern set.
+      }],
+      /*returnType=*/"void",
+      /*name=*/"populatePatterns",
+      /*arguments=*/(ins "RewritePatternSet &":$patterns)
     >,
   ];
 }

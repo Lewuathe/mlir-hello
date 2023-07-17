@@ -3471,7 +3471,7 @@ struct OmpIfClause {
 struct OmpAlignedClause {
   TUPLE_CLASS_BOILERPLATE(OmpAlignedClause);
   CharBlock source;
-  std::tuple<std::list<Name>, std::optional<ScalarIntConstantExpr>> t;
+  std::tuple<OmpObjectList, std::optional<ScalarIntConstantExpr>> t;
 };
 
 // 2.9.5 order-clause -> ORDER ([order-modifier :]concurrent)
@@ -3978,7 +3978,7 @@ struct OpenMPConstruct {
       u;
 };
 
-// Parse tree nodes for OpenACC 3.1 directives and clauses
+// Parse tree nodes for OpenACC 3.3 directives and clauses
 
 struct AccObject {
   UNION_CLASS_BOILERPLATE(AccObject);
@@ -4037,7 +4037,7 @@ struct AccObjectListWithModifier {
   std::tuple<std::optional<AccDataModifier>, AccObjectList> t;
 };
 
-// 2.5.13: + | * | max | min | iand | ior | ieor | .and. | .or. | .eqv. | .neqv.
+// 2.5.15: + | * | max | min | iand | ior | ieor | .and. | .or. | .eqv. | .neqv.
 struct AccReductionOperator {
   ENUM_CLASS(
       Operator, Plus, Multiply, Max, Min, Iand, Ior, Ieor, And, Or, Eqv, Neqv)
@@ -4077,9 +4077,7 @@ struct AccTileExprList {
 };
 
 struct AccSizeExpr {
-  TUPLE_CLASS_BOILERPLATE(AccSizeExpr);
-  CharBlock source;
-  std::tuple<std::optional<ScalarIntExpr>> t; // if null then *
+  WRAPPER_CLASS_BOILERPLATE(AccSizeExpr, std::optional<ScalarIntExpr>);
 };
 
 struct AccSizeExprList {
@@ -4092,9 +4090,23 @@ struct AccSelfClause {
   CharBlock source;
 };
 
-struct AccGangArgument {
-  TUPLE_CLASS_BOILERPLATE(AccGangArgument);
-  std::tuple<std::optional<ScalarIntExpr>, std::optional<AccSizeExpr>> t;
+// num, dim, static
+struct AccGangArg {
+  UNION_CLASS_BOILERPLATE(AccGangArg);
+  WRAPPER_CLASS(Num, ScalarIntExpr);
+  WRAPPER_CLASS(Dim, ScalarIntExpr);
+  WRAPPER_CLASS(Static, AccSizeExpr);
+  std::variant<Num, Dim, Static> u;
+  CharBlock source;
+};
+
+struct AccGangArgList {
+  WRAPPER_CLASS_BOILERPLATE(AccGangArgList, std::list<AccGangArg>);
+};
+
+struct AccCollapseArg {
+  TUPLE_CLASS_BOILERPLATE(AccCollapseArg);
+  std::tuple<bool, ScalarIntConstantExpr> t;
 };
 
 struct AccClause {

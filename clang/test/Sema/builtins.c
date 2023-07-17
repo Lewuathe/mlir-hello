@@ -71,7 +71,6 @@ void test9_4(volatile int* ptr, int val) {
   __sync_fetch_and_nand(ptr, val);
 }
 
-// rdar://7236819
 void test10(void) __attribute__((noreturn));
 
 void test10(void) {
@@ -104,13 +103,11 @@ int test13(void) {
   __builtin_eh_return(0, 0); // no warning, eh_return never returns.
 }
 
-// <rdar://problem/8228293>
 void test14(void) {
   int old;
   old = __sync_fetch_and_min((volatile int *)&old, 1);
 }
 
-// <rdar://problem/8336581>
 void test15(const char *s) {
   __builtin_printf("string is %s\n", s);
 }
@@ -216,7 +213,6 @@ void unavailable(void) {
   __builtin_operator_delete(0); // expected-error {{'__builtin_operator_delete' is only available in C++}}
 }
 
-// rdar://18259539
 size_t strlcpy(char * restrict dst, const char * restrict src, size_t size);
 size_t strlcat(char * restrict dst, const char * restrict src, size_t size);
 
@@ -239,7 +235,6 @@ void Test19(void)
 				                                                   // expected-warning {{'strlcat' will always overflow; destination buffer has size 20, but size argument is 40}}
 }
 
-// rdar://11076881
 char * Test20(char *p, const char *in, unsigned n)
 {
     static char buf[10];
@@ -343,7 +338,6 @@ void test22(void) {
   (void)__builtin_signbitl(1.0L);
 }
 
-// rdar://43909200
 #define memcpy(x,y,z) __builtin___memcpy_chk(x,y,z, __builtin_object_size(x,0))
 #define my_memcpy(x,y,z) __builtin___memcpy_chk(x,y,z, __builtin_object_size(x,0))
 
@@ -378,3 +372,14 @@ void test_builtin_complex(void) {
 }
 
 _Complex double builtin_complex_static_init = __builtin_complex(1.0, 2.0);
+
+int test_is_fpclass(float x, int mask) {
+  int x1 = __builtin_isfpclass(x, 1024); // expected-error {{argument value 1024 is outside the valid range [0, 1023]}}
+  int x2 = __builtin_isfpclass(3, 3); // expected-error{{floating point classification requires argument of floating point type (passed in 'int')}}
+  int x3 = __builtin_isfpclass(x, 3, x); // expected-error{{too many arguments to function call, expected 2, have 3}}
+  int x4 = __builtin_isfpclass(x); // expected-error{{too few arguments to function call, expected 2, have 1}}
+  int x5 = __builtin_isfpclass(x, mask); // expected-error{{argument to '__builtin_isfpclass' must be a constant integer}}
+  int x6 = __builtin_isfpclass(x, -1); // expected-error{{argument value -1 is outside the valid range [0, 1023]}}
+  float _Complex c = x;
+  int x7 = __builtin_isfpclass(c, 3); // expected-error{{floating point classification requires argument of floating point type (passed in '_Complex float')}}
+}

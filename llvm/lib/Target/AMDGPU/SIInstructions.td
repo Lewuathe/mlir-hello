@@ -47,7 +47,7 @@ let Uses = [MODE, M0, EXEC] in {
 multiclass V_INTERP_P1_F32_m : VINTRP_m <
   0x00000000,
   (outs VINTRPDst:$vdst),
-  (ins VGPR_32:$vsrc, Attr:$attr, AttrChan:$attrchan),
+  (ins VGPR_32:$vsrc, InterpAttr:$attr, InterpAttrChan:$attrchan),
   "v_interp_p1_f32$vdst, $vsrc, $attr$attrchan",
   [(set f32:$vdst, (int_amdgcn_interp_p1 f32:$vsrc,
                    (i32 timm:$attrchan), (i32 timm:$attr), M0))]
@@ -73,7 +73,8 @@ let DisableEncoding = "$src0", Constraints = "$src0 = $vdst" in {
 defm V_INTERP_P2_F32 : VINTRP_m <
   0x00000001,
   (outs VINTRPDst:$vdst),
-  (ins VGPR_32:$src0, VGPR_32:$vsrc, Attr:$attr, AttrChan:$attrchan),
+  (ins VGPR_32:$src0, VGPR_32:$vsrc, InterpAttr:$attr,
+       InterpAttrChan:$attrchan),
   "v_interp_p2_f32$vdst, $vsrc, $attr$attrchan",
   [(set f32:$vdst, (int_amdgcn_interp_p2 f32:$src0, f32:$vsrc,
                    (i32 timm:$attrchan), (i32 timm:$attr), M0))]>;
@@ -83,7 +84,7 @@ defm V_INTERP_P2_F32 : VINTRP_m <
 defm V_INTERP_MOV_F32 : VINTRP_m <
   0x00000002,
   (outs VINTRPDst:$vdst),
-  (ins InterpSlot:$vsrc, Attr:$attr, AttrChan:$attrchan),
+  (ins InterpSlot:$vsrc, InterpAttr:$attr, InterpAttrChan:$attrchan),
   "v_interp_mov_f32$vdst, $vsrc, $attr$attrchan",
   [(set f32:$vdst, (int_amdgcn_interp_mov (i32 timm:$vsrc),
                    (i32 timm:$attrchan), (i32 timm:$attr), M0))]>;
@@ -95,6 +96,16 @@ defm V_INTERP_MOV_F32 : VINTRP_m <
 //===----------------------------------------------------------------------===//
 // Pseudo Instructions
 //===----------------------------------------------------------------------===//
+
+// Insert a branch to an endpgm block to use as a fallback trap.
+def ENDPGM_TRAP : SPseudoInstSI<
+  (outs), (ins),
+  [(AMDGPUendpgm_trap)],
+  "ENDPGM_TRAP"> {
+  let hasSideEffects = 1;
+  let usesCustomInserter = 1;
+}
+
 def ATOMIC_FENCE : SPseudoInstSI<
   (outs), (ins i32imm:$ordering, i32imm:$scope),
   [(atomic_fence (i32 timm:$ordering), (i32 timm:$scope))],
@@ -160,6 +171,13 @@ def STRICT_WQM : PseudoInstSI <(outs unknown:$vdst), (ins unknown:$src0)>;
 }
 
 } // End let hasSideEffects = 0, mayLoad = 0, mayStore = 0, Uses = [EXEC]
+
+def WWM_COPY : SPseudoInstSI <
+  (outs unknown:$dst), (ins unknown:$src)> {
+  let hasSideEffects = 0;
+  let isAsCheapAsAMove = 1;
+  let isConvergent = 1;
+}
 
 def ENTER_STRICT_WWM : SPseudoInstSI <(outs SReg_1:$sdst), (ins i64imm:$src0)> {
   let Uses = [EXEC];
@@ -489,7 +507,7 @@ def SI_ILLEGAL_COPY : SPseudoInstSI <
 
 // Branch on undef scc. Used to avoid intermediate copy from
 // IMPLICIT_DEF to SCC.
-def SI_BR_UNDEF : SPseudoInstSI <(outs), (ins sopp_brtarget:$simm16)> {
+def SI_BR_UNDEF : SPseudoInstSI <(outs), (ins SOPPBrTarget:$simm16)> {
   let isTerminator = 1;
   let usesCustomInserter = 1;
   let isBranch = 1;
@@ -921,6 +939,9 @@ defm SI_SPILL_AV352 : SI_SPILL_VGPR <AV_352, 1>;
 defm SI_SPILL_AV384 : SI_SPILL_VGPR <AV_384, 1>;
 defm SI_SPILL_AV512 : SI_SPILL_VGPR <AV_512, 1>;
 defm SI_SPILL_AV1024 : SI_SPILL_VGPR <AV_1024, 1>;
+
+let isConvergent = 1 in
+defm SI_SPILL_WWM_V32 : SI_SPILL_VGPR <VGPR_32>;
 
 def SI_PC_ADD_REL_OFFSET : SPseudoInstSI <
   (outs SReg_64:$dst),
@@ -1355,66 +1376,6 @@ foreach Index = 0-15 in {
   >;
 }
 
-
-def : Pat <
-  (extract_subvector v4i16:$vec, (i32 0)),
-  (v2i16 (EXTRACT_SUBREG v4i16:$vec, sub0))
->;
-
-def : Pat <
-  (extract_subvector v4i16:$vec, (i32 2)),
-  (v2i16 (EXTRACT_SUBREG v4i16:$vec, sub1))
->;
-
-def : Pat <
-  (extract_subvector v4f16:$vec, (i32 0)),
-  (v2f16 (EXTRACT_SUBREG v4f16:$vec, sub0))
->;
-
-def : Pat <
-  (extract_subvector v4f16:$vec, (i32 2)),
-  (v2f16 (EXTRACT_SUBREG v4f16:$vec, sub1))
->;
-
-def : Pat <
-  (extract_subvector v8i16:$vec, (i32 0)),
-  (v4i16 (EXTRACT_SUBREG v8i16:$vec, sub0_sub1))
->;
-
-def : Pat <
-  (extract_subvector v8i16:$vec, (i32 4)),
-  (v4i16 (EXTRACT_SUBREG v8i16:$vec, sub2_sub3))
->;
-
-def : Pat <
-  (extract_subvector v8f16:$vec, (i32 0)),
-  (v4f16 (EXTRACT_SUBREG v8f16:$vec, sub0_sub1))
->;
-
-def : Pat <
-  (extract_subvector v8f16:$vec, (i32 4)),
-  (v4f16 (EXTRACT_SUBREG v8f16:$vec, sub2_sub3))
->;
-
-def : Pat <
-  (extract_subvector v16i16:$vec, (i32 0)),
-  (v8i16 (EXTRACT_SUBREG v16i16:$vec, sub0_sub1_sub2_sub3))
->;
-
-def : Pat <
-  (extract_subvector v16i16:$vec, (i32 8)),
-  (v8i16 (EXTRACT_SUBREG v16i16:$vec, sub4_sub5_sub6_sub7))
->;
-
-def : Pat <
-  (extract_subvector v16f16:$vec, (i32 0)),
-  (v8f16 (EXTRACT_SUBREG v16f16:$vec, sub0_sub1_sub2_sub3))
->;
-
-def : Pat <
-  (extract_subvector v16f16:$vec, (i32 8)),
-  (v8f16 (EXTRACT_SUBREG v16f16:$vec, sub4_sub5_sub6_sub7))
->;
 
 foreach Index = 0-31 in {
   def Extract_Element_v32i32_#Index : Extract_Element <

@@ -8,57 +8,6 @@
 
 import os, pathlib
 
-header_restrictions = {
-    "barrier": "!defined(_LIBCPP_HAS_NO_THREADS)",
-    "future": "!defined(_LIBCPP_HAS_NO_THREADS)",
-    "latch": "!defined(_LIBCPP_HAS_NO_THREADS)",
-    "mutex": "!defined(_LIBCPP_HAS_NO_THREADS)",
-    "semaphore": "!defined(_LIBCPP_HAS_NO_THREADS)",
-    "shared_mutex": "!defined(_LIBCPP_HAS_NO_THREADS)",
-    "stdatomic.h": "__cplusplus > 202002L && !defined(_LIBCPP_HAS_NO_THREADS)",
-    "thread": "!defined(_LIBCPP_HAS_NO_THREADS)",
-    "filesystem": "!defined(_LIBCPP_HAS_NO_FILESYSTEM_LIBRARY)",
-    # TODO(LLVM-17): simplify this to __cplusplus >= 202002L
-    "coroutine": "(defined(__cpp_impl_coroutine) && __cpp_impl_coroutine >= 201902L) || (defined(__cpp_coroutines) && __cpp_coroutines >= 201703L)",
-    "clocale": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "codecvt": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "fstream": "!defined(_LIBCPP_HAS_NO_LOCALIZATION) && !defined(_LIBCPP_HAS_NO_FSTREAM)",
-    "iomanip": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "ios": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "iostream": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "istream": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "locale.h": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "locale": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "ostream": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "regex": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "sstream": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "streambuf": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "strstream": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
-    "wctype.h": "!defined(_LIBCPP_HAS_NO_WIDE_CHARACTERS)",
-    "cwctype": "!defined(_LIBCPP_HAS_NO_WIDE_CHARACTERS)",
-    "cwchar": "!defined(_LIBCPP_HAS_NO_WIDE_CHARACTERS)",
-    "wchar.h": "!defined(_LIBCPP_HAS_NO_WIDE_CHARACTERS)",
-    "experimental/algorithm": "__cplusplus >= 201103L",
-    "experimental/deque": "__cplusplus >= 201103L",
-    "experimental/forward_list": "__cplusplus >= 201103L",
-    "experimental/functional": "__cplusplus >= 201103L",
-    "experimental/iterator": "__cplusplus >= 201103L",
-    "experimental/list": "__cplusplus >= 201103L",
-    "experimental/map": "__cplusplus >= 201103L",
-    "experimental/memory_resource": "__cplusplus >= 201103L",
-    "experimental/propagate_const": "__cplusplus >= 201103L",
-    "experimental/regex": "!defined(_LIBCPP_HAS_NO_LOCALIZATION) && __cplusplus >= 201103L",
-    "experimental/set": "__cplusplus >= 201103L",
-    "experimental/simd": "__cplusplus >= 201103L",
-    "experimental/span": "__cplusplus >= 201103L",
-    "experimental/string": "__cplusplus >= 201103L",
-    "experimental/type_traits": "__cplusplus >= 201103L",
-    "experimental/unordered_map": "__cplusplus >= 201103L",
-    "experimental/unordered_set": "__cplusplus >= 201103L",
-    "experimental/utility": "__cplusplus >= 201103L",
-    "experimental/vector": "__cplusplus >= 201103L",
-}
-
 lit_header_restrictions = {
     "barrier": "// UNSUPPORTED: no-threads, c++03, c++11, c++14, c++17",
     "clocale": "// UNSUPPORTED: no-localization",
@@ -78,7 +27,6 @@ lit_header_restrictions = {
     "experimental/regex": "// UNSUPPORTED: no-localization, c++03",
     "experimental/set": "// UNSUPPORTED: c++03",
     "experimental/simd": "// UNSUPPORTED: c++03",
-    "experimental/span": "// UNSUPPORTED: c++03",
     "experimental/string": "// UNSUPPORTED: c++03",
     "experimental/type_traits": "// UNSUPPORTED: c++03",
     "experimental/unordered_map": "// UNSUPPORTED: c++03",
@@ -86,7 +34,7 @@ lit_header_restrictions = {
     "experimental/utility": "// UNSUPPORTED: c++03",
     "experimental/vector": "// UNSUPPORTED: c++03",
     "filesystem": "// UNSUPPORTED: no-filesystem, c++03, c++11, c++14",
-    "fstream": "// UNSUPPORTED: no-localization, no-fstream",
+    "fstream": "// UNSUPPORTED: no-localization, no-filesystem",
     "future": "// UNSUPPORTED: no-threads, c++03",
     "iomanip": "// UNSUPPORTED: no-localization",
     "ios": "// UNSUPPORTED: no-localization",
@@ -102,6 +50,7 @@ lit_header_restrictions = {
     "shared_mutex": "// UNSUPPORTED: no-threads, c++03, c++11",
     "sstream": "// UNSUPPORTED: no-localization",
     "stdatomic.h": "// UNSUPPORTED: no-threads, c++03, c++11, c++14, c++17, c++20",
+    "stop_token": "// UNSUPPORTED: no-threads, c++03, c++11, c++14, c++17",
     "streambuf": "// UNSUPPORTED: no-localization",
     "strstream": "// UNSUPPORTED: no-localization",
     "thread": "// UNSUPPORTED: no-threads, c++03",
@@ -113,13 +62,25 @@ private_headers_still_public_in_modules = [
     "__assert",
     "__config",
     "__config_site.in",
-    "__debug",
     "__hash_table",
     "__threading_support",
     "__tree",
     "__undef_macros",
     "__verbose_abort",
 ]
+
+# Headers that can't be included on their own. Most of these are conceptually
+# part of another header that were split out just for organization, but aren't
+# meant to be included by anything else.
+non_standalone_headers = frozenset((
+    # Alternate implementations for __algorithm/pstl_backends/cpu_backends/backend.h
+    "__algorithm/pstl_backends/cpu_backends/serial.h",
+    "__algorithm/pstl_backends/cpu_backends/thread.h",
+
+    # Alternate implementations for locale.
+    "__locale_dir/locale_base_api/bsd_locale_defaults.h",
+    "__locale_dir/locale_base_api/bsd_locale_fallbacks.h",
+))
 
 # This table was produced manually, by grepping the TeX source of the Standard's
 # library clauses for the string "#include". Each header's synopsis contains
@@ -190,12 +151,5 @@ private_headers = sorted(
     p.relative_to(include).as_posix() for p in include.rglob("*") if is_header(p)
                                                                      and str(p.relative_to(include)).startswith("__")
                                                                      and not p.name.startswith("pstl")
+                                                                     and str(p.relative_to(include)) not in non_standalone_headers
 )
-variables = {
-    "toplevel_headers": toplevel_headers,
-    "experimental_headers": experimental_headers,
-    "public_headers": public_headers,
-    "private_headers": private_headers,
-    "header_restrictions": header_restrictions,
-    "private_headers_still_public_in_modules": private_headers_still_public_in_modules,
-}

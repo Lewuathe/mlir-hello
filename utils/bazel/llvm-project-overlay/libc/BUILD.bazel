@@ -26,6 +26,11 @@ PRINTF_COPTS = [
     "LIBC_COPT_PRINTF_DISABLE_WRITE_INT",
 ]
 
+MEMORY_COPTS = [
+    # "LIBC_COPT_MEMCPY_X86_USE_REPMOVSB_FROM_SIZE=0",
+    # "LIBC_COPT_MEMCPY_X86_USE_SOFTWARE_PREFETCHING",
+]
+
 # A flag to pick which `mpfr` to use for math tests.
 # Usage: `--@llvm-project//libc:mpfr=<disable|external|system>`.
 # Flag documentation: https://bazel.build/extending/config
@@ -81,7 +86,10 @@ libc_support_library(
 libc_support_library(
     name = "__support_macros_properties_cpu_features",
     hdrs = ["src/__support/macros/properties/cpu_features.h"],
-    deps = [":libc_root"],
+    deps = [
+        "__support_macros_properties_architectures",
+        ":libc_root",
+    ],
 )
 
 libc_support_library(
@@ -253,7 +261,10 @@ libc_support_library(
 libc_support_library(
     name = "__support_cpp_type_traits",
     hdrs = ["src/__support/CPP/type_traits.h"],
-    deps = [":libc_root"],
+    deps = [
+        ":__support_macros_attributes",
+        ":libc_root",
+    ],
 )
 
 libc_support_library(
@@ -310,10 +321,13 @@ libc_support_library(
     hdrs = [
         "src/__support/float_to_string.h",
         "src/__support/ryu_constants.h",
+        "src/__support/ryu_long_double_constants.h",
     ],
+    defines = ["LIBC_COPT_FLOAT_TO_STR_USE_MEGA_LONG_DOUBLE_TABLE"],
     deps = [
         ":__support_common",
         ":__support_cpp_type_traits",
+        ":__support_fputil_dyadic_float",
         ":__support_fputil_fp_bits",
         ":__support_libc_assert",
         ":__support_uint",
@@ -439,8 +453,10 @@ libc_support_library(
         ":__support_cpp_limits",
         ":__support_cpp_optional",
         ":__support_ctype_utils",
+        ":__support_fputil_dyadic_float",
         ":__support_fputil_fenv_impl",
         ":__support_fputil_fp_bits",
+        ":__support_fputil_rounding_mode",
         ":__support_str_to_integer",
         ":__support_str_to_num_result",
         ":__support_uint128",
@@ -526,6 +542,7 @@ libc_support_library(
         ":__support_cpp_optional",
         ":__support_fputil_fenv_impl",
         ":__support_fputil_fp_bits",
+        ":__support_fputil_rounding_mode",
         ":libc_root",
     ],
 )
@@ -549,6 +566,15 @@ libc_support_library(
 )
 
 libc_support_library(
+    name = "__support_fputil_rounding_mode",
+    hdrs = ["src/__support/FPUtil/rounding_mode.h"],
+    deps = [
+        ":__support_macros_attributes",
+        ":libc_root",
+    ],
+)
+
+libc_support_library(
     name = "__support_fputil_float_properties",
     hdrs = ["src/__support/FPUtil/FloatProperties.h"],
     deps = [
@@ -566,9 +592,23 @@ libc_support_library(
         ":__support_builtin_wrappers",
         ":__support_common",
         ":__support_cpp_bit",
+        ":__support_cpp_type_traits",
+        ":__support_fputil_float_properties",
+        ":__support_fputil_platform_defs",
+        ":__support_uint128",
+        ":libc_root",
+    ],
+)
+
+libc_support_library(
+    name = "__support_fputil_fpbits_str",
+    hdrs = ["src/__support/FPUtil/fpbits_str.h"],
+    deps = [
+        ":__support_common",
         ":__support_cpp_string",
         ":__support_cpp_type_traits",
         ":__support_fputil_float_properties",
+        ":__support_fputil_fp_bits",
         ":__support_fputil_platform_defs",
         ":__support_integer_to_string",
         ":__support_uint128",
@@ -587,6 +627,7 @@ libc_support_library(
         ":__support_fputil_basic_operations",
         ":__support_fputil_fenv_impl",
         ":__support_fputil_fp_bits",
+        ":__support_fputil_rounding_mode",
         ":__support_uint128",
         ":libc_root",
     ],
@@ -618,6 +659,7 @@ libc_support_library(
         ":__support_cpp_type_traits",
         ":__support_fputil_fenv_impl",
         ":__support_fputil_fp_bits",
+        ":__support_fputil_rounding_mode",
         ":libc_root",
     ],
 )
@@ -669,6 +711,7 @@ libc_support_library(
         ":__support_fputil_fenv_impl",
         ":__support_fputil_fp_bits",
         ":__support_fputil_platform_defs",
+        ":__support_fputil_rounding_mode",
         ":__support_uint128",
         ":libc_root",
     ],
@@ -697,6 +740,7 @@ libc_support_library(
         ":__support_fputil_fenv_impl",
         ":__support_fputil_float_properties",
         ":__support_fputil_fp_bits",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_attributes",
         ":__support_macros_optimization",
         ":__support_macros_properties_cpu_features",
@@ -759,6 +803,7 @@ libc_support_library(
         ":__support_common",
         ":__support_fputil_multiply_add",
         ":__support_number_pair",
+        ":libc_root",
     ],
 )
 
@@ -772,6 +817,7 @@ libc_support_library(
         ":__support_fputil_multiply_add",
         ":__support_macros_optimization",
         ":__support_uint",
+        ":libc_root",
     ],
 )
 
@@ -1107,7 +1153,17 @@ libc_support_library(
     deps = [
         ":__support_common",
         ":__support_fputil_dyadic_float",
+        ":__support_uint128",
         ":common_constants",
+    ],
+)
+
+libc_math_function(
+    name = "erff",
+    additional_deps = [
+        ":__support_fputil_multiply_add",
+        ":__support_fputil_polyeval",
+        ":__support_macros_optimization",
     ],
 )
 
@@ -1118,6 +1174,7 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":__support_macros_properties_cpu_features",
         ":common_constants",
@@ -1131,6 +1188,7 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":common_constants",
     ],
@@ -1143,6 +1201,7 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":common_constants",
         ":explogxf",
@@ -1156,7 +1215,9 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
+        ":__support_macros_properties_cpu_features",
         ":explogxf",
     ],
 )
@@ -1274,6 +1335,7 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":common_constants",
         ":explogxf",
@@ -1287,6 +1349,7 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":common_constants",
         ":explogxf",
@@ -1300,6 +1363,7 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":__support_macros_properties_cpu_features",
         ":common_constants",
@@ -1382,6 +1446,7 @@ libc_math_function(
         ":__support_fputil_multiply_add",
         ":__support_fputil_nearest_integer",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":inv_trigf_utils",
         ":math_utils",
@@ -1564,6 +1629,7 @@ libc_math_function(
     additional_deps = [
         ":__support_fputil_fma",
         ":__support_fputil_multiply_add",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":__support_macros_properties_cpu_features",
         ":sincosf_utils",
@@ -1576,6 +1642,7 @@ libc_math_function(
         ":__support_fputil_fma",
         ":__support_fputil_multiply_add",
         ":__support_fputil_polyeval",
+        ":__support_fputil_rounding_mode",
         ":__support_macros_optimization",
         ":__support_macros_properties_cpu_features",
         ":range_reduction",
@@ -1678,7 +1745,89 @@ libc_math_function(name = "scalbnf")
 
 libc_math_function(name = "scalbnl")
 
+############################## inttypes targets ##############################
+
+libc_function(
+    name = "imaxabs",
+    srcs = ["src/inttypes/imaxabs.cpp"],
+    hdrs = ["src/inttypes/imaxabs.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
+
+libc_function(
+    name = "imaxdiv",
+    srcs = ["src/inttypes/imaxdiv.cpp"],
+    hdrs = ["src/inttypes/imaxdiv.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
+
 ############################### stdlib targets ###############################
+
+libc_function(
+    name = "abs",
+    srcs = ["src/stdlib/abs.cpp"],
+    hdrs = ["src/stdlib/abs.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
+
+libc_function(
+    name = "labs",
+    srcs = ["src/stdlib/labs.cpp"],
+    hdrs = ["src/stdlib/labs.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
+
+libc_function(
+    name = "llabs",
+    srcs = ["src/stdlib/llabs.cpp"],
+    hdrs = ["src/stdlib/llabs.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
+
+libc_function(
+    name = "div",
+    srcs = ["src/stdlib/div.cpp"],
+    hdrs = ["src/stdlib/div.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
+
+libc_function(
+    name = "ldiv",
+    srcs = ["src/stdlib/ldiv.cpp"],
+    hdrs = ["src/stdlib/ldiv.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
+
+libc_function(
+    name = "lldiv",
+    srcs = ["src/stdlib/lldiv.cpp"],
+    hdrs = ["src/stdlib/lldiv.h"],
+    deps = [
+        ":__support_common",
+        ":__support_integer_operations",
+    ],
+)
 
 libc_function(
     name = "atoi",
@@ -1733,12 +1882,32 @@ libc_function(
     ],
 )
 
+libc_support_library(
+    name = "qsort_util",
+    hdrs = ["src/stdlib/qsort_util.h"],
+    deps = [
+        ":__support_common",
+        ":__support_macros_attributes",
+    ],
+)
+
 libc_function(
     name = "qsort",
     srcs = ["src/stdlib/qsort.cpp"],
     hdrs = ["src/stdlib/qsort.h"],
     deps = [
         ":__support_common",
+        ":qsort_util",
+    ],
+)
+
+libc_function(
+    name = "qsort_r",
+    srcs = ["src/stdlib/qsort_r.cpp"],
+    hdrs = ["src/stdlib/qsort_r.h"],
+    deps = [
+        ":__support_common",
+        ":qsort_util",
     ],
 )
 
@@ -1834,21 +2003,29 @@ libc_support_library(
         "src/string/memory_utils/op_aarch64.h",
         "src/string/memory_utils/op_builtin.h",
         "src/string/memory_utils/op_generic.h",
+        "src/string/memory_utils/op_riscv.h",
         "src/string/memory_utils/op_x86.h",
         "src/string/memory_utils/utils.h",
     ],
+    defines = MEMORY_COPTS,
     textual_hdrs = [
+        "src/string/memory_utils/aarch64/bcmp_implementations.h",
         "src/string/memory_utils/aarch64/memcmp_implementations.h",
         "src/string/memory_utils/aarch64/memcpy_implementations.h",
         "src/string/memory_utils/bcmp_implementations.h",
         "src/string/memory_utils/bzero_implementations.h",
+        "src/string/memory_utils/generic/aligned_access.h",
+        "src/string/memory_utils/generic/byte_per_byte.h",
         "src/string/memory_utils/memcmp_implementations.h",
         "src/string/memory_utils/memcpy_implementations.h",
+        "src/string/memory_utils/memmem_implementations.h",
         "src/string/memory_utils/memmove_implementations.h",
         "src/string/memory_utils/memset_implementations.h",
+        "src/string/memory_utils/riscv/bcmp_implementations.h",
+        "src/string/memory_utils/riscv/memcpy_implementations.h",
         "src/string/memory_utils/strcmp_implementations.h",
         "src/string/memory_utils/strstr_implementations.h",
-        "src/string/memory_utils/memmem_implementations.h",
+        "src/string/memory_utils/x86_64/bcmp_implementations.h",
         "src/string/memory_utils/x86_64/memcmp_implementations.h",
         "src/string/memory_utils/x86_64/memcpy_implementations.h",
     ],
@@ -2451,6 +2628,7 @@ libc_support_library(
         ":__support_fputil_fenv_impl",
         ":__support_fputil_float_properties",
         ":__support_fputil_fp_bits",
+        ":__support_fputil_rounding_mode",
         ":__support_integer_to_string",
         ":__support_libc_assert",
         ":__support_uint",

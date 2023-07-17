@@ -12,6 +12,7 @@
 
 #include "flang/Frontend/CompilerInvocation.h"
 #include "flang/Common/Fortran-features.h"
+#include "flang/Common/OpenMP-features.h"
 #include "flang/Common/Version.h"
 #include "flang/Frontend/CodeGenOptions.h"
 #include "flang/Frontend/PreprocessorOptions.h"
@@ -734,8 +735,8 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
             res.getLangOpts().OpenMPVersion, diags)) {
       res.getLangOpts().OpenMPVersion = Version;
     }
-    if (args.hasArg(clang::driver::options::OPT_fopenmp_is_device)) {
-      res.getLangOpts().OpenMPIsDevice = 1;
+    if (args.hasArg(clang::driver::options::OPT_fopenmp_is_target_device)) {
+      res.getLangOpts().OpenMPIsTargetDevice = 1;
 
       // Get OpenMP host file path if any and report if a non existent file is
       // found
@@ -919,6 +920,10 @@ bool CompilerInvocation::createFromArgs(
     res.loweringOpts.setLowerToHighLevelFIR(true);
   }
 
+  if (args.hasArg(clang::driver::options::OPT_flang_experimental_polymorphism)) {
+    res.loweringOpts.setPolymorphicTypeImpl(true);
+  }
+
   success &= parseFrontendArgs(res.getFrontendOpts(), args, diags);
   parseTargetArgs(res.getTargetOpts(), args);
   parsePreprocessorArgs(res.getPreprocessorOpts(), args);
@@ -1005,7 +1010,6 @@ void CompilerInvocation::setDefaultFortranOpts() {
 void CompilerInvocation::setDefaultPredefinitions() {
   auto &fortranOptions = getFortranOpts();
   const auto &frontendOptions = getFrontendOpts();
-
   // Populate the macro list with version numbers and other predefinitions.
   fortranOptions.predefinitions.emplace_back("__flang__", "1");
   fortranOptions.predefinitions.emplace_back("__flang_major__",
@@ -1018,11 +1022,12 @@ void CompilerInvocation::setDefaultPredefinitions() {
   // Add predefinitions based on extensions enabled
   if (frontendOptions.features.IsEnabled(
           Fortran::common::LanguageFeature::OpenACC)) {
-    fortranOptions.predefinitions.emplace_back("_OPENACC", "202011");
+    fortranOptions.predefinitions.emplace_back("_OPENACC", "202211");
   }
   if (frontendOptions.features.IsEnabled(
           Fortran::common::LanguageFeature::OpenMP)) {
-    fortranOptions.predefinitions.emplace_back("_OPENMP", "201511");
+    Fortran::common::setOpenMPMacro(getLangOpts().OpenMPVersion,
+                                    fortranOptions.predefinitions);
   }
   llvm::Triple targetTriple{llvm::Triple(this->targetOpts.triple)};
   if (targetTriple.getArch() == llvm::Triple::ArchType::x86_64) {
@@ -1106,6 +1111,9 @@ void CompilerInvocation::setSemanticsOpts(
   semanticsContext->targetCharacteristics()
       .set_compilerOptionsString(allCompilerInvocOpts)
       .set_compilerVersionString(version);
+
+  if (targetTriple.isPPC())
+    semanticsContext->targetCharacteristics().set_isPPC(true);
 }
 
 /// Set \p loweringOptions controlling lowering behavior based

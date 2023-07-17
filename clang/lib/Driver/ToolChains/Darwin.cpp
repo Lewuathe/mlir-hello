@@ -74,7 +74,8 @@ llvm::Triple::ArchType darwin::getArchTypeForMachOArchName(StringRef Str) {
       .Default(llvm::Triple::UnknownArch);
 }
 
-void darwin::setTripleTypeForMachOArchName(llvm::Triple &T, StringRef Str) {
+void darwin::setTripleTypeForMachOArchName(llvm::Triple &T, StringRef Str,
+                                           const ArgList &Args) {
   const llvm::Triple::ArchType Arch = getArchTypeForMachOArchName(Str);
   llvm::ARM::ArchKind ArchKind = llvm::ARM::parseArch(Str);
   T.setArch(Arch);
@@ -84,6 +85,11 @@ void darwin::setTripleTypeForMachOArchName(llvm::Triple &T, StringRef Str) {
   if (ArchKind == llvm::ARM::ArchKind::ARMV6M ||
       ArchKind == llvm::ARM::ArchKind::ARMV7M ||
       ArchKind == llvm::ARM::ArchKind::ARMV7EM) {
+    // Don't reject -mios-version-min= if we have an iOS triple.
+    if (T.isiOS())
+      for (Arg *A : Args.filtered(options::OPT_mios_version_min_EQ))
+        A->ignoreTargetSpecific();
+
     T.setOS(llvm::Triple::UnknownOS);
     T.setObjectFormat(llvm::Triple::MachO);
   }
@@ -626,9 +632,9 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // It seems that the 'e' option is completely ignored for dynamic executables
   // (the default), and with static executables, the last one wins, as expected.
-  Args.AddAllArgs(CmdArgs, {options::OPT_d_Flag, options::OPT_s, options::OPT_t,
-                            options::OPT_Z_Flag, options::OPT_u_Group,
-                            options::OPT_e, options::OPT_r});
+  Args.AddAllArgs(CmdArgs,
+                  {options::OPT_d_Flag, options::OPT_s, options::OPT_t,
+                   options::OPT_Z_Flag, options::OPT_u_Group, options::OPT_r});
 
   // Forward -ObjC when either -ObjC or -ObjC++ is used, to force loading
   // members of static archive libraries which implement Objective-C classes or

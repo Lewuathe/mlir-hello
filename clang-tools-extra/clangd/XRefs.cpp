@@ -1362,10 +1362,9 @@ maybeFindIncludeReferences(ParsedAST &AST, Position Pos,
     return std::nullopt;
 
   // Add the #include line to the references list.
-  auto IncludeLen = std::string{"#include"}.length() + Inc.Written.length() + 1;
   ReferencesResult::Reference Result;
-  Result.Loc.range = clangd::Range{Position{Inc.HashLine, 0},
-                                   Position{Inc.HashLine, (int)IncludeLen}};
+  Result.Loc.range =
+      rangeTillEOL(SM.getBufferData(SM.getMainFileID()), Inc.HashOffset);
   Result.Loc.uri = URIMainFile;
   Results.References.push_back(std::move(Result));
 
@@ -1408,7 +1407,7 @@ ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
       if (Refs != IDToRefs.end()) {
         for (const auto &Ref : Refs->second) {
           ReferencesResult::Reference Result;
-          Result.Loc.range = Ref.Rng;
+          Result.Loc.range = Ref.toRange(SM);
           Result.Loc.uri = URIMainFile;
           if (Ref.IsDefinition) {
             Result.Attributes |= ReferencesResult::Declaration;

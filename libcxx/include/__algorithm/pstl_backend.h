@@ -98,6 +98,15 @@ implemented, all the algorithms will eventually forward to the basis algorithms 
   template <class _ExecutionPolicy, class _Iterator, class _SizeT, class _Tp>
   void __pstl_fill_n(_Backend, _Iterator __first, _SizeT __n, const _Tp& __value);
 
+  template <class _ExecutionPolicy, class _Iterator, class _Generator>
+  void __pstl_generate(_Backend, _Iterator __first, _Iterator __last, _Generator __gen);
+
+  template <class _ExecutionPolicy, class _Iterator, class _Predicate>
+  void __pstl_is_partitioned(_Backend, _Iterator __first, _Iterator __last, _Predicate __pred);
+
+  template <class _ExecutionPolicy, class _Iterator, class _Size, class _Generator>
+  void __pstl_generator_n(_Backend, _Iterator __first, _Size __n, _Generator __gen);
+
   template <class _ExecutionPolicy, class _terator1, class _Iterator2, class _OutIterator, class _Comp>
   _OutIterator __pstl_merge(_Backend,
                             _Iterator1 __first1,
@@ -112,6 +121,34 @@ implemented, all the algorithms will eventually forward to the basis algorithms 
 
   temlate <class _ExecutionPolicy, class _Iterator>
   __iter_value_type<_Iterator> __pstl_reduce(_Backend, _Iterator __first, _Iterator __last);
+
+  template <class _ExecuitonPolicy, class _Iterator, class _Tp>
+  __iter_diff_t<_Iterator> __pstl_count(_Backend, _Iterator __first, _Iterator __last, const _Tp& __value);
+
+  template <class _ExecutionPolicy, class _Iterator, class _Predicate>
+  __iter_diff_t<_Iterator> __pstl_count_if(_Backend, _Iterator __first, _Iterator __last, _Predicate __pred);
+
+  template <class _ExecutionPolicy, class _Iterator, class _Tp>
+  void __pstl_replace(_Backend, _Iterator __first, _Iterator __last, const _Tp& __old_value, const _Tp& __new_value);
+
+  template <class _ExecutionPolicy, class _Iterator, class _Pred, class _Tp>
+  void __pstl_replace_if(_Backend, _Iterator __first, _Iterator __last, _Pred __pred, const _Tp& __new_value);
+
+  template <class _ExecutionPolicy, class _Iterator, class _OutIterator, class _Tp>
+  void __pstl_replace_copy(_Backend,
+                           _Iterator __first,
+                           _Iterator __last,
+                           _OutIterator __result,
+                           const _Tp& __old_value,
+                           const _Tp& __new_value);
+
+  template <class _ExecutionPolicy, class _Iterator, class _OutIterator, class _Pred, class _Tp>
+  void __pstl_replace_copy_if(_Backend,
+                              _Iterator __first,
+                              _Iterator __last,
+                              _OutIterator __result,
+                              _Pred __pred,
+                              const _Tp& __new_value);
 
 // TODO: Complete this list
 
@@ -132,7 +169,8 @@ struct __select_backend<std::execution::unsequenced_policy> {
 };
 #  endif
 
-#  if defined(_LIBCPP_PSTL_CPU_BACKEND_SERIAL) || defined(_LIBCPP_PSTL_CPU_BACKEND_THREAD)
+#  if defined(_LIBCPP_PSTL_CPU_BACKEND_SERIAL) || defined(_LIBCPP_PSTL_CPU_BACKEND_THREAD) ||                          \
+      defined(_LIBCPP_PSTL_CPU_BACKEND_LIBDISPATCH)
 template <>
 struct __select_backend<std::execution::parallel_policy> {
   using type = __cpu_backend_tag;

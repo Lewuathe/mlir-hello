@@ -512,8 +512,6 @@ bool AMDGPUCallLowering::lowerFormalArgumentsKernel(
   const SITargetLowering &TLI = *getTLI<SITargetLowering>();
   const DataLayout &DL = F.getParent()->getDataLayout();
 
-  Info->allocateKnownAddressLDSGlobal(F);
-
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(F.getCallingConv(), F.isVarArg(), MF, ArgLocs, F.getContext());
 
@@ -521,7 +519,7 @@ bool AMDGPUCallLowering::lowerFormalArgumentsKernel(
 
   unsigned i = 0;
   const Align KernArgBaseAlign(16);
-  const unsigned BaseOffset = Subtarget->getExplicitKernelArgOffset(F);
+  const unsigned BaseOffset = Subtarget->getExplicitKernelArgOffset();
   uint64_t ExplicitArgOffset = 0;
 
   // TODO: Align down to dword alignment and extract bits for extending loads.
@@ -595,8 +593,6 @@ bool AMDGPUCallLowering::lowerFormalArguments(
   const GCNSubtarget &Subtarget = MF.getSubtarget<GCNSubtarget>();
   const SIRegisterInfo *TRI = Subtarget.getRegisterInfo();
   const DataLayout &DL = F.getParent()->getDataLayout();
-
-  Info->allocateKnownAddressLDSGlobal(F);
 
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CC, F.isVarArg(), MF, ArgLocs, F.getContext());

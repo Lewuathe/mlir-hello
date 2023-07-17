@@ -12,6 +12,7 @@
 #include "../ClangTidyOptions.h"
 #include "../utils/OptionsUtils.h"
 #include "clang-include-cleaner/Analysis.h"
+#include "clang-include-cleaner/IncludeSpeller.h"
 #include "clang-include-cleaner/Record.h"
 #include "clang-include-cleaner/Types.h"
 #include "clang/AST/ASTContext.h"
@@ -33,6 +34,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
 #include <optional>
 #include <string>
@@ -44,7 +46,7 @@ namespace clang::tidy::misc {
 
 namespace {
 struct MissingIncludeInfo {
-  SourceLocation SymRefLocation;
+  include_cleaner::SymbolReference SymRef;
   include_cleaner::Header Missing;
 };
 } // namespace
@@ -133,7 +135,7 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
              if (!Satisfied && !Providers.empty() &&
                  Ref.RT == include_cleaner::RefType::Explicit &&
                  !shouldIgnore(Providers.front()))
-               Missing.push_back({Ref.RefLocation, Providers.front()});
+               Missing.push_back({Ref, Providers.front()});
            });
 
   std::vector<const include_cleaner::Include *> Unused;
@@ -170,7 +172,8 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
 
   for (const auto *Inc : Unused) {
     diag(Inc->HashLocation, "included header %0 is not used directly")
-        << Inc->quote()
+        << llvm::sys::path::filename(Inc->Spelled,
+                                     llvm::sys::path::Style::posix)
         << FixItHint::CreateRemoval(CharSourceRange::getCharRange(
                SM->translateLineCol(SM->getMainFileID(), Inc->Line, 1),
                SM->translateLineCol(SM->getMainFileID(), Inc->Line + 1, 1)));
@@ -180,7 +183,7 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
                                          FileStyle->IncludeStyle);
   for (const auto &Inc : Missing) {
     std::string Spelling =
-        include_cleaner::spellHeader(Inc.Missing, *HS, MainFile);
+        include_cleaner::spellHeader({Inc.Missing, *HS, MainFile});
     bool Angled = llvm::StringRef{Spelling}.starts_with("<");
     // We might suggest insertion of an existing include in edge cases, e.g.,
     // include is present in a PP-disabled region, or spelling of the header
@@ -189,9 +192,9 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
     if (auto Replacement =
             HeaderIncludes.insert(llvm::StringRef{Spelling}.trim("\"<>"),
                                   Angled, tooling::IncludeDirective::Include))
-      diag(SM->getSpellingLoc(Inc.SymRefLocation),
-           "no header providing %0 is directly included")
-          << Spelling
+      diag(SM->getSpellingLoc(Inc.SymRef.RefLocation),
+           "no header providing \"%0\" is directly included")
+          << Inc.SymRef.Target.name()
           << FixItHint::CreateInsertion(
                  SM->getComposedLoc(SM->getMainFileID(),
                                     Replacement->getOffset()),

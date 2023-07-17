@@ -13,9 +13,9 @@ func.func @inner_func_inlinable(%ptr : !llvm.ptr) -> i32 {
   llvm.intr.dbg.declare #variableAddr = %ptr : !llvm.ptr
   %byte = llvm.mlir.constant(43 : i8) : i8
   %true = llvm.mlir.constant(1 : i1) : i1
-  "llvm.intr.memset"(%ptr, %byte, %0, %true) : (!llvm.ptr, i8, i32, i1) -> ()
-  "llvm.intr.memmove"(%ptr, %ptr, %0, %true) : (!llvm.ptr, !llvm.ptr, i32, i1) -> ()
-  "llvm.intr.memcpy"(%ptr, %ptr, %0, %true) : (!llvm.ptr, !llvm.ptr, i32, i1) -> ()
+  "llvm.intr.memset"(%ptr, %byte, %0) <{isVolatile = true}> : (!llvm.ptr, i8, i32) -> ()
+  "llvm.intr.memmove"(%ptr, %ptr, %0) <{isVolatile = true}> : (!llvm.ptr, !llvm.ptr, i32) -> ()
+  "llvm.intr.memcpy"(%ptr, %ptr, %0) <{isVolatile = true}> : (!llvm.ptr, !llvm.ptr, i32) -> ()
   "llvm.intr.assume"(%true) : (i1) -> ()
   llvm.fence release
   %2 = llvm.atomicrmw add %ptr, %0 monotonic : !llvm.ptr, i32
@@ -54,13 +54,10 @@ func.func @test_inline(%ptr : !llvm.ptr) -> i32 {
 
 // -----
 
-llvm.metadata @metadata {
-  llvm.access_group @group
-  llvm.return
-}
+#group = #llvm.access_group<id = distinct[0]<>>
 
 llvm.func @inlinee(%ptr : !llvm.ptr) -> i32 {
-  %0 = llvm.load %ptr { access_groups = [@metadata::@group] } : !llvm.ptr -> i32
+  %0 = llvm.load %ptr { access_groups = [#group] } : !llvm.ptr -> i32
   llvm.return %0 : i32
 }
 
@@ -73,16 +70,13 @@ llvm.func @test_not_inline(%ptr : !llvm.ptr) -> i32 {
 
 // -----
 
-llvm.metadata @metadata {
-  llvm.access_group @group
-  llvm.return
-}
+#group = #llvm.access_group<id = distinct[0]<>>
 
 func.func private @with_mem_attr(%ptr : !llvm.ptr) {
   %0 = llvm.mlir.constant(42 : i32) : i32
   // Do not inline load/store operations that carry attributes requiring
   // handling while inlining, until this is supported by the inliner.
-  llvm.store %0, %ptr { access_groups = [@metadata::@group] }: i32, !llvm.ptr
+  llvm.store %0, %ptr { access_groups = [#group] }: i32, !llvm.ptr
   return
 }
 
