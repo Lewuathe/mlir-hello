@@ -454,6 +454,11 @@ template <class ELFT> void elf::createSyntheticSections() {
   in.igotPlt = std::make_unique<IgotPltSection>();
   add(*in.igotPlt);
 
+  if (config->emachine == EM_ARM) {
+    in.armCmseSGSection = std::make_unique<ArmCmseSGSection>();
+    add(*in.armCmseSGSection);
+  }
+
   // _GLOBAL_OFFSET_TABLE_ is defined relative to either .got.plt or .got. Treat
   // it as a relocation and ensure the referenced section is created.
   if (ElfSym::globalOffsetTable && config->emachine != EM_MIPS) {
@@ -595,6 +600,9 @@ template <class ELFT> void Writer<ELFT>::run() {
     if (auto e = buffer->commit())
       fatal("failed to write output '" + buffer->getPath() +
             "': " + toString(std::move(e)));
+
+    if (!config->cmseOutputLib.empty())
+      writeARMCmseImportLib<ELFT>();
   }
 }
 
@@ -657,7 +665,7 @@ static bool shouldKeepInSymtab(const Defined &sym) {
   // * --discard-locals is used.
   // * The symbol is in a SHF_MERGE section, which is normally the reason for
   //   the assembler keeping the .L symbol.
-  if (sym.getName().startswith(".L") &&
+  if (sym.getName().starts_with(".L") &&
       (config->discard == DiscardPolicy::Locals ||
        (sym.section && (sym.section->flags & SHF_MERGE))))
     return false;
@@ -1983,6 +1991,7 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
 
   removeUnusedSyntheticSections();
   script->diagnoseOrphanHandling();
+  script->diagnoseMissingSGSectionAddress();
 
   sortSections();
 
@@ -2035,6 +2044,9 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
         addPhdrForSection(part, SHT_MIPS_OPTIONS, PT_MIPS_OPTIONS, PF_R);
         addPhdrForSection(part, SHT_MIPS_ABIFLAGS, PT_MIPS_ABIFLAGS, PF_R);
       }
+      if (config->emachine == EM_RISCV)
+        addPhdrForSection(part, SHT_RISCV_ATTRIBUTES, PT_RISCV_ATTRIBUTES,
+                          PF_R);
     }
     Out::programHeaders->size = sizeof(Elf_Phdr) * mainPart->phdrs.size();
 
@@ -2131,6 +2143,7 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
     // static symbol table.
     finalizeSynthetic(in.symTab.get());
     finalizeSynthetic(in.ppc64LongBranchTarget.get());
+    finalizeSynthetic(in.armCmseSGSection.get());
   }
 
   // Relaxation to delete inter-basic block jumps created by basic block
@@ -2144,6 +2157,13 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
   // of finalizing other sections.
   for (OutputSection *sec : outputSections)
     sec->finalize();
+
+  script->checkMemoryRegions();
+
+  if (config->emachine == EM_ARM && !config->isLE && config->armBe8) {
+    addArmInputSectionMappingSymbols();
+    sortArmMappingSymbols();
+  }
 }
 
 // Ensure data sections are not mixed with executable sections when

@@ -20,6 +20,7 @@ add_clang_library(clangTidyMiscModule
   ConstCorrectnessCheck.cpp
   DefinitionsInHeadersCheck.cpp
   ConfusableIdentifierCheck.cpp
+  HeaderIncludeCycleCheck.cpp
   IncludeCleanerCheck.cpp
   MiscTidyModule.cpp
   MisleadingBidirectional.cpp
@@ -56,10 +57,13 @@ clang_target_link_libraries(clangTidyMiscModule
   clangASTMatchers
   clangBasic
   clangFormat
-  clangIncludeCleaner
   clangLex
   clangSerialization
   clangTooling
   clangToolingInclusions
   clangToolingInclusionsStdlib
+  )
+target_link_libraries(clangTidyMiscModule
+  PRIVATE
+  clangIncludeCleaner
   )

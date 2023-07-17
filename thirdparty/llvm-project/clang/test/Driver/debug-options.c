@@ -1,5 +1,4 @@
 // Check to make sure clang is somewhat picky about -g options.
-// rdar://10383444
 
 // Linux.
 // RUN: %clang -### -c -g %s -target x86_64-linux-gnu 2>&1 \
@@ -462,7 +461,7 @@
 // GDWARF64_ON:  "-gdwarf64"
 // GDWARF64_VER:  error: invalid argument '-gdwarf64' only allowed with 'DWARFv3 or greater'
 // GDWARF64_32ARCH: error: invalid argument '-gdwarf64' only allowed with '64 bit architecture'
-// GDWARF64_ELF: error: invalid argument '-gdwarf64' only allowed with 'ELF/XCOFF platforms'
+// GDWARF64_ELF: error: invalid argument '-gdwarf64' only allowed with 'ELF platforms'
 
 /// Default to -fno-dwarf-directory-asm for -fno-integrated-as before DWARF v5.
 // RUN: %clang -### -target x86_64 -c -gdwarf-2 %s 2>&1 | FileCheck --check-prefix=DIRECTORY %s

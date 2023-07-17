@@ -106,7 +106,7 @@ def TEST_TestType : DialectType<Test_Dialect,
 // Test Symbols
 //===----------------------------------------------------------------------===//
 
-def SymbolOp : TEST_Op<"symbol", [Symbol]> {
+def SymbolOp : TEST_Op<"symbol", [NoMemoryEffect, Symbol]> {
   let summary =  "operation which defines a new symbol";
   let arguments = (ins StrAttr:$sym_name,
                        OptionalAttr<StrAttr>:$sym_visibility);
@@ -3342,6 +3342,11 @@ def TestOpWithWrappedProperties : TEST_Op<"with_wrapped_properties"> {
   let arguments = (ins
     MyStructProperty:$prop
   );
+}
+
+def TestOpUsingPropertyInCustom : TEST_Op<"using_property_in_custom"> {
+  let assemblyFormat = "custom<UsingPropertyInCustom>($prop) attr-dict";
+  let arguments = (ins ArrayProperty<"int64_t", 3>:$prop);
 }
 
 // Op with a properties struct defined out-of-line. The struct has custom

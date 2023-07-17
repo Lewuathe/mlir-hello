@@ -188,12 +188,14 @@ template <class T, class Allocator, class Predicate>
 #include <__algorithm/lexicographical_compare_three_way.h>
 #include <__algorithm/min.h>
 #include <__assert> // all public C++ headers provide the assertion handler
+#include <__availability>
 #include <__config>
 #include <__iterator/distance.h>
 #include <__iterator/iterator_traits.h>
 #include <__iterator/move_iterator.h>
 #include <__iterator/next.h>
 #include <__memory/addressof.h>
+#include <__memory/allocation_guard.h>
 #include <__memory/allocator.h>
 #include <__memory/allocator_destructor.h>
 #include <__memory/allocator_traits.h>
@@ -291,6 +293,7 @@ struct __forward_begin_node
     pointer __next_;
 
     _LIBCPP_INLINE_VISIBILITY __forward_begin_node() : __next_(nullptr) {}
+    _LIBCPP_INLINE_VISIBILITY explicit __forward_begin_node(pointer __n) : __next_(__n) {}
 
     _LIBCPP_INLINE_VISIBILITY
     __begin_node_pointer __next_as_begin() const {
@@ -306,8 +309,13 @@ struct _LIBCPP_STANDALONE_DEBUG __forward_list_node
     : public __begin_node_of<_Tp, _VoidPtr>
 {
     typedef _Tp value_type;
+    typedef __begin_node_of<_Tp, _VoidPtr> _Base;
+    typedef typename _Base::pointer _NodePtr;
 
     value_type __value_;
+
+    _LIBCPP_HIDE_FROM_ABI __forward_list_node() = default;
+    _LIBCPP_HIDE_FROM_ABI __forward_list_node(const value_type& __v, _NodePtr __next) : _Base(__next), __value_(__v) {}
 };
 
 
@@ -865,18 +873,18 @@ public:
     _LIBCPP_HIDE_FROM_ABI __remove_return_type unique(_BinaryPredicate __binary_pred);
 #ifndef _LIBCPP_CXX03_LANG
     _LIBCPP_INLINE_VISIBILITY
-    void merge(forward_list&& __x) {merge(__x, __less<value_type>());}
+    void merge(forward_list&& __x) {merge(__x, __less<>());}
     template <class _Compare>
         _LIBCPP_INLINE_VISIBILITY
         void merge(forward_list&& __x, _Compare __comp)
         {merge(__x, _VSTD::move(__comp));}
 #endif // _LIBCPP_CXX03_LANG
     _LIBCPP_INLINE_VISIBILITY
-    void merge(forward_list& __x) {merge(__x, __less<value_type>());}
+    void merge(forward_list& __x) {merge(__x, __less<>());}
     template <class _Compare>
     _LIBCPP_HIDE_FROM_ABI void merge(forward_list& __x, _Compare __comp);
     _LIBCPP_INLINE_VISIBILITY
-    void sort() {sort(__less<value_type>());}
+    void sort() {sort(__less<>());}
     template <class _Compare> _LIBCPP_INLINE_VISIBILITY void sort(_Compare __comp);
     _LIBCPP_HIDE_FROM_ABI void reverse() _NOEXCEPT;
 
@@ -1246,14 +1254,20 @@ typename forward_list<_Tp, _Alloc>::iterator
 forward_list<_Tp, _Alloc>::insert_after(const_iterator __p, size_type __n,
                                         const value_type& __v)
 {
+    using _Guard = __allocation_guard<__node_allocator>;
+
     __begin_node_pointer __r = __p.__get_begin();
     if (__n > 0)
     {
         __node_allocator& __a = base::__alloc();
-        typedef __allocator_destructor<__node_allocator> _Dp;
-        unique_ptr<__node, _Dp> __h(__node_traits::allocate(__a, 1), _Dp(__a, 1));
-        __node_traits::construct(__a, _VSTD::addressof(__h->__value_), __v);
-        __node_pointer __first = __h.release();
+
+        __node_pointer __first = nullptr;
+        {
+          _Guard __h(__a, 1);
+          __node_traits::construct(__a, std::addressof(__h.__get()->__value_), __v);
+          __h.__get()->__next_ = nullptr;
+          __first = __h.__release_ptr();
+        }
         __node_pointer __last = __first;
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
         try
@@ -1261,9 +1275,10 @@ forward_list<_Tp, _Alloc>::insert_after(const_iterator __p, size_type __n,
 #endif // _LIBCPP_HAS_NO_EXCEPTIONS
             for (--__n; __n != 0; --__n, __last = __last->__next_)
             {
-                __h.reset(__node_traits::allocate(__a, 1));
-                __node_traits::construct(__a, _VSTD::addressof(__h->__value_), __v);
-                __last->__next_ = __h.release();
+                _Guard __h(__a, 1);
+                __node_traits::construct(__a, std::addressof(__h.__get()->__value_), __v);
+                __h.__get()->__next_ = nullptr;
+                __last->__next_ = __h.__release_ptr();
             }
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
         }
@@ -1292,14 +1307,19 @@ __enable_if_t<__has_input_iterator_category<_InputIterator>::value, typename for
 forward_list<_Tp, _Alloc>::insert_after(const_iterator __p,
                                         _InputIterator __f, _InputIterator __l)
 {
+    using _Guard = __allocation_guard<__node_allocator>;
+
     __begin_node_pointer __r = __p.__get_begin();
     if (__f != __l)
     {
         __node_allocator& __a = base::__alloc();
-        typedef __allocator_destructor<__node_allocator> _Dp;
-        unique_ptr<__node, _Dp> __h(__node_traits::allocate(__a, 1), _Dp(__a, 1));
-        __node_traits::construct(__a, _VSTD::addressof(__h->__value_), *__f);
-        __node_pointer __first = __h.release();
+        __node_pointer __first = nullptr;
+        {
+          _Guard __h(__a, 1);
+          __node_traits::construct(__a, std::addressof(__h.__get()->__value_), *__f);
+          __h.__get()->__next_ = nullptr;
+          __first = __h.__release_ptr();
+        }
         __node_pointer __last = __first;
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
         try
@@ -1307,9 +1327,10 @@ forward_list<_Tp, _Alloc>::insert_after(const_iterator __p,
 #endif // _LIBCPP_HAS_NO_EXCEPTIONS
             for (++__f; __f != __l; ++__f, ((void)(__last = __last->__next_)))
             {
-                __h.reset(__node_traits::allocate(__a, 1));
-                __node_traits::construct(__a, _VSTD::addressof(__h->__value_), *__f);
-                __last->__next_ = __h.release();
+                _Guard __h(__a, 1);
+                __node_traits::construct(__a, std::addressof(__h.__get()->__value_), *__f);
+                __h.__get()->__next_ = nullptr;
+                __last->__next_ = __h.__release_ptr();
             }
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
         }
@@ -1814,7 +1835,7 @@ _LIBCPP_END_NAMESPACE_STD
 _LIBCPP_BEGIN_NAMESPACE_STD
 namespace pmr {
 template <class _ValueT>
-using forward_list = std::forward_list<_ValueT, polymorphic_allocator<_ValueT>>;
+using forward_list _LIBCPP_AVAILABILITY_PMR = std::forward_list<_ValueT, polymorphic_allocator<_ValueT>>;
 } // namespace pmr
 _LIBCPP_END_NAMESPACE_STD
 #endif

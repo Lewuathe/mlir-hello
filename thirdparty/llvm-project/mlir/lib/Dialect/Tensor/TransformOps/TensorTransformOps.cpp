@@ -80,11 +80,56 @@ void tensor::registerFindPayloadReplacementOpInterfaceExternalModels(
 }
 
 //===----------------------------------------------------------------------===//
+// Apply...PatternsOp
+//===----------------------------------------------------------------------===//
+
+void transform::ApplyDropRedundantInsertSliceRankExpansionPatternsOp::
+    populatePatterns(RewritePatternSet &patterns) {
+  tensor::populateDropRedundantInsertSliceRankExpansionPatterns(patterns);
+}
+
+void transform::ApplyFoldTensorEmptyPatternsOp::populatePatterns(
+    RewritePatternSet &patterns) {
+  tensor::populateFoldTensorEmptyPatterns(patterns, getFoldSingleUseOnly());
+}
+
+void transform::ApplyFoldIntoPackAndUnpackPatternsOp::populatePatterns(
+    RewritePatternSet &patterns) {
+  tensor::populateFoldIntoPackAndUnpackPatterns(patterns);
+}
+
+void transform::ApplyFoldTensorSubsetOpsPatternsOp::populatePatterns(
+    RewritePatternSet &patterns) {
+  tensor::populateFoldTensorSubsetOpPatterns(patterns);
+}
+
+void transform::ApplyFoldTensorSubsetOpsIntoVectorTransfersPatternsOp::
+    populatePatterns(RewritePatternSet &patterns) {
+  tensor::populateFoldTensorSubsetIntoVectorTransferPatterns(patterns);
+}
+
+void transform::ApplyMergeConsecutiveInsertExtractSlicePatternsOp::
+    populatePatterns(RewritePatternSet &patterns) {
+  tensor::populateMergeConsecutiveInsertExtractSlicePatterns(patterns);
+}
+
+void transform::ApplyReassociativeReshapeFoldingPatternsOp::populatePatterns(
+    RewritePatternSet &patterns) {
+  tensor::populateReassociativeReshapeFoldingPatterns(patterns);
+}
+
+void transform::ApplyRewriteTensorOpsAsConstantPatternsOp::populatePatterns(
+    RewritePatternSet &patterns) {
+  tensor::populateRewriteAsConstantPatterns(patterns);
+}
+
+//===----------------------------------------------------------------------===//
 // MakeLoopIndependentOp
 //===----------------------------------------------------------------------===//
 
 DiagnosedSilenceableFailure transform::MakeLoopIndependentOp::applyToOne(
-    Operation *target, transform::ApplyToEachResultList &results,
+    transform::TransformRewriter &rewriter, Operation *target,
+    transform::ApplyToEachResultList &results,
     transform::TransformState &state) {
   // Gather IVs.
   SmallVector<Value> ivs;
@@ -102,7 +147,6 @@ DiagnosedSilenceableFailure transform::MakeLoopIndependentOp::applyToOne(
   }
 
   // Rewrite IR.
-  IRRewriter rewriter(target->getContext());
   FailureOr<Value> replacement = failure();
   if (auto padOp = dyn_cast<tensor::PadOp>(target)) {
     replacement = tensor::buildIndependentOp(rewriter, padOp, ivs);
@@ -144,26 +188,6 @@ public:
 #define GET_OP_LIST
 #include "mlir/Dialect/Tensor/TransformOps/TensorTransformOps.cpp.inc"
         >();
-
-    addDialectDataInitializer<transform::PatternRegistry>(
-        [&](transform::PatternRegistry &registry) {
-          registry.registerPatterns("tensor.fold_tensor_subset_ops",
-                                    tensor::populateFoldTensorSubsetOpPatterns);
-          registry.registerPatterns(
-              "tensor.merge_consecutive_insert_extract_slice",
-              tensor::populateMergeConsecutiveInsertExtractSlicePatterns);
-          registry.registerPatterns(
-              "tensor.drop_redundant_insert_slice_rank_expansion",
-              tensor::populateDropRedundantInsertSliceRankExpansionPatterns);
-          registry.registerPatterns(
-              "tensor.reassociative_reshape_folding",
-              tensor::populateReassociativeReshapeFoldingPatterns);
-          registry.registerPatterns("tensor.fold_tensor_empty",
-                                    tensor::populateFoldTensorEmptyPatterns);
-          registry.registerPatterns(
-              "tensor.fold_into_pack_and_unpack",
-              tensor::populateFoldIntoPackAndUnpackPatterns);
-        });
   }
 };
 } // namespace

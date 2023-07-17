@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cstdio>
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <sanitizer/hwasan_interface.h>
 #include <stdexcept>

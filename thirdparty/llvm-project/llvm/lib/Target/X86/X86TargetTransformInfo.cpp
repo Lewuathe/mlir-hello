@@ -245,7 +245,8 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
   assert(ISD && "Invalid opcode");
 
   if (ISD == ISD::MUL && Args.size() == 2 && LT.second.isVector() &&
-      LT.second.getScalarType() == MVT::i32) {
+      (LT.second.getScalarType() == MVT::i32 ||
+       LT.second.getScalarType() == MVT::i64)) {
     // Check if the operands can be represented as a smaller datatype.
     bool Op1Signed = false, Op2Signed = false;
     unsigned Op1MinSize = BaseT::minRequiredElementSize(Args[0], Op1Signed);
@@ -253,10 +254,11 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
     unsigned OpMinSize = std::max(Op1MinSize, Op2MinSize);
     bool SignedMode = Op1Signed || Op2Signed;
 
-    // If both are representable as i15 and at least one is constant,
+    // If both vXi32 are representable as i15 and at least one is constant,
     // zero-extended, or sign-extended from vXi16 (or less pre-SSE41) then we
     // can treat this as PMADDWD which has the same costs as a vXi16 multiply.
-    if (OpMinSize <= 15 && !ST->isPMADDWDSlow()) {
+    if (OpMinSize <= 15 && !ST->isPMADDWDSlow() &&
+        LT.second.getScalarType() == MVT::i32) {
       bool Op1Constant =
           isa<ConstantDataVector>(Args[0]) || isa<ConstantVector>(Args[0]);
       bool Op2Constant =
@@ -287,6 +289,12 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
       if (!SignedMode && OpMinSize <= 16)
         return LT.first * 5; // pmullw/pmulhw/pshuf
     }
+
+    // If both vXi64 are representable as (unsigned) i32, then we can perform
+    // the multiple with a single PMULUDQ instruction.
+    // TODO: Add (SSE41+) PMULDQ handling for signed extensions.
+    if (!SignedMode && OpMinSize <= 32 && LT.second.getScalarType() == MVT::i64)
+      ISD = X86ISD::PMULUDQ;
   }
 
   // Vector multiply by pow2 will be simplified to shifts.
@@ -893,6 +901,8 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
     { ISD::MUL,     MVT::v8i64,   {  6,  9, 8, 8 } }, // 3*pmuludq/3*shift/2*add
     { ISD::MUL,     MVT::i64,     {  1 } }, // Skylake from http://www.agner.org/
 
+    { X86ISD::PMULUDQ, MVT::v8i64, { 1,  5, 1, 1 } },
+
     { ISD::FNEG,    MVT::v8f64,   {  1,  1, 1, 2 } }, // Skylake from http://www.agner.org/
     { ISD::FADD,    MVT::v8f64,   {  1,  4, 1, 1 } }, // Skylake from http://www.agner.org/
     { ISD::FADD,    MVT::v4f64,   {  1,  4, 1, 1 } }, // Skylake from http://www.agner.org/
@@ -1092,6 +1102,8 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
     { ISD::MUL,  MVT::v4i32,   {  2, 10, 1, 2 } }, // pmulld
     { ISD::MUL,  MVT::v4i64,   {  6, 10, 8,13 } }, // 3*pmuludq/3*shift/2*add
     { ISD::MUL,  MVT::v2i64,   {  6, 10, 8, 8 } }, // 3*pmuludq/3*shift/2*add
+
+    { X86ISD::PMULUDQ, MVT::v4i64, { 1,  5, 1, 1 } },
 
     { ISD::FNEG, MVT::v4f64,   {  1,  1, 1, 2 } }, // vxorpd
     { ISD::FNEG, MVT::v8f32,   {  1,  1, 1, 2 } }, // vxorps
@@ -1323,7 +1335,9 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
     { ISD::MUL,  MVT::v16i8,  {  5, 18,12,12 } }, // 2*unpack/2*pmullw/2*and/pack
     { ISD::MUL,  MVT::v8i16,  {  1,  5, 1, 1 } }, // pmullw
     { ISD::MUL,  MVT::v4i32,  {  6,  8, 7, 7 } }, // 3*pmuludq/4*shuffle
-    { ISD::MUL,  MVT::v2i64,  {  8, 10, 8, 8 } }, // 3*pmuludq/3*shift/2*add
+    { ISD::MUL,  MVT::v2i64,  {  7, 10,10,10 } }, // 3*pmuludq/3*shift/2*add
+
+    { X86ISD::PMULUDQ, MVT::v2i64, { 1,  5, 1, 1 } },
 
     { ISD::FDIV, MVT::f32,    { 23, 23, 1, 1 } }, // Pentium IV from http://www.agner.org/
     { ISD::FDIV, MVT::v4f32,  { 39, 39, 1, 1 } }, // Pentium IV from http://www.agner.org/
@@ -4955,7 +4969,8 @@ X86TTIImpl::getPointersChainCost(ArrayRef<const Value *> Ptrs,
     if (const auto *BaseGEP = dyn_cast<GetElementPtrInst>(Base)) {
       SmallVector<const Value *> Indices(BaseGEP->indices());
       return getGEPCost(BaseGEP->getSourceElementType(),
-                        BaseGEP->getPointerOperand(), Indices, CostKind);
+                        BaseGEP->getPointerOperand(), Indices, nullptr,
+                        CostKind);
     }
     return TTI::TCC_Free;
   }
@@ -5241,25 +5256,16 @@ X86TTIImpl::getArithmeticReductionCost(unsigned Opcode, VectorType *ValTy,
                                             CostKind, 0, nullptr, nullptr);
 }
 
-InstructionCost X86TTIImpl::getMinMaxCost(Type *Ty, Type *CondTy,
+InstructionCost X86TTIImpl::getMinMaxCost(Intrinsic::ID IID, Type *Ty,
                                           TTI::TargetCostKind CostKind,
-                                          bool IsUnsigned, FastMathFlags FMF) {
-  Intrinsic::ID Id;
-  if (Ty->isIntOrIntVectorTy()) {
-    Id = IsUnsigned ? Intrinsic::umin : Intrinsic::smin;
-  } else {
-    assert(Ty->isFPOrFPVectorTy() &&
-           "Expected float point or integer vector type.");
-    Id = Intrinsic::minnum;
-  }
-
-  IntrinsicCostAttributes ICA(Id, Ty, {Ty, Ty}, FMF);
+                                          FastMathFlags FMF) {
+  IntrinsicCostAttributes ICA(IID, Ty, {Ty, Ty}, FMF);
   return getIntrinsicInstrCost(ICA, CostKind);
 }
 
 InstructionCost
-X86TTIImpl::getMinMaxReductionCost(VectorType *ValTy, VectorType *CondTy,
-                                   bool IsUnsigned, FastMathFlags FMF,
+X86TTIImpl::getMinMaxReductionCost(Intrinsic::ID IID, VectorType *ValTy,
+                                   FastMathFlags FMF,
                                    TTI::TargetCostKind CostKind) {
   std::pair<InstructionCost, MVT> LT = getTypeLegalizationCost(ValTy);
 
@@ -5267,11 +5273,14 @@ X86TTIImpl::getMinMaxReductionCost(VectorType *ValTy, VectorType *CondTy,
 
   int ISD;
   if (ValTy->isIntOrIntVectorTy()) {
-    ISD = IsUnsigned ? ISD::UMIN : ISD::SMIN;
+    ISD = (IID == Intrinsic::umin || IID == Intrinsic::umax) ? ISD::UMIN
+                                                             : ISD::SMIN;
   } else {
     assert(ValTy->isFPOrFPVectorTy() &&
            "Expected float point or integer vector type.");
-    ISD = ISD::FMINNUM;
+    ISD = (IID == Intrinsic::minnum || IID == Intrinsic::maxnum)
+              ? ISD::FMINNUM
+              : ISD::FMINIMUM;
   }
 
   // We use the Intel Architecture Code Analyzer(IACA) to measure the throughput
@@ -5347,9 +5356,7 @@ X86TTIImpl::getMinMaxReductionCost(VectorType *ValTy, VectorType *CondTy,
     // Type needs to be split. We need LT.first - 1 operations ops.
     Ty = FixedVectorType::get(ValVTy->getElementType(),
                               MTy.getVectorNumElements());
-    auto *SubCondTy = FixedVectorType::get(CondTy->getElementType(),
-                                           MTy.getVectorNumElements());
-    MinMaxCost = getMinMaxCost(Ty, SubCondTy, CostKind, IsUnsigned, FMF);
+    MinMaxCost = getMinMaxCost(IID, Ty, CostKind, FMF);
     MinMaxCost *= LT.first - 1;
     NumVecElts = MTy.getVectorNumElements();
   }
@@ -5376,8 +5383,7 @@ X86TTIImpl::getMinMaxReductionCost(VectorType *ValTy, VectorType *CondTy,
   // by type legalization.
   if (!isPowerOf2_32(ValVTy->getNumElements()) ||
       ScalarSize != MTy.getScalarSizeInBits())
-    return BaseT::getMinMaxReductionCost(ValTy, CondTy, IsUnsigned, FMF,
-                                         CostKind);
+    return BaseT::getMinMaxReductionCost(IID, ValTy, FMF, CostKind);
 
   // Now handle reduction with the legal type, taking into account size changes
   // at each level.
@@ -5421,9 +5427,7 @@ X86TTIImpl::getMinMaxReductionCost(VectorType *ValTy, VectorType *CondTy,
     }
 
     // Add the arithmetic op for this level.
-    auto *SubCondTy =
-        FixedVectorType::get(CondTy->getElementType(), Ty->getNumElements());
-    MinMaxCost += getMinMaxCost(Ty, SubCondTy, CostKind, IsUnsigned, FMF);
+    MinMaxCost += getMinMaxCost(IID, Ty, CostKind, FMF);
   }
 
   // Add the final extract element to the cost.

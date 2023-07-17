@@ -22,11 +22,13 @@
 #include "mlir/Dialect/LLVMIR/Transforms/LegalizeForExport.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/OpenMP/OpenMPInterfaces.h"
+#include "mlir/IR/AttrTypeSubElements.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/RegionGraphTraits.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "mlir/Target/LLVMIR/LLVMTranslationInterface.h"
 #include "mlir/Target/LLVMIR/TypeToLLVM.h"
 
@@ -359,6 +361,12 @@ llvm::Constant *mlir::LLVM::detail::getLLVMConstant(
         llvmType,
         intAttr.getValue().sextOrTrunc(llvmType->getIntegerBitWidth()));
   if (auto floatAttr = dyn_cast<FloatAttr>(attr)) {
+    const llvm::fltSemantics &sem = floatAttr.getValue().getSemantics();
+    // Special case for 8-bit floats, which are represented by integers due to
+    // the lack of native fp8 types in LLVM at the moment.
+    if (APFloat::getSizeInBits(sem) == 8 && llvmType->isIntegerTy(8))
+      return llvm::ConstantInt::get(llvmType,
+                                    floatAttr.getValue().bitcastToAPInt());
     if (llvmType !=
         llvm::Type::getFloatingPointTy(llvmType->getContext(),
                                        floatAttr.getValue().getSemantics())) {
@@ -454,7 +462,7 @@ ModuleTranslation::ModuleTranslation(Operation *module,
       debugTranslation(
           std::make_unique<DebugTranslation>(module, *this->llvmModule)),
       loopAnnotationTranslation(std::make_unique<LoopAnnotationTranslation>(
-          *this, module, *this->llvmModule)),
+          *this, *this->llvmModule)),
       typeTranslator(this->llvmModule->getContext()),
       iface(module->getContext()) {
   assert(satisfiesLLVMModule(mlirModule) &&
@@ -588,7 +596,7 @@ mlir::LLVM::detail::getTopologicallySortedBlocks(Region &region) {
   return blocks;
 }
 
-llvm::Value *mlir::LLVM::detail::createIntrinsicCall(
+llvm::CallInst *mlir::LLVM::detail::createIntrinsicCall(
     llvm::IRBuilderBase &builder, llvm::Intrinsic::ID intrinsic,
     ArrayRef<llvm::Value *> args, ArrayRef<llvm::Type *> tys) {
   llvm::Module *module = builder.GetInsertBlock()->getModule();
@@ -723,6 +731,12 @@ LogicalResult ModuleTranslation::convertGlobals() {
         op.getThreadLocal_() ? llvm::GlobalValue::GeneralDynamicTLSModel
                              : llvm::GlobalValue::NotThreadLocal,
         addrSpace);
+
+    if (std::optional<mlir::SymbolRefAttr> comdat = op.getComdat()) {
+      auto selectorOp = cast<ComdatSelectorOp>(
+          SymbolTable::lookupNearestSymbolFrom(op, *comdat));
+      var->setComdat(comdatMapping.lookup(selectorOp));
+    }
 
     if (op.getUnnamedAddr().has_value())
       var->setUnnamedAddr(convertUnnamedAddrToLLVM(*op.getUnnamedAddr()));
@@ -888,8 +902,8 @@ LogicalResult ModuleTranslation::convertOneFunction(LLVMFuncOp func) {
       llvmFunc->setPersonalityFn(pfunc);
   }
 
-  if (auto gc = func.getGarbageCollector())
-    llvmFunc->setGC(gc->str());
+  if (std::optional<StringRef> section = func.getSection())
+    llvmFunc->setSection(*section);
 
   if (auto armStreaming = func.getArmStreaming())
     llvmFunc->addFnAttr("aarch64_pstate_sm_enabled");
@@ -1018,6 +1032,22 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
 
     // Convert visibility attribute.
     llvmFunc->setVisibility(convertVisibilityToLLVM(function.getVisibility_()));
+
+    // Convert the comdat attribute.
+    if (std::optional<mlir::SymbolRefAttr> comdat = function.getComdat()) {
+      auto selectorOp = cast<ComdatSelectorOp>(
+          SymbolTable::lookupNearestSymbolFrom(function, *comdat));
+      llvmFunc->setComdat(comdatMapping.lookup(selectorOp));
+    }
+
+    if (auto gc = function.getGarbageCollector())
+      llvmFunc->setGC(gc->str());
+
+    if (auto unnamedAddr = function.getUnnamedAddr())
+      llvmFunc->setUnnamedAddr(convertUnnamedAddrToLLVM(*unnamedAddr));
+
+    if (auto alignment = function.getAlignment())
+      llvmFunc->setAlignment(llvm::MaybeAlign(*alignment));
   }
 
   return success();
@@ -1037,8 +1067,20 @@ LogicalResult ModuleTranslation::convertFunctions() {
   return success();
 }
 
-LogicalResult ModuleTranslation::createAccessGroupMetadata() {
-  return loopAnnotationTranslation->createAccessGroupMetadata();
+LogicalResult ModuleTranslation::convertComdats() {
+  for (auto comdatOp : getModuleBody(mlirModule).getOps<ComdatOp>()) {
+    for (auto selectorOp : comdatOp.getOps<ComdatSelectorOp>()) {
+      llvm::Module *module = getLLVMModule();
+      if (module->getComdatSymbolTable().contains(selectorOp.getSymName()))
+        return emitError(selectorOp.getLoc())
+               << "comdat selection symbols must be unique even in different "
+                  "comdat regions";
+      llvm::Comdat *comdat = module->getOrInsertComdat(selectorOp.getSymName());
+      comdat->setSelectionKind(convertComdatToLLVM(selectorOp.getComdat()));
+      comdatMapping.try_emplace(selectorOp, comdat);
+    }
+  }
+  return success();
 }
 
 void ModuleTranslation::setAccessGroupsMetadata(AccessGroupOpInterface op,
@@ -1048,60 +1090,56 @@ void ModuleTranslation::setAccessGroupsMetadata(AccessGroupOpInterface op,
 }
 
 LogicalResult ModuleTranslation::createAliasScopeMetadata() {
-  mlirModule->walk([&](LLVM::MetadataOp metadatas) {
-    // Create the domains first, so they can be reference below in the scopes.
-    DenseMap<Operation *, llvm::MDNode *> aliasScopeDomainMetadataMapping;
-    metadatas.walk([&](LLVM::AliasScopeDomainMetadataOp op) {
-      llvm::LLVMContext &ctx = llvmModule->getContext();
-      llvm::SmallVector<llvm::Metadata *, 2> operands;
-      operands.push_back({}); // Placeholder for self-reference
-      if (std::optional<StringRef> description = op.getDescription())
-        operands.push_back(llvm::MDString::get(ctx, *description));
-      llvm::MDNode *domain = llvm::MDNode::get(ctx, operands);
-      domain->replaceOperandWith(0, domain); // Self-reference for uniqueness
-      aliasScopeDomainMetadataMapping.insert({op, domain});
-    });
+  DenseMap<Attribute, llvm::MDNode *> aliasScopeDomainMetadataMapping;
 
-    // Now create the scopes, referencing the domains created above.
-    metadatas.walk([&](LLVM::AliasScopeMetadataOp op) {
-      llvm::LLVMContext &ctx = llvmModule->getContext();
-      assert(isa<LLVM::MetadataOp>(op->getParentOp()));
-      auto metadataOp = dyn_cast<LLVM::MetadataOp>(op->getParentOp());
-      Operation *domainOp =
-          SymbolTable::lookupNearestSymbolFrom(metadataOp, op.getDomainAttr());
-      llvm::MDNode *domain = aliasScopeDomainMetadataMapping.lookup(domainOp);
-      assert(domain && "Scope's domain should already be valid");
-      llvm::SmallVector<llvm::Metadata *, 3> operands;
-      operands.push_back({}); // Placeholder for self-reference
-      operands.push_back(domain);
-      if (std::optional<StringRef> description = op.getDescription())
-        operands.push_back(llvm::MDString::get(ctx, *description));
-      llvm::MDNode *scope = llvm::MDNode::get(ctx, operands);
-      scope->replaceOperandWith(0, scope); // Self-reference for uniqueness
-      aliasScopeMetadataMapping.insert({op, scope});
-    });
+  AttrTypeWalker walker;
+  walker.addWalk([&](LLVM::AliasScopeDomainAttr op) {
+    llvm::LLVMContext &ctx = llvmModule->getContext();
+    llvm::SmallVector<llvm::Metadata *, 2> operands;
+    operands.push_back({}); // Placeholder for self-reference
+    if (StringAttr description = op.getDescription())
+      operands.push_back(llvm::MDString::get(ctx, description));
+    llvm::MDNode *domain = llvm::MDNode::get(ctx, operands);
+    domain->replaceOperandWith(0, domain); // Self-reference for uniqueness
+    aliasScopeDomainMetadataMapping.insert({op, domain});
   });
+
+  walker.addWalk([&](LLVM::AliasScopeAttr op) {
+    llvm::LLVMContext &ctx = llvmModule->getContext();
+    llvm::MDNode *domain =
+        aliasScopeDomainMetadataMapping.lookup(op.getDomain());
+    assert(domain && "Scope's domain should already be valid");
+    llvm::SmallVector<llvm::Metadata *, 3> operands;
+    operands.push_back({}); // Placeholder for self-reference
+    operands.push_back(domain);
+    if (StringAttr description = op.getDescription())
+      operands.push_back(llvm::MDString::get(ctx, description));
+    llvm::MDNode *scope = llvm::MDNode::get(ctx, operands);
+    scope->replaceOperandWith(0, scope); // Self-reference for uniqueness
+    aliasScopeMetadataMapping.insert({op, scope});
+  });
+
+  mlirModule->walk([&](AliasAnalysisOpInterface op) {
+    if (auto aliasScopes = op.getAliasScopesOrNull())
+      walker.walk(aliasScopes);
+    if (auto noAliasScopes = op.getNoAliasScopesOrNull())
+      walker.walk(noAliasScopes);
+  });
+
   return success();
 }
 
 llvm::MDNode *
-ModuleTranslation::getAliasScope(Operation *op,
-                                 SymbolRefAttr aliasScopeRef) const {
-  StringAttr metadataName = aliasScopeRef.getRootReference();
-  StringAttr scopeName = aliasScopeRef.getLeafReference();
-  auto metadataOp = SymbolTable::lookupNearestSymbolFrom<LLVM::MetadataOp>(
-      op->getParentOp(), metadataName);
-  Operation *aliasScopeOp =
-      SymbolTable::lookupNearestSymbolFrom(metadataOp, scopeName);
-  return aliasScopeMetadataMapping.lookup(aliasScopeOp);
+ModuleTranslation::getAliasScope(AliasScopeAttr aliasScopeAttr) const {
+  return aliasScopeMetadataMapping.lookup(aliasScopeAttr);
 }
 
 llvm::MDNode *ModuleTranslation::getAliasScopes(
-    Operation *op, ArrayRef<SymbolRefAttr> aliasScopeRefs) const {
+    ArrayRef<AliasScopeAttr> aliasScopeAttrs) const {
   SmallVector<llvm::Metadata *> nodes;
-  nodes.reserve(aliasScopeRefs.size());
-  for (SymbolRefAttr aliasScopeRef : aliasScopeRefs)
-    nodes.push_back(getAliasScope(op, aliasScopeRef));
+  nodes.reserve(aliasScopeAttrs.size());
+  for (AliasScopeAttr aliasScopeRef : aliasScopeAttrs)
+    nodes.push_back(getAliasScope(aliasScopeRef));
   return llvm::MDNode::get(getLLVMContext(), nodes);
 }
 
@@ -1111,7 +1149,7 @@ void ModuleTranslation::setAliasScopeMetadata(AliasAnalysisOpInterface op,
     if (!aliasScopeRefs || aliasScopeRefs.empty())
       return;
     llvm::MDNode *node = getAliasScopes(
-        op, llvm::to_vector(aliasScopeRefs.getAsRange<SymbolRefAttr>()));
+        llvm::to_vector(aliasScopeRefs.getAsRange<AliasScopeAttr>()));
     inst->setMetadata(kind, node);
   };
 
@@ -1274,12 +1312,13 @@ llvm::OpenMPIRBuilder *ModuleTranslation::getOpenMPBuilder() {
   if (!ompBuilder) {
     ompBuilder = std::make_unique<llvm::OpenMPIRBuilder>(*llvmModule);
 
-    bool isDevice = false;
+    bool isTargetDevice = false;
     llvm::StringRef hostIRFilePath = "";
 
-    if (Attribute deviceAttr = mlirModule->getAttr("omp.is_device"))
+    if (Attribute deviceAttr = mlirModule->getAttr("omp.is_target_device"))
       if (::llvm::isa<mlir::BoolAttr>(deviceAttr))
-        isDevice = ::llvm::dyn_cast<mlir::BoolAttr>(deviceAttr).getValue();
+        isTargetDevice =
+            ::llvm::dyn_cast<mlir::BoolAttr>(deviceAttr).getValue();
 
     if (Attribute filepath = mlirModule->getAttr("omp.host_ir_filepath"))
       if (::llvm::isa<mlir::StringAttr>(filepath))
@@ -1290,7 +1329,7 @@ llvm::OpenMPIRBuilder *ModuleTranslation::getOpenMPBuilder() {
 
     // TODO: set the flags when available
     llvm::OpenMPIRBuilderConfig config(
-        isDevice, /* IsTargetCodegen */ false,
+        isTargetDevice, /* IsGPU */ false,
         /* HasRequiresUnifiedSharedMemory */ false,
         /* OpenMPOffloadMandatory */ false);
     ompBuilder->setConfig(config);
@@ -1370,11 +1409,11 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
   LLVM::ensureDistinctSuccessors(module);
 
   ModuleTranslation translator(module, std::move(llvmModule));
+  if (failed(translator.convertComdats()))
+    return nullptr;
   if (failed(translator.convertFunctionSignatures()))
     return nullptr;
   if (failed(translator.convertGlobals()))
-    return nullptr;
-  if (failed(translator.createAccessGroupMetadata()))
     return nullptr;
   if (failed(translator.createAliasScopeMetadata()))
     return nullptr;
@@ -1387,7 +1426,7 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
   llvm::IRBuilder<> llvmBuilder(llvmContext);
   for (Operation &o : getModuleBody(module).getOperations()) {
     if (!isa<LLVM::LLVMFuncOp, LLVM::GlobalOp, LLVM::GlobalCtorsOp,
-             LLVM::GlobalDtorsOp, LLVM::MetadataOp>(&o) &&
+             LLVM::GlobalDtorsOp, LLVM::MetadataOp, LLVM::ComdatOp>(&o) &&
         !o.hasTrait<OpTrait::IsTerminator>() &&
         failed(translator.convertOperation(o, llvmBuilder))) {
       return nullptr;

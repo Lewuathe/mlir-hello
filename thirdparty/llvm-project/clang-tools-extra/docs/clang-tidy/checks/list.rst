@@ -255,6 +255,7 @@ Clang-Tidy Checks
    `misc-confusable-identifiers <misc/confusable-identifiers.html>`_,
    `misc-const-correctness <misc/const-correctness.html>`_, "Yes"
    `misc-definitions-in-headers <misc/definitions-in-headers.html>`_, "Yes"
+   `misc-header-include-cycle <misc/header-include-cycle.html>`_,
    `misc-include-cleaner <misc/include-cleaner.html>`_, "Yes"
    `misc-misleading-bidirectional <misc/misleading-bidirectional.html>`_,
    `misc-misleading-identifier <misc/misleading-identifier.html>`_,
@@ -301,6 +302,7 @@ Clang-Tidy Checks
    `modernize-use-noexcept <modernize/use-noexcept.html>`_, "Yes"
    `modernize-use-nullptr <modernize/use-nullptr.html>`_, "Yes"
    `modernize-use-override <modernize/use-override.html>`_, "Yes"
+   `modernize-use-std-print <modernize/use-std-print.html>`_, "Yes"
    `modernize-use-trailing-return-type <modernize/use-trailing-return-type.html>`_, "Yes"
    `modernize-use-transparent-functors <modernize/use-transparent-functors.html>`_, "Yes"
    `modernize-use-uncaught-exceptions <modernize/use-uncaught-exceptions.html>`_, "Yes"
@@ -329,7 +331,9 @@ Clang-Tidy Checks
    `performance-move-constructor-init <performance/move-constructor-init.html>`_,
    `performance-no-automatic-move <performance/no-automatic-move.html>`_,
    `performance-no-int-to-ptr <performance/no-int-to-ptr.html>`_,
+   `performance-noexcept-destructor <performance/noexcept-destructor.html>`_, "Yes"
    `performance-noexcept-move-constructor <performance/noexcept-move-constructor.html>`_, "Yes"
+   `performance-noexcept-swap <performance/noexcept-swap.html>`_, "Yes"
    `performance-trivially-destructible <performance/trivially-destructible.html>`_, "Yes"
    `performance-type-promotion-in-math-fn <performance/type-promotion-in-math-fn.html>`_, "Yes"
    `performance-unnecessary-copy-initialization <performance/unnecessary-copy-initialization.html>`_, "Yes"
@@ -481,6 +485,9 @@ Clang-Tidy Checks
    `cppcoreguidelines-c-copy-assignment-signature <cppcoreguidelines/c-copy-assignment-signature.html>`_, `misc-unconventional-assign-operator <misc/unconventional-assign-operator.html>`_,
    `cppcoreguidelines-explicit-virtual-functions <cppcoreguidelines/explicit-virtual-functions.html>`_, `modernize-use-override <modernize/use-override.html>`_, "Yes"
    `cppcoreguidelines-macro-to-enum <cppcoreguidelines/macro-to-enum.html>`_, `modernize-macro-to-enum <modernize/macro-to-enum.html>`_, "Yes"
+   `cppcoreguidelines-noexcept-destructor <cppcoreguidelines/noexcept-destructor.html>`_, `performance-noexcept-destructor <performance/noexcept-destructor.html>`_, "Yes"
+   `cppcoreguidelines-noexcept-move-operations <cppcoreguidelines/noexcept-move-operations.html>`_, `performance-noexcept-move-constructor <performance/noexcept-move-constructor.html>`_, "Yes"
+   `cppcoreguidelines-noexcept-swap <cppcoreguidelines/noexcept-swap.html>`_, `performance-noexcept-swap <performance/noexcept-swap.html>`_, "Yes"
    `cppcoreguidelines-non-private-member-variables-in-classes <cppcoreguidelines/non-private-member-variables-in-classes.html>`_, `misc-non-private-member-variables-in-classes <misc/non-private-member-variables-in-classes.html>`_,
    `cppcoreguidelines-use-default-member-init <cppcoreguidelines/use-default-member-init.html>`_, `modernize-use-default-member-init <modernize/use-default-member-init.html>`_,
    `fuchsia-header-anon-namespaces <fuchsia/header-anon-namespaces.html>`_, `google-build-namespaces <google/build-namespaces.html>`_,

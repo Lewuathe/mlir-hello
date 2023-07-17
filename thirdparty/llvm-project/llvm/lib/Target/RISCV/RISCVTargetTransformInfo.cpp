@@ -30,24 +30,28 @@ static cl::opt<unsigned> RVVRegisterWidthLMUL(
 static cl::opt<unsigned> SLPMaxVF(
     "riscv-v-slp-max-vf",
     cl::desc(
-        "Result used for getMaximumVF query which is used exclusively by "
-        "SLP vectorizer.  Defaults to 1 which disables SLP."),
-    cl::init(1), cl::Hidden);
+        "Overrides result used for getMaximumVF query which is used "
+        "exclusively by SLP vectorizer."),
+    cl::Hidden);
 
 InstructionCost RISCVTTIImpl::getLMULCost(MVT VT) {
   // TODO: Here assume reciprocal throughput is 1 for LMUL_1, it is
   // implementation-defined.
   if (!VT.isVector())
     return InstructionCost::getInvalid();
+  unsigned DLenFactor = ST->getDLenFactor();
   unsigned Cost;
   if (VT.isScalableVector()) {
     unsigned LMul;
     bool Fractional;
     std::tie(LMul, Fractional) =
         RISCVVType::decodeVLMUL(RISCVTargetLowering::getLMUL(VT));
-    Cost = Fractional ? 1 : LMul;
+    if (Fractional)
+      Cost = LMul <= DLenFactor ? (DLenFactor / LMul) : 1;
+    else
+      Cost = (LMul * DLenFactor);
   } else {
-    Cost = divideCeil(VT.getSizeInBits(), ST->getRealMinVLen());
+    Cost = divideCeil(VT.getSizeInBits(), ST->getRealMinVLen() / DLenFactor);
   }
   return Cost;
 }
@@ -445,6 +449,8 @@ InstructionCost RISCVTTIImpl::getInterleavedMemoryOpCost(
     unsigned Opcode, Type *VecTy, unsigned Factor, ArrayRef<unsigned> Indices,
     Align Alignment, unsigned AddressSpace, TTI::TargetCostKind CostKind,
     bool UseMaskForCond, bool UseMaskForGaps) {
+  if (isa<ScalableVectorType>(VecTy))
+    return InstructionCost::getInvalid();
   auto *FVTy = cast<FixedVectorType>(VecTy);
   InstructionCost MemCost =
       getMemoryOpCost(Opcode, VecTy, Alignment, AddressSpace, CostKind);
@@ -465,7 +471,8 @@ InstructionCost RISCVTTIImpl::getInterleavedMemoryOpCost(
       // it's getMemoryOpCost returns a really expensive cost for types like
       // <6 x i8>, which show up when doing interleaves of Factor=3 etc.
       // Should the memory op cost of these be cheaper?
-      if (TLI->isLegalInterleavedAccessType(LegalFVTy, Factor, DL)) {
+      if (TLI->isLegalInterleavedAccessType(LegalFVTy, Factor, Alignment,
+                                            AddressSpace, DL)) {
         InstructionCost LegalMemCost = getMemoryOpCost(
             Opcode, LegalFVTy, Alignment, AddressSpace, CostKind);
         return LT.first + LegalMemCost;
@@ -1206,15 +1213,15 @@ unsigned RISCVTTIImpl::getEstimatedVLFor(VectorType *Ty) {
 }
 
 InstructionCost
-RISCVTTIImpl::getMinMaxReductionCost(VectorType *Ty, VectorType *CondTy,
-                                     bool IsUnsigned, FastMathFlags FMF,
+RISCVTTIImpl::getMinMaxReductionCost(Intrinsic::ID IID, VectorType *Ty,
+                                     FastMathFlags FMF,
                                      TTI::TargetCostKind CostKind) {
   if (isa<FixedVectorType>(Ty) && !ST->useRVVForFixedLengthVectors())
-    return BaseT::getMinMaxReductionCost(Ty, CondTy, IsUnsigned, FMF, CostKind);
+    return BaseT::getMinMaxReductionCost(IID, Ty, FMF, CostKind);
 
   // Skip if scalar size of Ty is bigger than ELEN.
   if (Ty->getScalarSizeInBits() > ST->getELEN())
-    return BaseT::getMinMaxReductionCost(Ty, CondTy, IsUnsigned, FMF, CostKind);
+    return BaseT::getMinMaxReductionCost(IID, Ty, FMF, CostKind);
 
   std::pair<InstructionCost, MVT> LT = getTypeLegalizationCost(Ty);
   if (Ty->getElementType()->isIntegerTy(1))
@@ -1635,7 +1642,7 @@ InstructionCost RISCVTTIImpl::getPointersChainCost(
     } else {
       SmallVector<const Value *> Indices(GEP->indices());
       Cost += getGEPCost(GEP->getSourceElementType(), GEP->getPointerOperand(),
-                         Indices, CostKind);
+                         Indices, AccessTy, CostKind);
     }
   }
   return Cost;
@@ -1738,12 +1745,19 @@ unsigned RISCVTTIImpl::getRegUsageForType(Type *Ty) {
 }
 
 unsigned RISCVTTIImpl::getMaximumVF(unsigned ElemWidth, unsigned Opcode) const {
-  // This interface is currently only used by SLP.  Returning 1 (which is the
-  // default value for SLPMaxVF) disables SLP. We currently have a cost modeling
-  // problem w/ constant materialization which causes SLP to perform majorly
-  // unprofitable transformations.
-  // TODO: Figure out constant materialization cost modeling and remove.
-  return SLPMaxVF;
+  if (SLPMaxVF.getNumOccurrences())
+    return SLPMaxVF;
+
+  // Return how many elements can fit in getRegisterBitwidth.  This is the
+  // same routine as used in LoopVectorizer.  We should probably be
+  // accounting for whether we actually have instructions with the right
+  // lane type, but we don't have enough information to do that without
+  // some additional plumbing which hasn't been justified yet.
+  TypeSize RegWidth =
+    getRegisterBitWidth(TargetTransformInfo::RGK_FixedWidthVector);
+  // If no vector registers, or absurd element widths, disable
+  // vectorization by returning 1.
+  return std::max<unsigned>(1U, RegWidth.getFixedValue() / ElemWidth);
 }
 
 bool RISCVTTIImpl::isLSRCostLess(const TargetTransformInfo::LSRCost &C1,
