@@ -167,6 +167,7 @@ TEST(ConfigParseTest, ParsesConfigurationBools) {
   CHECK_PARSE_BOOL(IndentWrappedFunctionNames);
   CHECK_PARSE_BOOL(InsertBraces);
   CHECK_PARSE_BOOL(InsertNewlineAtEOF);
+  CHECK_PARSE_BOOL(KeepEmptyLinesAtEOF);
   CHECK_PARSE_BOOL(KeepEmptyLinesAtTheStartOfBlocks);
   CHECK_PARSE_BOOL(ObjCSpaceAfterProperty);
   CHECK_PARSE_BOOL(ObjCSpaceBeforeProtocolList);
@@ -916,6 +917,13 @@ TEST(ConfigParseTest, ParsesConfiguration) {
               LineEnding, FormatStyle::LE_CRLF);
   Style.LineEnding = DefaultLineEnding;
   CHECK_PARSE("UseCRLF: true", LineEnding, FormatStyle::LE_DeriveCRLF);
+
+  CHECK_PARSE("RemoveParentheses: MultipleParentheses", RemoveParentheses,
+              FormatStyle::RPS_MultipleParentheses);
+  CHECK_PARSE("RemoveParentheses: ReturnStatement", RemoveParentheses,
+              FormatStyle::RPS_ReturnStatement);
+  CHECK_PARSE("RemoveParentheses: Leave", RemoveParentheses,
+              FormatStyle::RPS_Leave);
 }
 
 TEST(ConfigParseTest, ParsesConfigurationWithLanguages) {

@@ -329,8 +329,7 @@ private:
   Instruction *optimizeBitCastFromPhi(CastInst &CI, PHINode *PN);
   Instruction *matchSAddSubSat(IntrinsicInst &MinMax1);
   Instruction *foldNot(BinaryOperator &I);
-
-  void freelyInvertAllUsersOf(Value *V, Value *IgnoredUser = nullptr);
+  Instruction *foldBinOpOfDisplacedShifts(BinaryOperator &I);
 
   /// Determine if a pair of casts can be replaced by a single cast.
   ///
@@ -393,11 +392,11 @@ public:
   /// without having to rewrite the CFG from within InstCombine.
   void CreateNonTerminatorUnreachable(Instruction *InsertAt) {
     auto &Ctx = InsertAt->getContext();
-    new StoreInst(ConstantInt::getTrue(Ctx),
-                  PoisonValue::get(Type::getInt1PtrTy(Ctx)),
-                  InsertAt);
+    auto *SI = new StoreInst(ConstantInt::getTrue(Ctx),
+                             PoisonValue::get(Type::getInt1PtrTy(Ctx)),
+                             /*isVolatile*/ false, Align(1));
+    InsertNewInstBefore(SI, *InsertAt);
   }
-
 
   /// Combiner aware instruction erasure.
   ///
@@ -411,12 +410,11 @@ public:
 
     // Make sure that we reprocess all operands now that we reduced their
     // use counts.
-    for (Use &Operand : I.operands())
-      if (auto *Inst = dyn_cast<Instruction>(Operand))
-        Worklist.add(Inst);
-
+    SmallVector<Value *> Ops(I.operands());
     Worklist.remove(&I);
     I.eraseFromParent();
+    for (Value *Op : Ops)
+      Worklist.handleUseCountDecrement(Op);
     MadeIRChange = true;
     return nullptr; // Don't do anything with FI
   }
@@ -449,6 +447,12 @@ public:
   // efficiently reorganized.
   Value *SimplifySelectsFeedingBinaryOp(BinaryOperator &I, Value *LHS,
                                         Value *RHS);
+
+  // (Binop1 (Binop2 (logic_shift X, C), C1), (logic_shift Y, C))
+  //    -> (logic_shift (Binop1 (Binop2 X, inv_logic_shift(C1, C)), Y), C)
+  // (Binop1 (Binop2 (logic_shift X, Amt), Mask), (logic_shift Y, Amt))
+  //    -> (BinOp (logic_shift (BinOp X, Y)), Mask)
+  Instruction *foldBinOpShiftWithShift(BinaryOperator &I);
 
   /// This tries to simplify binary operations by factorizing out common terms
   /// (e. g. "(A*B)+(A*C)" -> "A*(B+C)").
@@ -655,6 +659,11 @@ public:
   Value *EvaluateInDifferentType(Value *V, Type *Ty, bool isSigned);
 
   bool tryToSinkInstruction(Instruction *I, BasicBlock *DestBlock);
+
+  bool removeInstructionsBeforeUnreachable(Instruction &I);
+  bool handleUnreachableFrom(Instruction *I);
+  bool handlePotentiallyDeadSuccessors(BasicBlock *BB, BasicBlock *LiveSucc);
+  void freelyInvertAllUsersOf(Value *V, Value *IgnoredUser = nullptr);
 };
 
 class Negator final {

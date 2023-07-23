@@ -2290,7 +2290,7 @@ Constant *ShuffleVectorInst::convertShuffleMaskForBitcode(ArrayRef<int> Mask,
   SmallVector<Constant *, 16> MaskConst;
   for (int Elem : Mask) {
     if (Elem == PoisonMaskElem)
-      MaskConst.push_back(UndefValue::get(Int32Ty));
+      MaskConst.push_back(PoisonValue::get(Int32Ty));
     else
       MaskConst.push_back(ConstantInt::get(Int32Ty, Elem));
   }
@@ -3397,15 +3397,9 @@ unsigned CastInst::isEliminableCastPair(
         "Illegal addrspacecast, bitcast sequence!");
       // Allowed, use first cast's opcode
       return firstOp;
-    case 14: {
-      // bitcast, addrspacecast -> addrspacecast if the element type of
-      // bitcast's source is the same as that of addrspacecast's destination.
-      PointerType *SrcPtrTy = cast<PointerType>(SrcTy->getScalarType());
-      PointerType *DstPtrTy = cast<PointerType>(DstTy->getScalarType());
-      if (SrcPtrTy->hasSameElementTypeAs(DstPtrTy))
-        return Instruction::AddrSpaceCast;
-      return 0;
-    }
+    case 14:
+      // bitcast, addrspacecast -> addrspacecast
+      return Instruction::AddrSpaceCast;
     case 15:
       // FIXME: this state can be merged with (1), but the following assert
       // is useful to check the correcteness of the sequence due to semantic

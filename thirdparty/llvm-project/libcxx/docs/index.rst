@@ -39,6 +39,8 @@ Getting Started with libc++
    BuildingLibcxx
    TestingLibcxx
    Contributing
+   Modules
+   HardenedMode
    ReleaseProcedure
    Status/Cxx14
    Status/Cxx17
@@ -47,6 +49,7 @@ Getting Started with libc++
    Status/Cxx2c
    Status/Format
    Status/Parallelism
+   Status/PSTL
    Status/Ranges
    Status/Spaceship
    Status/Zip
@@ -178,7 +181,6 @@ Design Documents
    DesignDocs/ABIVersioning
    DesignDocs/AtomicDesign
    DesignDocs/CapturingConfigInfo
-   DesignDocs/DebugMode
    DesignDocs/ExperimentalFeatures
    DesignDocs/ExtendedCXX03Support
    DesignDocs/FeatureTestMacros

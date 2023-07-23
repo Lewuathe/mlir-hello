@@ -292,9 +292,8 @@ public:
     if (request.GetCursorIndex() != 0)
       return;
 
-    CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), CommandCompletions::eFrameIndexCompletion,
-        request, nullptr);
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), lldb::eFrameIndexCompletion, request, nullptr);
   }
 
   Options *GetOptions() override { return &m_options; }
@@ -327,21 +326,29 @@ protected:
         }
       } else if (*m_options.relative_frame_offset > 0) {
         // I don't want "up 20" where "20" takes you past the top of the stack
-        // to produce
-        // an error, but rather to just go to the top.  So I have to count the
-        // stack here...
-        const uint32_t num_frames = thread->GetStackFrameCount();
-        if (static_cast<int32_t>(num_frames - frame_idx) >
-            *m_options.relative_frame_offset)
-          frame_idx += *m_options.relative_frame_offset;
+        // to produce an error, but rather to just go to the top.  OTOH, start
+        // by seeing if the requested frame exists, in which case we can avoid 
+        // counting the stack here...
+        const uint32_t frame_requested = frame_idx 
+            + *m_options.relative_frame_offset;
+        StackFrameSP frame_sp = thread->GetStackFrameAtIndex(frame_requested);
+        if (frame_sp)
+          frame_idx = frame_requested;
         else {
-          if (frame_idx == num_frames - 1) {
-            // If we are already at the top of the stack, just warn and don't
-            // reset the frame.
-            result.AppendError("Already at the top of the stack.");
-            return false;
-          } else
-            frame_idx = num_frames - 1;
+          // The request went past the stack, so handle that case:
+          const uint32_t num_frames = thread->GetStackFrameCount();
+          if (static_cast<int32_t>(num_frames - frame_idx) >
+              *m_options.relative_frame_offset)
+          frame_idx += *m_options.relative_frame_offset;
+          else {
+            if (frame_idx == num_frames - 1) {
+              // If we are already at the top of the stack, just warn and don't
+              // reset the frame.
+              result.AppendError("Already at the top of the stack.");
+              return false;
+            } else
+              frame_idx = num_frames - 1;
+          }
         }
       }
     } else {
@@ -445,9 +452,9 @@ may even involve JITing and running code in the target program.)");
   HandleArgumentCompletion(CompletionRequest &request,
                            OptionElementVector &opt_element_vector) override {
     // Arguments are the standard source file completer.
-    CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), CommandCompletions::eVariablePathCompletion,
-        request, nullptr);
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), lldb::eVariablePathCompletion, request,
+        nullptr);
   }
 
 protected:

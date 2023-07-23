@@ -14,7 +14,6 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/Linalg/Utils/IndexingUtils.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -526,12 +525,12 @@ elementwiseMatchAndRewriteHelper(Operation *operation,
   assert(operation->getNumResults() == 1 &&
          "All TOSA elementwise ops should only return a single result.");
 
-  auto results = operation->getResults();
-  auto resultTy = dyn_cast<ShapedType>(operation->getResult(0).getType());
+  auto result = operation->getResult(0);
+  auto resultTy = dyn_cast<RankedTensorType>(result.getType());
 
   if (!resultTy)
-    return rewriter.notifyMatchFailure(operation,
-                                       "All results must be a shaped type");
+    return rewriter.notifyMatchFailure(
+        operation, "All results must be a ranked tensor type");
 
   unsigned rank = resultTy.getRank();
 
@@ -545,7 +544,7 @@ elementwiseMatchAndRewriteHelper(Operation *operation,
   SmallVector<Value> emptyTensors;
 
   SmallVector<Value> dynDims;
-  dynDims.resize(cast<ShapedType>(results.front().getType()).getRank());
+  dynDims.resize(rank);
 
   for (auto arg : operation->getOperands()) {
     auto operandTy = cast<ShapedType>(arg.getType());
@@ -557,12 +556,9 @@ elementwiseMatchAndRewriteHelper(Operation *operation,
 
   SmallVector<Value> filteredDims = condenseValues(dynDims);
 
-  for (auto result : results) {
-    auto resultTy = cast<ShapedType>(result.getType());
-    emptyTensors.push_back(rewriter.create<tensor::EmptyOp>(
-        loc, resultTy.getShape(), resultTy.getElementType(), filteredDims));
-    opResultTypes.push_back(result.getType());
-  }
+  emptyTensors.push_back(
+      rewriter.create<tensor::EmptyOp>(loc, resultTy, filteredDims));
+  opResultTypes.push_back(result.getType());
 
   auto bodyResultTypes = llvm::to_vector<4>(llvm::map_range(
       emptyTensors, [](Value v) { return getElementTypeOrSelf(v); }));
@@ -1887,8 +1883,8 @@ public:
     llvm::SmallVector<Value> results;
 
     auto addDynamicDimension = [&](Value source, int64_t dim) {
-      auto dynamicDim = tensor::createDimValue(builder, loc, source, dim);
-      if (auto dimValue = llvm::dyn_cast_if_present<Value>(dynamicDim.value()))
+      auto sz = tensor::getMixedSize(builder, loc, source, dim);
+      if (auto dimValue = llvm::dyn_cast_if_present<Value>(sz))
         results.push_back(dimValue);
     };
 
@@ -2044,7 +2040,7 @@ struct RFFT2dConverter final : public OpRewritePattern<RFFT2dOp> {
   computeOutputShape(OpBuilder &builder, Location loc, Value input,
                      llvm::SmallVectorImpl<Value> &dynamicSizes) {
     // Get [N, H, W]
-    auto dims = linalg::getMixedDimensions(builder, loc, input);
+    auto dims = tensor::getMixedSizes(builder, loc, input);
 
     // Set W = (W / 2) + 1 to account for the half-sized W dimension of the
     // output tensors.
@@ -2127,8 +2123,8 @@ struct RFFT2dConverter final : public OpRewritePattern<RFFT2dOp> {
         affineDimsExpr(rewriter, 0, 1, 2)});
 
     // Width and height dimensions of the original input.
-    auto dimH = linalg::createOrFoldDimOp(rewriter, loc, input, 1);
-    auto dimW = linalg::createOrFoldDimOp(rewriter, loc, input, 2);
+    auto dimH = rewriter.createOrFold<tensor::DimOp>(loc, input, 1);
+    auto dimW = rewriter.createOrFold<tensor::DimOp>(loc, input, 2);
 
     // Constants and dimension sizes
     auto twoPiAttr = rewriter.getFloatAttr(elementType, 6.283185307179586);

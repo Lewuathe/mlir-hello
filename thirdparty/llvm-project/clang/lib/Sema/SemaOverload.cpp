@@ -6468,7 +6468,7 @@ void Sema::AddOverloadCandidate(
     OverloadCandidateSet &CandidateSet, bool SuppressUserConversions,
     bool PartialOverloading, bool AllowExplicit, bool AllowExplicitConversions,
     ADLCallKind IsADLCandidate, ConversionSequenceList EarlyConversions,
-    OverloadCandidateParamOrder PO) {
+    OverloadCandidateParamOrder PO, bool AggregateCandidateDeduction) {
   const FunctionProtoType *Proto
     = dyn_cast<FunctionProtoType>(Function->getType()->getAs<FunctionType>());
   assert(Proto && "Functions without a prototype cannot be overloaded");
@@ -6635,7 +6635,8 @@ void Sema::AddOverloadCandidate(
   // parameter list is truncated on the right, so that there are
   // exactly m parameters.
   unsigned MinRequiredArgs = Function->getMinRequiredArguments();
-  if (Args.size() < MinRequiredArgs && !PartialOverloading) {
+  if (!AggregateCandidateDeduction && Args.size() < MinRequiredArgs &&
+      !PartialOverloading) {
     // Not enough arguments.
     Candidate.Viable = false;
     Candidate.FailureKind = ovl_fail_too_few_arguments;
@@ -7261,7 +7262,8 @@ void Sema::AddMethodTemplateCandidate(
   ConversionSequenceList Conversions;
   if (TemplateDeductionResult Result = DeduceTemplateArguments(
           MethodTmpl, ExplicitTemplateArgs, Args, Specialization, Info,
-          PartialOverloading, [&](ArrayRef<QualType> ParamTypes) {
+          PartialOverloading, /*AggregateDeductionCandidate=*/false,
+          [&](ArrayRef<QualType> ParamTypes) {
             return CheckNonDependentConversions(
                 MethodTmpl, ParamTypes, Args, CandidateSet, Conversions,
                 SuppressUserConversions, ActingContext, ObjectType,
@@ -7314,7 +7316,7 @@ void Sema::AddTemplateOverloadCandidate(
     TemplateArgumentListInfo *ExplicitTemplateArgs, ArrayRef<Expr *> Args,
     OverloadCandidateSet &CandidateSet, bool SuppressUserConversions,
     bool PartialOverloading, bool AllowExplicit, ADLCallKind IsADLCandidate,
-    OverloadCandidateParamOrder PO) {
+    OverloadCandidateParamOrder PO, bool AggregateCandidateDeduction) {
   if (!CandidateSet.isNewCandidate(FunctionTemplate, PO))
     return;
 
@@ -7344,7 +7346,8 @@ void Sema::AddTemplateOverloadCandidate(
   ConversionSequenceList Conversions;
   if (TemplateDeductionResult Result = DeduceTemplateArguments(
           FunctionTemplate, ExplicitTemplateArgs, Args, Specialization, Info,
-          PartialOverloading, [&](ArrayRef<QualType> ParamTypes) {
+          PartialOverloading, AggregateCandidateDeduction,
+          [&](ArrayRef<QualType> ParamTypes) {
             return CheckNonDependentConversions(
                 FunctionTemplate, ParamTypes, Args, CandidateSet, Conversions,
                 SuppressUserConversions, nullptr, QualType(), {}, PO);
@@ -7380,7 +7383,8 @@ void Sema::AddTemplateOverloadCandidate(
   AddOverloadCandidate(
       Specialization, FoundDecl, Args, CandidateSet, SuppressUserConversions,
       PartialOverloading, AllowExplicit,
-      /*AllowExplicitConversions*/ false, IsADLCandidate, Conversions, PO);
+      /*AllowExplicitConversions=*/false, IsADLCandidate, Conversions, PO,
+      Info.AggregateDeductionCandidateHasMismatchedArity);
 }
 
 /// Check that implicit conversion sequences can be formed for each argument
@@ -8024,8 +8028,7 @@ namespace {
 /// enumeration types.
 class BuiltinCandidateTypeSet  {
   /// TypeSet - A set of types.
-  typedef llvm::SetVector<QualType, SmallVector<QualType, 8>,
-                          llvm::SmallPtrSet<QualType, 8>> TypeSet;
+  typedef llvm::SmallSetVector<QualType, 8> TypeSet;
 
   /// PointerTypes - The set of pointer types that will be used in the
   /// built-in candidates.
@@ -10148,7 +10151,7 @@ bool clang::isBetterOverloadCandidate(
         return Guide2->isImplicit();
 
       //  -- F1 is the copy deduction candidate(16.3.1.8) and F2 is not
-      if (Guide1->isCopyDeductionCandidate())
+      if (Guide1->getDeductionCandidateKind() == DeductionCandidate::Copy)
         return true;
     }
   }
@@ -10750,6 +10753,8 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
   Expr *FromExpr = Conv.Bad.FromExpr;
   QualType FromTy = Conv.Bad.getFromType();
   QualType ToTy = Conv.Bad.getToType();
+  SourceRange ToParamRange =
+      !isObjectArgument ? Fn->getParamDecl(I)->getSourceRange() : SourceRange();
 
   if (FromTy == S.Context.OverloadTy) {
     assert(FromExpr && "overload set argument came from implicit argument?");
@@ -10760,8 +10765,7 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
 
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_overload)
         << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-        << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << ToTy
-        << Name << I + 1;
+        << ToParamRange << ToTy << Name << I + 1;
     MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
     return;
   }
@@ -10790,14 +10794,12 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
       if (isObjectArgument)
         S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_addrspace_this)
             << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second
-            << FnDesc << (FromExpr ? FromExpr->getSourceRange() : SourceRange())
-            << FromQs.getAddressSpace() << ToQs.getAddressSpace();
+            << FnDesc << FromQs.getAddressSpace() << ToQs.getAddressSpace();
       else
         S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_addrspace)
             << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second
-            << FnDesc << (FromExpr ? FromExpr->getSourceRange() : SourceRange())
-            << FromQs.getAddressSpace() << ToQs.getAddressSpace()
-            << ToTy->isReferenceType() << I + 1;
+            << FnDesc << ToParamRange << FromQs.getAddressSpace()
+            << ToQs.getAddressSpace() << ToTy->isReferenceType() << I + 1;
       MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
       return;
     }
@@ -10805,9 +10807,8 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
     if (FromQs.getObjCLifetime() != ToQs.getObjCLifetime()) {
       S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_ownership)
           << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-          << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-          << FromQs.getObjCLifetime() << ToQs.getObjCLifetime()
-          << (unsigned)isObjectArgument << I + 1;
+          << ToParamRange << FromTy << FromQs.getObjCLifetime()
+          << ToQs.getObjCLifetime() << (unsigned)isObjectArgument << I + 1;
       MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
       return;
     }
@@ -10815,18 +10816,8 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
     if (FromQs.getObjCGCAttr() != ToQs.getObjCGCAttr()) {
       S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_gc)
           << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-          << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-          << FromQs.getObjCGCAttr() << ToQs.getObjCGCAttr()
-          << (unsigned)isObjectArgument << I + 1;
-      MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
-      return;
-    }
-
-    if (FromQs.hasUnaligned() != ToQs.hasUnaligned()) {
-      S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_unaligned)
-          << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-          << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-          << FromQs.hasUnaligned() << I + 1;
+          << ToParamRange << FromTy << FromQs.getObjCGCAttr()
+          << ToQs.getObjCGCAttr() << (unsigned)isObjectArgument << I + 1;
       MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
       return;
     }
@@ -10837,13 +10828,11 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
     if (isObjectArgument) {
       S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_cvr_this)
           << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-          << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-          << (CVR - 1);
+          << FromTy << (CVR - 1);
     } else {
       S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_cvr)
           << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-          << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-          << (CVR - 1) << I + 1;
+          << ToParamRange << FromTy << (CVR - 1) << I + 1;
     }
     MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
     return;
@@ -10855,7 +10844,7 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
         << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
         << (unsigned)isObjectArgument << I + 1
         << (Conv.Bad.Kind == BadConversionSequence::rvalue_ref_to_lvalue)
-        << (FromExpr ? FromExpr->getSourceRange() : SourceRange());
+        << ToParamRange;
     MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
     return;
   }
@@ -10865,8 +10854,7 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
   if (FromExpr && isa<InitListExpr>(FromExpr)) {
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_list_argument)
         << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-        << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-        << ToTy << (unsigned)isObjectArgument << I + 1
+        << ToParamRange << FromTy << ToTy << (unsigned)isObjectArgument << I + 1
         << (Conv.Bad.Kind == BadConversionSequence::too_few_initializers ? 1
             : Conv.Bad.Kind == BadConversionSequence::too_many_initializers
                 ? 2
@@ -10885,8 +10873,7 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
     // Emit the generic diagnostic and, optionally, add the hints to it.
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_conv_incomplete)
         << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-        << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-        << ToTy << (unsigned)isObjectArgument << I + 1
+        << ToParamRange << FromTy << ToTy << (unsigned)isObjectArgument << I + 1
         << (unsigned)(Cand->Fix.Kind);
 
     MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
@@ -10927,24 +10914,24 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
   if (BaseToDerivedConversion) {
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_base_to_derived_conv)
         << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-        << (FromExpr ? FromExpr->getSourceRange() : SourceRange())
-        << (BaseToDerivedConversion - 1) << FromTy << ToTy << I + 1;
+        << ToParamRange << (BaseToDerivedConversion - 1) << FromTy << ToTy
+        << I + 1;
     MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
     return;
   }
 
   if (isa<ObjCObjectPointerType>(CFromTy) &&
       isa<PointerType>(CToTy)) {
-      Qualifiers FromQs = CFromTy.getQualifiers();
-      Qualifiers ToQs = CToTy.getQualifiers();
-      if (FromQs.getObjCLifetime() != ToQs.getObjCLifetime()) {
-        S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_arc_conv)
-            << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second
-            << FnDesc << (FromExpr ? FromExpr->getSourceRange() : SourceRange())
-            << FromTy << ToTy << (unsigned)isObjectArgument << I + 1;
-        MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
-        return;
-      }
+    Qualifiers FromQs = CFromTy.getQualifiers();
+    Qualifiers ToQs = CToTy.getQualifiers();
+    if (FromQs.getObjCLifetime() != ToQs.getObjCLifetime()) {
+      S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_arc_conv)
+          << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
+          << ToParamRange << FromTy << ToTy << (unsigned)isObjectArgument
+          << I + 1;
+      MaybeEmitInheritedConstructorNote(S, Cand->FoundDecl);
+      return;
+    }
   }
 
   if (TakingCandidateAddress &&
@@ -10954,8 +10941,7 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
   // Emit the generic diagnostic and, optionally, add the hints to it.
   PartialDiagnostic FDiag = S.PDiag(diag::note_ovl_candidate_bad_conv);
   FDiag << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second << FnDesc
-        << (FromExpr ? FromExpr->getSourceRange() : SourceRange()) << FromTy
-        << ToTy << (unsigned)isObjectArgument << I + 1
+        << ToParamRange << FromTy << ToTy << (unsigned)isObjectArgument << I + 1
         << (unsigned)(Cand->Fix.Kind);
 
   // Check that location of Fn is not in system header.
@@ -11038,11 +11024,13 @@ static void DiagnoseArityMismatch(Sema &S, NamedDecl *Found, Decl *D,
   if (modeCount == 1 && Fn->getParamDecl(0)->getDeclName())
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_arity_one)
         << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second
-        << Description << mode << Fn->getParamDecl(0) << NumFormalArgs;
+        << Description << mode << Fn->getParamDecl(0) << NumFormalArgs
+        << Fn->getParametersSourceRange();
   else
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_arity)
         << (unsigned)FnKindPair.first << (unsigned)FnKindPair.second
-        << Description << mode << modeCount << NumFormalArgs;
+        << Description << mode << modeCount << NumFormalArgs
+        << Fn->getParametersSourceRange();
 
   MaybeEmitInheritedConstructorNote(S, Found);
 }
@@ -12020,7 +12008,16 @@ void OverloadCandidateSet::NoteCandidates(
 
   S.Diag(PD.first, PD.second, shouldDeferDiags(S, Args, OpLoc));
 
-  NoteCandidates(S, Args, Cands, Opc, OpLoc);
+  // In WebAssembly we don't want to emit further diagnostics if a table is
+  // passed as an argument to a function.
+  bool NoteCands = true;
+  for (const Expr *Arg : Args) {
+    if (Arg->getType()->isWebAssemblyTableType())
+      NoteCands = false;
+  }
+
+  if (NoteCands)
+    NoteCandidates(S, Args, Cands, Opc, OpLoc);
 
   if (OCD == OCD_AmbiguousCandidates)
     MaybeDiagnoseAmbiguousConstraints(S, {begin(), end()});
@@ -14001,8 +13998,8 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
               Diag(FnDecl->getLocation(),
                    diag::note_ovl_ambiguous_oper_binary_reversed_self);
               // Mark member== const or provide matching != to disallow reversed
-              // args. Eg. 
-              // struct S { bool operator==(const S&); }; 
+              // args. Eg.
+              // struct S { bool operator==(const S&); };
               // S()==S();
               if (auto *MD = dyn_cast<CXXMethodDecl>(FnDecl))
                 if (Op == OverloadedOperatorKind::OO_EqualEqual &&
@@ -15460,8 +15457,14 @@ Expr *Sema::FixOverloadedFunctionReference(Expr *E, DeclAccessPair Found,
       unsigned ResultIdx = GSE->getResultIndex();
       AssocExprs[ResultIdx] = SubExpr;
 
+      if (GSE->isExprPredicate())
+        return GenericSelectionExpr::Create(
+            Context, GSE->getGenericLoc(), GSE->getControllingExpr(),
+            GSE->getAssocTypeSourceInfos(), AssocExprs, GSE->getDefaultLoc(),
+            GSE->getRParenLoc(), GSE->containsUnexpandedParameterPack(),
+            ResultIdx);
       return GenericSelectionExpr::Create(
-          Context, GSE->getGenericLoc(), GSE->getControllingExpr(),
+          Context, GSE->getGenericLoc(), GSE->getControllingType(),
           GSE->getAssocTypeSourceInfos(), AssocExprs, GSE->getDefaultLoc(),
           GSE->getRParenLoc(), GSE->containsUnexpandedParameterPack(),
           ResultIdx);

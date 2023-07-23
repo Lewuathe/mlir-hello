@@ -306,6 +306,8 @@ class CrashLog(symbolication.Symbolicator):
             if self.show_symbol_progress():
                 with print_lock:
                     print("Getting symbols for %s %s..." % (uuid_str, self.path))
+            # Keep track of unresolved source paths.
+            unavailable_source_paths = set()
             if os.path.exists(self.dsymForUUIDBinary):
                 dsym_for_uuid_command = "%s %s" % (self.dsymForUUIDBinary, uuid_str)
                 s = subprocess.check_output(dsym_for_uuid_command, shell=True)
@@ -335,6 +337,12 @@ class CrashLog(symbolication.Symbolicator):
                                     plist["DBGSymbolRichExecutable"]
                                 )
                                 self.resolved_path = self.path
+                            if "DBGSourcePathRemapping" in plist:
+                                path_remapping = plist["DBGSourcePathRemapping"]
+                                for _, value in path_remapping.items():
+                                    source_path = os.path.expanduser(value)
+                                    if not os.path.exists(source_path):
+                                        unavailable_source_paths.add(source_path)
             if not self.resolved_path and os.path.exists(self.path):
                 if not self.find_matching_slice():
                     return False
@@ -373,6 +381,12 @@ class CrashLog(symbolication.Symbolicator):
             ):
                 with print_lock:
                     print("Resolved symbols for %s %s..." % (uuid_str, self.path))
+                    if len(unavailable_source_paths):
+                        for source_path in unavailable_source_paths:
+                            print(
+                                "Could not access remapped source path for %s %s"
+                                % (uuid_str, source_path)
+                            )
                 return True
             else:
                 self.unavailable = True
@@ -1271,7 +1285,7 @@ class Symbolicate:
         pass
 
     def __call__(self, debugger, command, exe_ctx, result):
-        SymbolicateCrashLogs(debugger, shlex.split(command), result)
+        SymbolicateCrashLogs(debugger, shlex.split(command), result, True)
 
     def get_short_help(self):
         return "Symbolicate one or more darwin crash log files."
@@ -1307,7 +1321,7 @@ def SymbolicateCrashLog(crash_log, options):
         for thread in crash_log.threads:
             if thread.did_crash():
                 for ident in thread.idents:
-                    for image in self.crashlog.find_images_with_identifier(ident):
+                    for image in crash_log.find_images_with_identifier(ident):
                         image.resolve = True
 
     futures = []
@@ -1346,13 +1360,7 @@ def SymbolicateCrashLog(crash_log, options):
             print(error)
 
 
-def load_crashlog_in_scripted_process(debugger, crash_log_file, options, result):
-    crashlog_path = os.path.expanduser(crash_log_file)
-    if not os.path.exists(crashlog_path):
-        raise InteractiveCrashLogException(
-            "crashlog file %s does not exist" % crashlog_path
-        )
-
+def load_crashlog_in_scripted_process(debugger, crashlog_path, options, result):
     crashlog = CrashLogParser.create(debugger, crashlog_path, False).parse()
 
     target = lldb.SBTarget()
@@ -1602,7 +1610,7 @@ be disassembled and lookups can be performed using the addresses found in the cr
     return CreateSymbolicateCrashLogOptions("crashlog", description, True)
 
 
-def SymbolicateCrashLogs(debugger, command_args, result):
+def SymbolicateCrashLogs(debugger, command_args, result, is_command):
     option_parser = CrashLogOptionParser()
 
     if not len(command_args):
@@ -1613,6 +1621,26 @@ def SymbolicateCrashLogs(debugger, command_args, result):
         (options, args) = option_parser.parse_args(command_args)
     except:
         return
+
+    # Interactive mode requires running the crashlog command from inside lldb.
+    if options.interactive and not is_command:
+        lldb_exec = (
+            subprocess.check_output(["/usr/bin/xcrun", "-f", "lldb"])
+            .decode("utf-8")
+            .strip()
+        )
+        sys.exit(
+            os.execv(
+                lldb_exec,
+                [
+                    lldb_exec,
+                    "-o",
+                    "command script import lldb.macosx",
+                    "-o",
+                    "crashlog {}".format(shlex.join(command_args)),
+                ],
+            )
+        )
 
     if options.version:
         print(debugger.GetVersionString())
@@ -1641,17 +1669,22 @@ def SymbolicateCrashLogs(debugger, command_args, result):
     ci = debugger.GetCommandInterpreter()
 
     if args:
-        for crash_log_file in args:
+        for crashlog_file in args:
+            crashlog_path = os.path.expanduser(crashlog_file)
+            if not os.path.exists(crashlog_path):
+                raise FileNotFoundError(
+                    "crashlog file %s does not exist" % crashlog_path
+                )
             if should_run_in_interactive_mode(options, ci):
                 try:
                     load_crashlog_in_scripted_process(
-                        debugger, crash_log_file, options, result
+                        debugger, crashlog_path, options, result
                     )
                 except InteractiveCrashLogException as e:
                     result.SetError(str(e))
             else:
                 crash_log = CrashLogParser.create(
-                    debugger, crash_log_file, options.verbose
+                    debugger, crashlog_path, options.verbose
                 ).parse()
                 SymbolicateCrashLog(crash_log, options)
 
@@ -1660,16 +1693,16 @@ if __name__ == "__main__":
     # Create a new debugger instance
     debugger = lldb.SBDebugger.Create()
     result = lldb.SBCommandReturnObject()
-    SymbolicateCrashLogs(debugger, sys.argv[1:], result)
+    SymbolicateCrashLogs(debugger, sys.argv[1:], result, False)
     lldb.SBDebugger.Destroy(debugger)
 
 
 def __lldb_init_module(debugger, internal_dict):
     debugger.HandleCommand(
-        "command script add -o -c lldb.macosx.crashlog.Symbolicate crashlog"
+        "command script add -o -c lldb.macosx.crashlog.Symbolicate -C disk-file crashlog"
     )
     debugger.HandleCommand(
-        "command script add -o -f lldb.macosx.crashlog.save_crashlog save_crashlog"
+        "command script add -o -f lldb.macosx.crashlog.save_crashlog -C disk-file save_crashlog"
     )
     print(
         '"crashlog" and "save_crashlog" commands have been installed, use '

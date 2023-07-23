@@ -445,6 +445,14 @@ inline cst_pred_ty<is_any_apint> m_AnyIntegralConstant() {
   return cst_pred_ty<is_any_apint>();
 }
 
+struct is_shifted_mask {
+  bool isValue(const APInt &C) { return C.isShiftedMask(); }
+};
+
+inline cst_pred_ty<is_shifted_mask> m_ShiftedMask() {
+  return cst_pred_ty<is_shifted_mask>();
+}
+
 struct is_all_ones {
   bool isValue(const APInt &C) { return C.isAllOnes(); }
 };
@@ -1588,6 +1596,23 @@ template <typename Op_t, unsigned Opcode> struct CastClass_match {
   }
 };
 
+template <typename Op_t> struct PtrToIntSameSize_match {
+  const DataLayout &DL;
+  Op_t Op;
+
+  PtrToIntSameSize_match(const DataLayout &DL, const Op_t &OpMatch)
+      : DL(DL), Op(OpMatch) {}
+
+  template <typename OpTy> bool match(OpTy *V) {
+    if (auto *O = dyn_cast<Operator>(V))
+      return O->getOpcode() == Instruction::PtrToInt &&
+             DL.getTypeSizeInBits(O->getType()) ==
+                 DL.getTypeSizeInBits(O->getOperand(0)->getType()) &&
+             Op.match(O->getOperand(0));
+    return false;
+  }
+};
+
 /// Matches BitCast.
 template <typename OpTy>
 inline CastClass_match<OpTy, Instruction::BitCast> m_BitCast(const OpTy &Op) {
@@ -1598,6 +1623,12 @@ inline CastClass_match<OpTy, Instruction::BitCast> m_BitCast(const OpTy &Op) {
 template <typename OpTy>
 inline CastClass_match<OpTy, Instruction::PtrToInt> m_PtrToInt(const OpTy &Op) {
   return CastClass_match<OpTy, Instruction::PtrToInt>(Op);
+}
+
+template <typename OpTy>
+inline PtrToIntSameSize_match<OpTy> m_PtrToIntSameSize(const DataLayout &DL,
+                                                       const OpTy &Op) {
+  return PtrToIntSameSize_match<OpTy>(DL, Op);
 }
 
 /// Matches IntToPtr.

@@ -3256,6 +3256,17 @@ Parser::ParseCompoundLiteralExpression(ParsedType Ty,
 ///         string-literal
 /// \verbatim
 ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral) {
+  return ParseStringLiteralExpression(AllowUserDefinedLiteral,
+                                      /*Unevaluated=*/false);
+}
+
+ExprResult Parser::ParseUnevaluatedStringLiteralExpression() {
+  return ParseStringLiteralExpression(/*AllowUserDefinedLiteral=*/false,
+                                      /*Unevaluated=*/true);
+}
+
+ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
+                                                bool Unevaluated) {
   assert(isTokenStringLiteral() && "Not a string literal!");
 
   // String concat.  Note that keywords like __func__ and __FUNCTION__ are not
@@ -3266,6 +3277,11 @@ ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral) {
     StringToks.push_back(Tok);
     ConsumeStringToken();
   } while (isTokenStringLiteral());
+
+  if (Unevaluated) {
+    assert(!AllowUserDefinedLiteral && "UDL are always evaluated");
+    return Actions.ActOnUnevaluatedStringLiteral(StringToks);
+  }
 
   // Pass the set of string tokens, ready for concatenation, to the actions.
   return Actions.ActOnStringLiteral(StringToks,
@@ -3286,6 +3302,12 @@ ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral) {
 ///           type-name : assignment-expression
 ///           default : assignment-expression
 /// \endverbatim
+///
+/// As an extension, Clang also accepts:
+/// \verbatim
+///   generic-selection:
+///          _Generic ( type-name, generic-assoc-list )
+/// \endverbatim
 ExprResult Parser::ParseGenericSelectionExpression() {
   assert(Tok.is(tok::kw__Generic) && "_Generic keyword expected");
   if (!getLangOpts().C11)
@@ -3296,8 +3318,20 @@ ExprResult Parser::ParseGenericSelectionExpression() {
   if (T.expectAndConsume())
     return ExprError();
 
+  // We either have a controlling expression or we have a controlling type, and
+  // we need to figure out which it is.
+  TypeResult ControllingType;
   ExprResult ControllingExpr;
-  {
+  if (isTypeIdForGenericSelection()) {
+    ControllingType = ParseTypeName();
+    if (ControllingType.isInvalid()) {
+      SkipUntil(tok::r_paren, StopAtSemi);
+      return ExprError();
+    }
+    const auto *LIT = cast<LocInfoType>(ControllingType.get().get());
+    SourceLocation Loc = LIT->getTypeSourceInfo()->getTypeLoc().getBeginLoc();
+    Diag(Loc, diag::ext_generic_with_type_arg);
+  } else {
     // C11 6.5.1.1p3 "The controlling expression of a generic selection is
     // not evaluated."
     EnterExpressionEvaluationContext Unevaluated(
@@ -3362,10 +3396,13 @@ ExprResult Parser::ParseGenericSelectionExpression() {
   if (T.getCloseLocation().isInvalid())
     return ExprError();
 
-  return Actions.ActOnGenericSelectionExpr(KeyLoc, DefaultLoc,
-                                           T.getCloseLocation(),
-                                           ControllingExpr.get(),
-                                           Types, Exprs);
+  void *ExprOrTy = ControllingExpr.isUsable()
+                       ? ControllingExpr.get()
+                       : ControllingType.get().getAsOpaquePtr();
+
+  return Actions.ActOnGenericSelectionExpr(
+      KeyLoc, DefaultLoc, T.getCloseLocation(), ControllingExpr.isUsable(),
+      ExprOrTy, Types, Exprs);
 }
 
 /// Parse A C++1z fold-expression after the opening paren and optional

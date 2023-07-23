@@ -67,7 +67,7 @@ void test_tuple_or_pair_int_int(TestFunction check, ExceptionTest check_exceptio
   check(SV("__42: 99___"), SV("{:_^11m}"), input);
   check(SV("__42, 99___"), SV("{:_^11n}"), input);
 
-  for (CharT c : SV("aAbBcdeEfFgGopsxX?")) {
+  for (CharT c : SV("aAbBcdeEfFgGopPsxX?")) {
     check_exception("The format-spec should consume the input or end with a '}'",
                     std::basic_string_view{STR("{:") + c + STR("}")},
                     input);
@@ -114,7 +114,7 @@ void test_tuple_or_pair_int_string(TestFunction check, ExceptionTest check_excep
   check(SV("__42: \"hello\"___"), SV("{:_^16m}"), input);
   check(SV("__42, \"hello\"___"), SV("{:_^16n}"), input);
 
-  for (CharT c : SV("aAbBcdeEfFgGopsxX?")) {
+  for (CharT c : SV("aAbBcdeEfFgGopPsxX?")) {
     check_exception("The format-spec should consume the input or end with a '}'",
                     std::basic_string_view{STR("{:") + c + STR("}")},
                     input);
@@ -204,7 +204,7 @@ void test_tuple_int(TestFunction check, ExceptionTest check_exception) {
   check_exception("The format specifier m requires a pair or a two-element tuple", SV("{:m}"), input);
   check(SV("__42___"), SV("{:_^7n}"), input);
 
-  for (CharT c : SV("aAbBcdeEfFgGopsxX?")) {
+  for (CharT c : SV("aAbBcdeEfFgGopPsxX?")) {
     check_exception("The format-spec should consume the input or end with a '}'",
                     std::basic_string_view{STR("{:") + c + STR("}")},
                     input);
@@ -253,7 +253,7 @@ void test_tuple_int_string_color(TestFunction check, ExceptionTest check_excepti
   check_exception("The format specifier m requires a pair or a two-element tuple", SV("{:m}"), input);
   check(SV("__42, \"hello\", \"red\"___"), SV("{:_^23n}"), input);
 
-  for (CharT c : SV("aAbBcdeEfFgGopsxX?")) {
+  for (CharT c : SV("aAbBcdeEfFgGopPsxX?")) {
     check_exception("The format-spec should consume the input or end with a '}'",
                     std::basic_string_view{STR("{:") + c + STR("}")},
                     input);
@@ -326,7 +326,7 @@ void test_nested(TestFunction check, ExceptionTest check_exception, Nested&& inp
   check(SV("__42: (\"hello\", \"red\")___"), SV("{:_^25m}"), input);
   check(SV("__42, (\"hello\", \"red\")___"), SV("{:_^25n}"), input);
 
-  for (CharT c : SV("aAbBcdeEfFgGopsxX?")) {
+  for (CharT c : SV("aAbBcdeEfFgGopPsxX?")) {
     check_exception("The format-spec should consume the input or end with a '}'",
                     std::basic_string_view{STR("{:") + c + STR("}")},
                     input);
@@ -351,23 +351,17 @@ void run_tests(TestFunction check, ExceptionTest check_exception) {
   test_escaping<CharT>(check, std::make_pair(CharT('*'), STR("")));
   test_escaping<CharT>(check, std::make_tuple(CharT('*'), STR("")));
 
-  // Test cvref-qualified types.
+  // Test const ref-qualified types.
   // clang-format off
-  check(SV("(42)"), SV("{}"), std::tuple<               int  >{42});
-  check(SV("(42)"), SV("{}"), std::tuple<const          int  >{42});
-  check(SV("(42)"), SV("{}"), std::tuple<      volatile int  >{42});
-  check(SV("(42)"), SV("{}"), std::tuple<const volatile int  >{42});
+  check(SV("(42)"), SV("{}"), std::tuple<      int  >{42});
+  check(SV("(42)"), SV("{}"), std::tuple<const int  >{42});
 
   int answer = 42;
-  check(SV("(42)"), SV("{}"), std::tuple<               int& >{answer});
-  check(SV("(42)"), SV("{}"), std::tuple<const          int& >{answer});
-  check(SV("(42)"), SV("{}"), std::tuple<      volatile int& >{answer});
-  check(SV("(42)"), SV("{}"), std::tuple<const volatile int& >{answer});
+  check(SV("(42)"), SV("{}"), std::tuple<      int& >{answer});
+  check(SV("(42)"), SV("{}"), std::tuple<const int& >{answer});
 
-  check(SV("(42)"), SV("{}"), std::tuple<               int&&>{42});
-  check(SV("(42)"), SV("{}"), std::tuple<const          int&&>{42});
-  check(SV("(42)"), SV("{}"), std::tuple<      volatile int&&>{42});
-  check(SV("(42)"), SV("{}"), std::tuple<const volatile int&&>{42});
+  check(SV("(42)"), SV("{}"), std::tuple<      int&&>{42});
+  check(SV("(42)"), SV("{}"), std::tuple<const int&&>{42});
   // clang-format on
 }
 

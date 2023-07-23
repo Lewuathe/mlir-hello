@@ -381,8 +381,8 @@ void SIWholeQuadMode::markDefs(const MachineInstr &UseMI, LiveRange &LR,
       if (Reg.isVirtual()) {
         // Iterate over all operands to find relevant definitions
         bool HasDef = false;
-        for (const MachineOperand &Op : MI->operands()) {
-          if (!(Op.isReg() && Op.isDef() && Op.getReg() == Reg))
+        for (const MachineOperand &Op : MI->all_defs()) {
+          if (Op.getReg() != Reg)
             continue;
 
           // Compute lanes defined and overlap with use
@@ -454,14 +454,13 @@ void SIWholeQuadMode::markOperand(const MachineInstr &MI,
     // Handle physical registers that we need to track; this is mostly relevant
     // for VCC, which can appear as the (implicit) input of a uniform branch,
     // e.g. when a loop counter is stored in a VGPR.
-    for (MCRegUnitIterator RegUnit(Reg.asMCReg(), TRI); RegUnit.isValid();
-         ++RegUnit) {
-      LiveRange &LR = LIS->getRegUnit(*RegUnit);
+    for (MCRegUnit Unit : TRI->regunits(Reg.asMCReg())) {
+      LiveRange &LR = LIS->getRegUnit(Unit);
       const VNInfo *Value = LR.Query(LIS->getInstructionIndex(MI)).valueIn();
       if (!Value)
         continue;
 
-      markDefs(MI, LR, *RegUnit, AMDGPU::NoSubRegister, Flag, Worklist);
+      markDefs(MI, LR, Unit, AMDGPU::NoSubRegister, Flag, Worklist);
     }
   }
 }
@@ -472,11 +471,8 @@ void SIWholeQuadMode::markInstructionUses(const MachineInstr &MI, char Flag,
   LLVM_DEBUG(dbgs() << "markInstructionUses " << PrintState(Flag) << ": "
                     << MI);
 
-  for (const MachineOperand &Use : MI.uses()) {
-    if (!Use.isReg() || !Use.isUse())
-      continue;
+  for (const MachineOperand &Use : MI.all_uses())
     markOperand(MI, Use, Flag, Worklist);
-  }
 }
 
 // Scan instructions to determine which ones require an Exact execmask and
@@ -1140,7 +1136,7 @@ MachineBasicBlock::iterator SIWholeQuadMode::prepareInsertion(
     return PreferLast ? Last : First;
 
   LiveRange &LR =
-      LIS->getRegUnit(*MCRegUnitIterator(MCRegister::from(AMDGPU::SCC), TRI));
+      LIS->getRegUnit(*TRI->regunits(MCRegister::from(AMDGPU::SCC)).begin());
   auto MBBE = MBB.end();
   SlotIndex FirstIdx = First != MBBE ? LIS->getInstructionIndex(*First)
                                      : LIS->getMBBEndIdx(&MBB);
@@ -1186,11 +1182,9 @@ MachineBasicBlock::iterator SIWholeQuadMode::prepareInsertion(
   // does not need to be preserved.
   while (MBBI != Last) {
     bool IsExecDef = false;
-    for (const MachineOperand &MO : MBBI->operands()) {
-      if (MO.isReg() && MO.isDef()) {
-        IsExecDef |=
-            MO.getReg() == AMDGPU::EXEC_LO || MO.getReg() == AMDGPU::EXEC;
-      }
+    for (const MachineOperand &MO : MBBI->all_defs()) {
+      IsExecDef |=
+          MO.getReg() == AMDGPU::EXEC_LO || MO.getReg() == AMDGPU::EXEC;
     }
     if (!IsExecDef)
       break;
@@ -1377,6 +1371,10 @@ void SIWholeQuadMode::processBlock(MachineBasicBlock &MBB, bool IsEntry) {
         // safely leave Strict mode enabled.
         Needs = StateExact | StateWQM | StateStrict;
       }
+
+      // Exact mode exit can occur in terminators, but must be before branches.
+      if (MI.isBranch() && OutNeeds == StateExact)
+        Needs = StateExact;
 
       ++Next;
     } else {

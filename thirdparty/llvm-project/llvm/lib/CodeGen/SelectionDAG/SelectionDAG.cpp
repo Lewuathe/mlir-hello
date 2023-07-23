@@ -455,6 +455,10 @@ ISD::NodeType ISD::getVecReduceBaseOpcode(unsigned VecReduceOpcode) {
   case ISD::VECREDUCE_FMIN:
   case ISD::VP_REDUCE_FMIN:
     return ISD::FMINNUM;
+  case ISD::VECREDUCE_FMAXIMUM:
+    return ISD::FMAXIMUM;
+  case ISD::VECREDUCE_FMINIMUM:
+    return ISD::FMINIMUM;
   }
 }
 
@@ -923,6 +927,7 @@ static void AddNodeIDCustom(FoldingSetNodeID &ID, const SDNode *N) {
     ID.AddInteger(MN->getRawSubclassData());
     ID.AddInteger(MN->getPointerInfo().getAddrSpace());
     ID.AddInteger(MN->getMemOperand()->getFlags());
+    ID.AddInteger(MN->getMemoryVT().getRawBits());
   }
 }
 
@@ -4977,7 +4982,8 @@ bool SelectionDAG::isKnownNeverNaN(SDValue Op, bool SNaN, unsigned Depth) const 
   case ISD::FROUND:
   case ISD::FROUNDEVEN:
   case ISD::FRINT:
-  case ISD::FNEARBYINT: {
+  case ISD::FNEARBYINT:
+  case ISD::FLDEXP: {
     if (SNaN)
       return true;
     return isKnownNeverNaN(Op.getOperand(0), SNaN, Depth + 1);
@@ -5090,14 +5096,95 @@ bool SelectionDAG::isKnownNeverZero(SDValue Op, unsigned Depth) const {
                                [](ConstantSDNode *C) { return !C->isZero(); }))
     return true;
 
-  // TODO: Recognize more cases here.
+  // TODO: Recognize more cases here. Most of the cases are also incomplete to
+  // some degree.
   switch (Op.getOpcode()) {
-  default: break;
+  default:
+    break;
+
   case ISD::OR:
-    if (isKnownNeverZero(Op.getOperand(1), Depth + 1) ||
-        isKnownNeverZero(Op.getOperand(0), Depth + 1))
+    return isKnownNeverZero(Op.getOperand(1), Depth + 1) ||
+           isKnownNeverZero(Op.getOperand(0), Depth + 1);
+
+  case ISD::VSELECT:
+  case ISD::SELECT:
+    return isKnownNeverZero(Op.getOperand(1), Depth + 1) &&
+           isKnownNeverZero(Op.getOperand(2), Depth + 1);
+
+  case ISD::SHL:
+    if (Op->getFlags().hasNoSignedWrap() || Op->getFlags().hasNoUnsignedWrap())
+      return isKnownNeverZero(Op.getOperand(0), Depth + 1);
+
+    // 1 << X is never zero. TODO: This can be expanded if we can bound X.
+    // The expression is really !Known.One[BitWidth-MaxLog2(Known):0].isZero()
+    if (computeKnownBits(Op.getOperand(0), Depth + 1).One[0])
       return true;
     break;
+
+  case ISD::UADDSAT:
+  case ISD::UMAX:
+    return isKnownNeverZero(Op.getOperand(1), Depth + 1) ||
+           isKnownNeverZero(Op.getOperand(0), Depth + 1);
+
+  case ISD::UMIN:
+    return isKnownNeverZero(Op.getOperand(1), Depth + 1) &&
+           isKnownNeverZero(Op.getOperand(0), Depth + 1);
+
+  case ISD::ROTL:
+  case ISD::ROTR:
+  case ISD::BITREVERSE:
+  case ISD::BSWAP:
+  case ISD::CTPOP:
+  case ISD::ABS:
+    return isKnownNeverZero(Op.getOperand(0), Depth + 1);
+
+  case ISD::SRA:
+  case ISD::SRL:
+    if (Op->getFlags().hasExact())
+      return isKnownNeverZero(Op.getOperand(0), Depth + 1);
+    // Signed >> X is never zero. TODO: This can be expanded if we can bound X.
+    // The expression is really
+    // !Known.One[SignBit:SignBit-(BitWidth-MaxLog2(Known))].isZero()
+    if (computeKnownBits(Op.getOperand(0), Depth + 1).isNegative())
+      return true;
+    break;
+
+  case ISD::UDIV:
+  case ISD::SDIV:
+    // div exact can only produce a zero if the dividend is zero.
+    // TODO: For udiv this is also true if Op1 u<= Op0
+    if (Op->getFlags().hasExact())
+      return isKnownNeverZero(Op.getOperand(0), Depth + 1);
+    break;
+
+  case ISD::ADD:
+    if (Op->getFlags().hasNoUnsignedWrap())
+      if (isKnownNeverZero(Op.getOperand(1), Depth + 1) ||
+          isKnownNeverZero(Op.getOperand(0), Depth + 1))
+        return true;
+    // TODO: There are a lot more cases we can prove for add.
+    break;
+
+  case ISD::SUB: {
+    if (isNullConstant(Op.getOperand(0)))
+      return isKnownNeverZero(Op.getOperand(1), Depth + 1);
+
+    std::optional<bool> ne =
+        KnownBits::ne(computeKnownBits(Op.getOperand(0), Depth + 1),
+                      computeKnownBits(Op.getOperand(1), Depth + 1));
+    return ne && *ne;
+  }
+
+  case ISD::MUL:
+    if (Op->getFlags().hasNoSignedWrap() || Op->getFlags().hasNoUnsignedWrap())
+      if (isKnownNeverZero(Op.getOperand(1), Depth + 1) &&
+          isKnownNeverZero(Op.getOperand(0), Depth + 1))
+        return true;
+    break;
+
+  case ISD::ZERO_EXTEND:
+  case ISD::SIGN_EXTEND:
+    return isKnownNeverZero(Op.getOperand(0), Depth + 1);
   }
 
   return computeKnownBits(Op, Depth).isNonZero();
@@ -5107,7 +5194,7 @@ bool SelectionDAG::isEqualTo(SDValue A, SDValue B) const {
   // Check the obvious case.
   if (A == B) return true;
 
-  // For for negative and positive zero.
+  // For negative and positive zero.
   if (const ConstantFPSDNode *CA = dyn_cast<ConstantFPSDNode>(A))
     if (const ConstantFPSDNode *CB = dyn_cast<ConstantFPSDNode>(B))
       if (CA->isZero() && CB->isZero()) return true;
@@ -6917,6 +7004,13 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
     if (N1.getValueType() == VT)
       return N1;
     break;
+  case ISD::VP_TRUNCATE:
+  case ISD::VP_SIGN_EXTEND:
+  case ISD::VP_ZERO_EXTEND:
+    // Don't create noop casts.
+    if (N1.getValueType() == VT)
+      return N1;
+    break;
   }
 
   // Memoize node if it doesn't produce a flag.
@@ -8054,6 +8148,7 @@ SDValue SelectionDAG::getMemIntrinsicNode(unsigned Opcode, const SDLoc &dl,
         Opcode, dl.getIROrder(), VTList, MemVT, MMO));
     ID.AddInteger(MMO->getPointerInfo().getAddrSpace());
     ID.AddInteger(MMO->getFlags());
+    ID.AddInteger(MemVT.getRawBits());
     void *IP = nullptr;
     if (SDNode *E = FindNodeOrInsertPos(ID, dl, IP)) {
       cast<MemIntrinsicSDNode>(E)->refineAlignment(MMO);
@@ -9214,6 +9309,60 @@ SDValue SelectionDAG::getMaskedScatter(SDVTList VTs, EVT MemVT, const SDLoc &dl,
   assert(isa<ConstantSDNode>(N->getScale()) &&
          cast<ConstantSDNode>(N->getScale())->getAPIntValue().isPowerOf2() &&
          "Scale should be a constant power of 2");
+
+  CSEMap.InsertNode(N, IP);
+  InsertNode(N);
+  SDValue V(N, 0);
+  NewSDValueDbgMsg(V, "Creating new node: ", this);
+  return V;
+}
+
+SDValue SelectionDAG::getGetFPEnv(SDValue Chain, const SDLoc &dl, SDValue Ptr,
+                                  EVT MemVT, MachineMemOperand *MMO) {
+  assert(Chain.getValueType() == MVT::Other && "Invalid chain type");
+  SDVTList VTs = getVTList(MVT::Other);
+  SDValue Ops[] = {Chain, Ptr};
+  FoldingSetNodeID ID;
+  AddNodeIDNode(ID, ISD::GET_FPENV_MEM, VTs, Ops);
+  ID.AddInteger(MemVT.getRawBits());
+  ID.AddInteger(getSyntheticNodeSubclassData<FPStateAccessSDNode>(
+      ISD::GET_FPENV_MEM, dl.getIROrder(), VTs, MemVT, MMO));
+  ID.AddInteger(MMO->getPointerInfo().getAddrSpace());
+  ID.AddInteger(MMO->getFlags());
+  void *IP = nullptr;
+  if (SDNode *E = FindNodeOrInsertPos(ID, dl, IP))
+    return SDValue(E, 0);
+
+  auto *N = newSDNode<FPStateAccessSDNode>(ISD::GET_FPENV_MEM, dl.getIROrder(),
+                                           dl.getDebugLoc(), VTs, MemVT, MMO);
+  createOperands(N, Ops);
+
+  CSEMap.InsertNode(N, IP);
+  InsertNode(N);
+  SDValue V(N, 0);
+  NewSDValueDbgMsg(V, "Creating new node: ", this);
+  return V;
+}
+
+SDValue SelectionDAG::getSetFPEnv(SDValue Chain, const SDLoc &dl, SDValue Ptr,
+                                  EVT MemVT, MachineMemOperand *MMO) {
+  assert(Chain.getValueType() == MVT::Other && "Invalid chain type");
+  SDVTList VTs = getVTList(MVT::Other);
+  SDValue Ops[] = {Chain, Ptr};
+  FoldingSetNodeID ID;
+  AddNodeIDNode(ID, ISD::SET_FPENV_MEM, VTs, Ops);
+  ID.AddInteger(MemVT.getRawBits());
+  ID.AddInteger(getSyntheticNodeSubclassData<FPStateAccessSDNode>(
+      ISD::SET_FPENV_MEM, dl.getIROrder(), VTs, MemVT, MMO));
+  ID.AddInteger(MMO->getPointerInfo().getAddrSpace());
+  ID.AddInteger(MMO->getFlags());
+  void *IP = nullptr;
+  if (SDNode *E = FindNodeOrInsertPos(ID, dl, IP))
+    return SDValue(E, 0);
+
+  auto *N = newSDNode<FPStateAccessSDNode>(ISD::SET_FPENV_MEM, dl.getIROrder(),
+                                           dl.getDebugLoc(), VTs, MemVT, MMO);
+  createOperands(N, Ops);
 
   CSEMap.InsertNode(N, IP);
   InsertNode(N);
@@ -10418,8 +10567,7 @@ void SelectionDAG::salvageDebugInfo(SDNode &N) {
     case ISD::ADD:
       SDValue N0 = N.getOperand(0);
       SDValue N1 = N.getOperand(1);
-      if (!isConstantIntBuildVectorOrConstantInt(N0) &&
-          isConstantIntBuildVectorOrConstantInt(N1)) {
+      if (!isa<ConstantSDNode>(N0) && isa<ConstantSDNode>(N1)) {
         uint64_t Offset = N.getConstantOperandVal(1);
 
         // Rewrite an ADD constant node into a DIExpression. Since we are
@@ -11571,22 +11719,51 @@ SelectionDAG::matchBinOpReduction(SDNode *Extract, ISD::NodeType &BinOp,
 }
 
 SDValue SelectionDAG::UnrollVectorOp(SDNode *N, unsigned ResNE) {
-  assert(N->getNumValues() == 1 &&
-         "Can't unroll a vector with multiple results!");
-
   EVT VT = N->getValueType(0);
-  unsigned NE = VT.getVectorNumElements();
   EVT EltVT = VT.getVectorElementType();
-  SDLoc dl(N);
+  unsigned NE = VT.getVectorNumElements();
 
-  SmallVector<SDValue, 8> Scalars;
-  SmallVector<SDValue, 4> Operands(N->getNumOperands());
+  SDLoc dl(N);
 
   // If ResNE is 0, fully unroll the vector op.
   if (ResNE == 0)
     ResNE = NE;
   else if (NE > ResNE)
     NE = ResNE;
+
+  if (N->getNumValues() == 2) {
+    SmallVector<SDValue, 8> Scalars0, Scalars1;
+    SmallVector<SDValue, 4> Operands(N->getNumOperands());
+    EVT VT1 = N->getValueType(1);
+    EVT EltVT1 = VT1.getVectorElementType();
+
+    unsigned i;
+    for (i = 0; i != NE; ++i) {
+      for (unsigned j = 0, e = N->getNumOperands(); j != e; ++j) {
+        SDValue Operand = N->getOperand(j);
+        EVT OperandVT = Operand.getValueType();
+
+        // A vector operand; extract a single element.
+        EVT OperandEltVT = OperandVT.getVectorElementType();
+        Operands[j] = getNode(ISD::EXTRACT_VECTOR_ELT, dl, OperandEltVT,
+                              Operand, getVectorIdxConstant(i, dl));
+      }
+
+      SDValue EltOp = getNode(N->getOpcode(), dl, {EltVT, EltVT1}, Operands);
+      Scalars0.push_back(EltOp);
+      Scalars1.push_back(EltOp.getValue(1));
+    }
+
+    SDValue Vec0 = getBuildVector(VT, dl, Scalars0);
+    SDValue Vec1 = getBuildVector(VT1, dl, Scalars1);
+    return getMergeValues({Vec0, Vec1}, dl);
+  }
+
+  assert(N->getNumValues() == 1 &&
+         "Can't unroll a vector with multiple results!");
+
+  SmallVector<SDValue, 8> Scalars;
+  SmallVector<SDValue, 4> Operands(N->getNumOperands());
 
   unsigned i;
   for (i= 0; i != NE; ++i) {
@@ -12339,7 +12516,51 @@ SDValue SelectionDAG::getNeutralElement(unsigned Opcode, const SDLoc &DL,
 
     return getConstantFP(NeutralAF, DL, VT);
   }
+  case ISD::FMINIMUM:
+  case ISD::FMAXIMUM: {
+    // Neutral element for fminimum is Inf or FLT_MAX, depending on FMF.
+    const fltSemantics &Semantics = EVTToAPFloatSemantics(VT);
+    APFloat NeutralAF = !Flags.hasNoInfs() ? APFloat::getInf(Semantics)
+                                           : APFloat::getLargest(Semantics);
+    if (Opcode == ISD::FMAXIMUM)
+      NeutralAF.changeSign();
+
+    return getConstantFP(NeutralAF, DL, VT);
   }
+
+  }
+}
+
+/// Helper used to make a call to a library function that has one argument of
+/// pointer type.
+///
+/// Such functions include 'fegetmode', 'fesetenv' and some others, which are
+/// used to get or set floating-point state. They have one argument of pointer
+/// type, which points to the memory region containing bits of the
+/// floating-point state. The value returned by such function is ignored in the
+/// created call.
+///
+/// \param LibFunc Reference to library function (value of RTLIB::Libcall).
+/// \param Ptr Pointer used to save/load state.
+/// \param InChain Ingoing token chain.
+/// \returns Outgoing chain token.
+SDValue SelectionDAG::makeStateFunctionCall(unsigned LibFunc, SDValue Ptr,
+                                            SDValue InChain,
+                                            const SDLoc &DLoc) {
+  assert(InChain.getValueType() == MVT::Other && "Expected token chain");
+  TargetLowering::ArgListTy Args;
+  TargetLowering::ArgListEntry Entry;
+  Entry.Node = Ptr;
+  Entry.Ty = Ptr.getValueType().getTypeForEVT(*getContext());
+  Args.push_back(Entry);
+  RTLIB::Libcall LC = static_cast<RTLIB::Libcall>(LibFunc);
+  SDValue Callee = getExternalSymbol(TLI->getLibcallName(LC),
+                                     TLI->getPointerTy(getDataLayout()));
+  TargetLowering::CallLoweringInfo CLI(*this);
+  CLI.setDebugLoc(DLoc).setChain(InChain).setLibCallee(
+      TLI->getLibcallCallingConv(LC), Type::getVoidTy(*getContext()), Callee,
+      std::move(Args));
+  return TLI->LowerCallTo(CLI).second;
 }
 
 void SelectionDAG::copyExtraInfo(SDNode *From, SDNode *To) {

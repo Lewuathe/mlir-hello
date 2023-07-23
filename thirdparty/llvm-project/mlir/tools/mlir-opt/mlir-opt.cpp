@@ -14,6 +14,7 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/InitAllDialects.h"
+#include "mlir/InitAllExtensions.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -72,6 +73,7 @@ void registerTestAffineLoopParametricTilingPass();
 void registerTestArithEmulateWideIntPass();
 void registerTestAliasAnalysisPass();
 void registerTestBuiltinAttributeInterfaces();
+void registerTestBuiltinDistinctAttributes();
 void registerTestCallGraphPass();
 void registerTestCfAssertPass();
 void registerTestConstantFold();
@@ -86,6 +88,7 @@ void registerTestDiagnosticsPass();
 void registerTestDialectConversionPasses();
 void registerTestDominancePass();
 void registerTestDynamicPipelinePass();
+void registerTestEmulateNarrowTypePass();
 void registerTestExpandMathPass();
 void registerTestFooAnalysisPass();
 void registerTestComposeSubView();
@@ -112,6 +115,7 @@ void registerTestMathAlgebraicSimplificationPass();
 void registerTestMathPolynomialApproximationPass();
 void registerTestMemRefDependenceCheck();
 void registerTestMemRefStrideCalculation();
+void registerTestNextAccessPass();
 void registerTestOneToNTypeConversionPass();
 void registerTestOpaqueLoc();
 void registerTestPadFusion();
@@ -186,6 +190,7 @@ void registerTestPasses() {
   mlir::test::registerTestAliasAnalysisPass();
   mlir::test::registerTestArithEmulateWideIntPass();
   mlir::test::registerTestBuiltinAttributeInterfaces();
+  mlir::test::registerTestBuiltinDistinctAttributes();
   mlir::test::registerTestCallGraphPass();
   mlir::test::registerTestCfAssertPass();
   mlir::test::registerTestConstantFold();
@@ -204,6 +209,7 @@ void registerTestPasses() {
   mlir::test::registerTestDeadCodeAnalysisPass();
   mlir::test::registerTestDominancePass();
   mlir::test::registerTestDynamicPipelinePass();
+  mlir::test::registerTestEmulateNarrowTypePass();
   mlir::test::registerTestExpandMathPass();
   mlir::test::registerTestFooAnalysisPass();
   mlir::test::registerTestComposeSubView();
@@ -229,6 +235,7 @@ void registerTestPasses() {
   mlir::test::registerTestMathPolynomialApproximationPass();
   mlir::test::registerTestMemRefDependenceCheck();
   mlir::test::registerTestMemRefStrideCalculation();
+  mlir::test::registerTestNextAccessPass();
   mlir::test::registerTestOneToNTypeConversionPass();
   mlir::test::registerTestOpaqueLoc();
   mlir::test::registerTestPadFusion();
@@ -259,6 +266,8 @@ int main(int argc, char **argv) {
 #endif
   DialectRegistry registry;
   registerAllDialects(registry);
+  registerAllExtensions(registry);
+
 #ifdef MLIR_INCLUDE_TESTS
   ::test::registerTestDialect(registry);
   ::test::registerTestTransformDialectExtension(registry);
