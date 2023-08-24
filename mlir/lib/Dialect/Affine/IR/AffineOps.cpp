@@ -1278,17 +1278,16 @@ mlir::affine::makeComposedFoldedAffineApply(OpBuilder &b, Location loc,
                                             ArrayRef<OpFoldResult> operands) {
   assert(map.getNumResults() == 1 && "building affine.apply with !=1 result");
 
-  // Temporarily disconnect the listener, so that no notification is triggered
-  // if the op is folded.
+  // Create new builder without a listener, so that no notification is
+  // triggered if the op is folded.
   // TODO: OpBuilder::createOrFold should return OpFoldResults, then this
   // workaround is no longer needed.
-  OpBuilder::Listener *listener = b.getListener();
-  b.setListener(nullptr);
-  auto listenerResetter =
-      llvm::make_scope_exit([listener, &b] { b.setListener(listener); });
+  OpBuilder newBuilder(b.getContext());
+  newBuilder.setInsertionPoint(b.getInsertionBlock(), b.getInsertionPoint());
 
   // Create op.
-  AffineApplyOp applyOp = makeComposedAffineApply(b, loc, map, operands);
+  AffineApplyOp applyOp =
+      makeComposedAffineApply(newBuilder, loc, map, operands);
 
   // Get constant operands.
   SmallVector<Attribute> constOperands(applyOp->getNumOperands());
@@ -1299,7 +1298,7 @@ mlir::affine::makeComposedFoldedAffineApply(OpBuilder &b, Location loc,
   SmallVector<OpFoldResult> foldResults;
   if (failed(applyOp->fold(constOperands, foldResults)) ||
       foldResults.empty()) {
-    if (listener)
+    if (OpBuilder::Listener *listener = b.getListener())
       listener->notifyOperationInserted(applyOp);
     return applyOp.getResult();
   }
@@ -1347,17 +1346,15 @@ template <typename OpTy>
 static OpFoldResult makeComposedFoldedMinMax(OpBuilder &b, Location loc,
                                              AffineMap map,
                                              ArrayRef<OpFoldResult> operands) {
-  // Temporarily disconnect the listener, so that no notification is triggered
-  // if the op is folded.
+  // Create new builder without a listener, so that no notification is
+  // triggered if the op is folded.
   // TODO: OpBuilder::createOrFold should return OpFoldResults, then this
   // workaround is no longer needed.
-  OpBuilder::Listener *listener = b.getListener();
-  b.setListener(nullptr);
-  auto listenerResetter =
-      llvm::make_scope_exit([listener, &b] { b.setListener(listener); });
+  OpBuilder newBuilder(b.getContext());
+  newBuilder.setInsertionPoint(b.getInsertionBlock(), b.getInsertionPoint());
 
   // Create op.
-  auto minMaxOp = makeComposedMinMax<OpTy>(b, loc, map, operands);
+  auto minMaxOp = makeComposedMinMax<OpTy>(newBuilder, loc, map, operands);
 
   // Get constant operands.
   SmallVector<Attribute> constOperands(minMaxOp->getNumOperands());
@@ -1368,7 +1365,7 @@ static OpFoldResult makeComposedFoldedMinMax(OpBuilder &b, Location loc,
   SmallVector<OpFoldResult> foldResults;
   if (failed(minMaxOp->fold(constOperands, foldResults)) ||
       foldResults.empty()) {
-    if (listener)
+    if (OpBuilder::Listener *listener = b.getListener())
       listener->notifyOperationInserted(minMaxOp);
     return minMaxOp.getResult();
   }
@@ -2383,7 +2380,7 @@ void AffineForOp::getCanonicalizationPatterns(RewritePatternSet &results,
 /// induction variable. AffineForOp only has one region, so zero is the only
 /// valid value for `index`.
 OperandRange
-AffineForOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
+AffineForOp::getEntrySuccessorOperands(std::optional<unsigned> index) {
   assert((!index || *index == 0) && "invalid region index");
 
   // The initial operands map to the loop arguments after the induction
@@ -2397,8 +2394,7 @@ AffineForOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
 /// correspond to a constant value for each operand, or null if that operand is
 /// not a constant.
 void AffineForOp::getSuccessorRegions(
-    std::optional<unsigned> index, ArrayRef<Attribute> operands,
-    SmallVectorImpl<RegionSuccessor> &regions) {
+    std::optional<unsigned> index, SmallVectorImpl<RegionSuccessor> &regions) {
   assert((!index.has_value() || index.value() == 0) && "expected loop region");
   // The loop may typically branch back to its body or to the parent operation.
   // If the predecessor is the parent op and the trip count is known to be at
@@ -2863,18 +2859,20 @@ struct AlwaysTrueOrFalseIf : public OpRewritePattern<AffineIfOp> {
 /// AffineIfOp has two regions -- `then` and `else`. The flow of data should be
 /// as follows: AffineIfOp -> `then`/`else` -> AffineIfOp
 void AffineIfOp::getSuccessorRegions(
-    std::optional<unsigned> index, ArrayRef<Attribute> operands,
-    SmallVectorImpl<RegionSuccessor> &regions) {
+    std::optional<unsigned> index, SmallVectorImpl<RegionSuccessor> &regions) {
   // If the predecessor is an AffineIfOp, then branching into both `then` and
   // `else` region is valid.
   if (!index.has_value()) {
     regions.reserve(2);
     regions.push_back(
         RegionSuccessor(&getThenRegion(), getThenRegion().getArguments()));
-    // Don't consider the else region if it is empty.
-    if (!getElseRegion().empty())
+    // If the "else" region is empty, branch bach into parent.
+    if (getElseRegion().empty()) {
+      regions.push_back(getResults());
+    } else {
       regions.push_back(
           RegionSuccessor(&getElseRegion(), getElseRegion().getArguments()));
+    }
     return;
   }
 

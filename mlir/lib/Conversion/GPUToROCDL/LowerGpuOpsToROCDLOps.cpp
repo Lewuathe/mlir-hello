@@ -13,10 +13,15 @@
 
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/GPUToROCDL/GPUToROCDLPass.h"
+#include "mlir/Dialect/Arith/Transforms/Passes.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
 
 #include "mlir/Conversion/AMDGPUToROCDL/AMDGPUToROCDL.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
+#include "mlir/Conversion/GPUCommon/GPUCommonPass.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/LoweringOptions.h"
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
@@ -24,13 +29,13 @@
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVM.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlow.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/GPU/Transforms/Passes.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
 #include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/Pass/Pass.h"
@@ -60,6 +65,38 @@ static bool canBeCalledWithBarePointers(gpu::GPUFuncOp func) {
 }
 
 namespace {
+struct GPULaneIdOpToROCDL : ConvertOpToLLVMPattern<gpu::LaneIdOp> {
+  using ConvertOpToLLVMPattern<gpu::LaneIdOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(gpu::LaneIdOp op, gpu::LaneIdOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto loc = op->getLoc();
+    MLIRContext *context = rewriter.getContext();
+    // convert to:  %mlo = call @llvm.amdgcn.mbcnt.lo(-1, 0)
+    // followed by: %lid = call @llvm.amdgcn.mbcnt.hi(-1, %mlo)
+
+    Type intTy = IntegerType::get(context, 32);
+    Value zero = rewriter.createOrFold<arith::ConstantIntOp>(loc, 0, 32);
+    Value minus1 = rewriter.createOrFold<arith::ConstantIntOp>(loc, -1, 32);
+    Value mbcntLo =
+        rewriter.create<ROCDL::MbcntLoOp>(loc, intTy, ValueRange{minus1, zero});
+    Value laneId = rewriter.create<ROCDL::MbcntHiOp>(
+        loc, intTy, ValueRange{minus1, mbcntLo});
+    // Truncate or extend the result depending on the index bitwidth specified
+    // by the LLVMTypeConverter options.
+    const unsigned indexBitwidth = getTypeConverter()->getIndexTypeBitwidth();
+    if (indexBitwidth > 32) {
+      laneId = rewriter.create<LLVM::SExtOp>(
+          loc, IntegerType::get(context, indexBitwidth), laneId);
+    } else if (indexBitwidth < 32) {
+      laneId = rewriter.create<LLVM::TruncOp>(
+          loc, IntegerType::get(context, indexBitwidth), laneId);
+    }
+    rewriter.replaceOp(op, {laneId});
+    return success();
+  }
+};
 
 /// Import the GPU Ops to ROCDL Patterns.
 #include "GPUToROCDL.cpp.inc"
@@ -130,6 +167,7 @@ struct LowerGpuOpsToROCDLOpsPass
     {
       RewritePatternSet patterns(ctx);
       populateGpuRewritePatterns(patterns);
+      arith::populateExpandBFloat16Patterns(patterns);
       (void)applyPatternsAndFoldGreedily(m, std::move(patterns));
     }
 
@@ -239,6 +277,8 @@ void mlir::populateGpuToROCDLConversionPatterns(
     // Use address space = 4 to match the OpenCL definition of printf()
     patterns.add<GPUPrintfOpToLLVMCallLowering>(converter, /*addressSpace=*/4);
   }
+
+  patterns.add<GPULaneIdOpToROCDL>(converter);
 
   populateOpPatterns<math::AbsFOp>(converter, patterns, "__ocml_fabs_f32",
                                    "__ocml_fabs_f64");

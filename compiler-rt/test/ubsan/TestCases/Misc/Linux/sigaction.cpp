@@ -5,13 +5,13 @@
 // The test seems to segfault on aarch64 with tsan:
 // https://lab.llvm.org/buildbot/#/builders/179/builds/6662
 // Reason unknown, needs debugging.
-// XFAIL: target=aarch64{{.*}} && ubsan-tsan
+// UNSUPPORTED: target=aarch64{{.*}} && ubsan-tsan
 
 #include <assert.h>
 #include <signal.h>
 #include <stdio.h>
 
-__attribute__((constructor(0))) void ctor() {
+__attribute__((constructor(1))) void ctor() {
   fprintf(stderr, "INIT\n");
   struct sigaction old;
   assert(!sigaction(SIGSEGV, nullptr, &old));

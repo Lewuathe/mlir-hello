@@ -47,6 +47,7 @@ using namespace test;
 using namespace ast_matchers;
 using llvm::IsStringMapEntry;
 using ::testing::DescribeMatcher;
+using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 using ::testing::NotNull;
 using ::testing::Test;
@@ -82,6 +83,30 @@ TEST(DataflowAnalysisTest, NoopAnalysis) {
   EXPECT_EQ(BlockStates.size(), 2u);
   EXPECT_TRUE(BlockStates[0].has_value());
   EXPECT_TRUE(BlockStates[1].has_value());
+}
+
+// Basic test that `diagnoseFunction` calls the Diagnoser function for the
+// number of elements expected.
+TEST(DataflowAnalysisTest, DiagnoseFunctionDiagnoserCalledOnEachElement) {
+  std::string Code = R"(void target() { int x = 0; ++x; })";
+  std::unique_ptr<ASTUnit> AST =
+      tooling::buildASTFromCodeWithArgs(Code, {"-std=c++11"});
+
+  auto *Func =
+      cast<FunctionDecl>(findValueDecl(AST->getASTContext(), "target"));
+  auto Diagnoser = [](const CFGElement &Elt, ASTContext &,
+                      const TransferStateForDiagnostics<NoopLattice> &) {
+    std::vector<std::string> Diagnostics(1);
+    llvm::raw_string_ostream OS(Diagnostics.front());
+    Elt.dumpToStream(OS);
+    return Diagnostics;
+  };
+  auto Result = diagnoseFunction<NoopAnalysis, std::string>(
+      *Func, AST->getASTContext(), Diagnoser);
+  // `diagnoseFunction` provides no guarantees about the order in which elements
+  // are visited, so we use `UnorderedElementsAre`.
+  EXPECT_THAT_EXPECTED(Result, llvm::HasValue(UnorderedElementsAre(
+                                   "0\n", "int x = 0;\n", "x\n", "++x\n")));
 }
 
 struct NonConvergingLattice {
@@ -370,13 +395,6 @@ TEST_F(NoreturnDestructorTest, ConditionalOperatorNestedBranchReturns) {
   // FIXME: Called functions at point `p` should contain only "foo".
 }
 
-StructValue &createNewStructValue(AggregateStorageLocation &Loc,
-                                  Environment &Env) {
-  auto &Val = *cast<StructValue>(Env.createValue(Loc.getType()));
-  Env.setValue(Loc, Val);
-  return Val;
-}
-
 // Models an analysis that uses flow conditions.
 class SpecialBoolAnalysis final
     : public DataflowAnalysis<SpecialBoolAnalysis, NoopLattice> {
@@ -397,7 +415,7 @@ public:
     if (const auto *E = selectFirst<CXXConstructExpr>(
             "call", match(cxxConstructExpr(HasSpecialBoolType).bind("call"), *S,
                           getASTContext()))) {
-      cast<StructValue>(Env.getValueStrict(*E))
+      cast<RecordValue>(Env.getValue(*E))
           ->setProperty("is_set", Env.getBoolLiteralValue(false));
     } else if (const auto *E = selectFirst<CXXMemberCallExpr>(
                    "call", match(cxxMemberCallExpr(callee(cxxMethodDecl(ofClass(
@@ -405,9 +423,9 @@ public:
                                      .bind("call"),
                                  *S, getASTContext()))) {
       auto &ObjectLoc =
-          *cast<AggregateStorageLocation>(getImplicitObjectLocation(*E, Env));
+          *cast<RecordStorageLocation>(getImplicitObjectLocation(*E, Env));
 
-      createNewStructValue(ObjectLoc, Env)
+      refreshRecordValue(ObjectLoc, Env)
           .setProperty("is_set", Env.getBoolLiteralValue(true));
     }
   }
@@ -554,7 +572,7 @@ public:
         *S, getASTContext());
     if (const auto *E = selectFirst<CXXConstructExpr>(
             "construct", Matches)) {
-      cast<StructValue>(Env.getValueStrict(*E))
+      cast<RecordValue>(Env.getValue(*E))
           ->setProperty("has_value", Env.getBoolLiteralValue(false));
     } else if (const auto *E =
                    selectFirst<CXXOperatorCallExpr>("operator", Matches)) {
@@ -562,10 +580,7 @@ public:
       auto *Object = E->getArg(0);
       assert(Object != nullptr);
 
-      auto &ObjectLoc = *cast<AggregateStorageLocation>(
-          Env.getStorageLocation(*Object, SkipPast::Reference));
-
-      createNewStructValue(ObjectLoc, Env)
+      refreshRecordValue(*Object, Env)
           .setProperty("has_value", Env.getBoolLiteralValue(true));
     }
   }
@@ -1228,7 +1243,7 @@ public:
         match(callExpr(callee(functionDecl(hasName("makeTop")))).bind("top"),
               *S, getASTContext());
     if (const auto *E = selectFirst<CallExpr>("top", Matches)) {
-      Env.setValueStrict(*E, Env.makeTopBoolValue());
+      Env.setValue(*E, Env.makeTopBoolValue());
     }
   }
 

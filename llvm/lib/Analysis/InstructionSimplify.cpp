@@ -2116,6 +2116,19 @@ static Value *simplifyAndInst(Value *Op0, Value *Op1, const SimplifyQuery &Q,
       return Op0;
   }
 
+  // and 2^x-1, 2^C --> 0 where x <= C.
+  const APInt *PowerC;
+  Value *Shift;
+  if (match(Op1, m_Power2(PowerC)) &&
+      match(Op0, m_Add(m_Value(Shift), m_AllOnes())) &&
+      isKnownToBeAPowerOfTwo(Shift, Q.DL, /*OrZero*/ false, 0, Q.AC, Q.CxtI,
+                             Q.DT)) {
+    KnownBits Known = computeKnownBits(Shift, Q.DL, 0, Q.AC, Q.CxtI, Q.DT);
+    // Use getActiveBits() to make use of the additional power of two knowledge
+    if (PowerC->getActiveBits() >= Known.getMaxValue().getActiveBits())
+      return ConstantInt::getNullValue(Op1->getType());
+  }
+
   // If we have a multiplication overflow check that is being 'and'ed with a
   // check that one of the multipliers is not zero, we can omit the 'and', and
   // only keep the overflow check.
@@ -4256,12 +4269,15 @@ static Value *simplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
   if (V == Op)
     return RepOp;
 
+  if (!MaxRecurse--)
+    return nullptr;
+
   // We cannot replace a constant, and shouldn't even try.
   if (isa<Constant>(Op))
     return nullptr;
 
   auto *I = dyn_cast<Instruction>(V);
-  if (!I || !is_contained(I->operands(), Op))
+  if (!I)
     return nullptr;
 
   // The arguments of a phi node might refer to a value from a previous
@@ -4272,15 +4288,26 @@ static Value *simplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
   if (Op->getType()->isVectorTy()) {
     // For vector types, the simplification must hold per-lane, so forbid
     // potentially cross-lane operations like shufflevector.
-    assert(I->getType()->isVectorTy() && "Vector type mismatch");
-    if (isa<ShuffleVectorInst>(I) || isa<CallBase>(I))
+    if (!I->getType()->isVectorTy() || isa<ShuffleVectorInst>(I) ||
+        isa<CallBase>(I))
       return nullptr;
   }
 
   // Replace Op with RepOp in instruction operands.
-  SmallVector<Value *, 8> NewOps(I->getNumOperands());
-  transform(I->operands(), NewOps.begin(),
-            [&](Value *V) { return V == Op ? RepOp : V; });
+  SmallVector<Value *, 8> NewOps;
+  bool AnyReplaced = false;
+  for (Value *InstOp : I->operands()) {
+    if (Value *NewInstOp = simplifyWithOpReplaced(
+            InstOp, Op, RepOp, Q, AllowRefinement, MaxRecurse)) {
+      NewOps.push_back(NewInstOp);
+      AnyReplaced = InstOp != NewInstOp;
+    } else {
+      NewOps.push_back(InstOp);
+    }
+  }
+
+  if (!AnyReplaced)
+    return nullptr;
 
   if (!AllowRefinement) {
     // General InstSimplify functions may refine the result, e.g. by returning
@@ -4305,10 +4332,8 @@ static Value *simplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
       // by assumption and this case never wraps, so nowrap flags can be
       // ignored.
       if ((Opcode == Instruction::Sub || Opcode == Instruction::Xor) &&
-          NewOps[0] == NewOps[1]) {
-        assert(NewOps[0] == RepOp && "Precondition for non-poison assumption");
+          NewOps[0] == RepOp && NewOps[1] == RepOp)
         return Constant::getNullValue(I->getType());
-      }
 
       // If we are substituting an absorber constant into a binop and extra
       // poison can't leak if we remove the select -- because both operands of
@@ -4317,9 +4342,11 @@ static Value *simplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
       // (Op == 0) ? 0 : (Op & -Op)            --> Op & -Op
       // (Op == 0) ? 0 : (Op * (binop Op, C))  --> Op * (binop Op, C)
       // (Op == -1) ? -1 : (Op | (binop C, Op) --> Op | (binop C, Op)
-      if (RepOp == ConstantExpr::getBinOpAbsorber(Opcode, I->getType()) &&
+      Constant *Absorber =
+          ConstantExpr::getBinOpAbsorber(Opcode, I->getType());
+      if ((NewOps[0] == Absorber || NewOps[1] == Absorber) &&
           impliesPoison(BO, Op))
-        return RepOp;
+        return Absorber;
     }
 
     if (isa<GetElementPtrInst>(I)) {
@@ -4328,7 +4355,7 @@ static Value *simplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
       if (NewOps.size() == 2 && match(NewOps[1], m_Zero()))
         return NewOps[0];
     }
-  } else if (MaxRecurse) {
+  } else {
     // The simplification queries below may return the original value. Consider:
     //   %div = udiv i32 %arg, %arg2
     //   %mul = mul nsw i32 %div, %arg2
@@ -4343,7 +4370,7 @@ static Value *simplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
     };
 
     return PreventSelfSimplify(
-        ::simplifyInstructionWithOperands(I, NewOps, Q, MaxRecurse - 1));
+        ::simplifyInstructionWithOperands(I, NewOps, Q, MaxRecurse));
   }
 
   // If all operands are constant after substituting Op for RepOp then we can
@@ -6020,23 +6047,18 @@ static Value *simplifyRelativeLoad(Constant *Ptr, Constant *Offset,
   if (!IsConstantOffsetFromGlobal(Ptr, PtrSym, PtrOffset, DL))
     return nullptr;
 
-  Type *Int8PtrTy = Type::getInt8PtrTy(Ptr->getContext());
   Type *Int32Ty = Type::getInt32Ty(Ptr->getContext());
-  Type *Int32PtrTy = Int32Ty->getPointerTo();
-  Type *Int64Ty = Type::getInt64Ty(Ptr->getContext());
 
   auto *OffsetConstInt = dyn_cast<ConstantInt>(Offset);
   if (!OffsetConstInt || OffsetConstInt->getType()->getBitWidth() > 64)
     return nullptr;
 
-  uint64_t OffsetInt = OffsetConstInt->getSExtValue();
-  if (OffsetInt % 4 != 0)
+  APInt OffsetInt = OffsetConstInt->getValue().sextOrTrunc(
+      DL.getIndexTypeSizeInBits(Ptr->getType()));
+  if (OffsetInt.srem(4) != 0)
     return nullptr;
 
-  Constant *C = ConstantExpr::getGetElementPtr(
-      Int32Ty, ConstantExpr::getBitCast(Ptr, Int32PtrTy),
-      ConstantInt::get(Int64Ty, OffsetInt / 4));
-  Constant *Loaded = ConstantFoldLoadFromConstPtr(C, Int32Ty, DL);
+  Constant *Loaded = ConstantFoldLoadFromConstPtr(Ptr, Int32Ty, OffsetInt, DL);
   if (!Loaded)
     return nullptr;
 
@@ -6066,7 +6088,7 @@ static Value *simplifyRelativeLoad(Constant *Ptr, Constant *Offset,
       PtrSym != LoadedRHSSym || PtrOffset != LoadedRHSOffset)
     return nullptr;
 
-  return ConstantExpr::getBitCast(LoadedLHSPtr, Int8PtrTy);
+  return LoadedLHSPtr;
 }
 
 static Value *simplifyUnaryIntrinsic(Function *F, Value *Op0,
@@ -6159,6 +6181,15 @@ static Value *simplifyUnaryIntrinsic(Function *F, Value *Op0,
     if (isSplatValue(Op0))
       return Op0;
     break;
+  case Intrinsic::frexp: {
+    // Frexp is idempotent with the added complication of the struct return.
+    if (match(Op0, m_ExtractValue<0>(m_Value(X)))) {
+      if (match(X, m_Intrinsic<Intrinsic::frexp>(m_Value())))
+        return X;
+    }
+
+    break;
+  }
   default:
     break;
   }
@@ -6516,13 +6547,10 @@ static Value *simplifyIntrinsic(CallBase *Call, Value *Callee,
   if (!NumOperands) {
     switch (IID) {
     case Intrinsic::vscale: {
-      auto Attr = Call->getFunction()->getFnAttribute(Attribute::VScaleRange);
-      if (!Attr.isValid())
-        return nullptr;
-      unsigned VScaleMin = Attr.getVScaleRangeMin();
-      std::optional<unsigned> VScaleMax = Attr.getVScaleRangeMax();
-      if (VScaleMax && VScaleMin == VScaleMax)
-        return ConstantInt::get(F->getReturnType(), VScaleMin);
+      Type *RetTy = F->getReturnType();
+      ConstantRange CR = getVScaleRange(Call->getFunction(), 64);
+      if (const APInt *C = CR.getSingleElement())
+        return ConstantInt::get(RetTy, C->getZExtValue());
       return nullptr;
     }
     default:

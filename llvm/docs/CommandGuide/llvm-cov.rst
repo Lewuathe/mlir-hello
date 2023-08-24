@@ -340,7 +340,11 @@ OPTIONS
 
  Map the paths in the coverage data to local source file paths. This allows you
  to generate the coverage data on one machine, and then use llvm-cov on a
- different machine where you have the same files on a different path.
+ different machine where you have the same files on a different path. Multiple
+ `-path-equivalence` arguments can be passed to specify different mappings. Each
+ argument consists of a source path `<from>` and its corresponding local path `<to>`.
+ The mappings are applied in the order they are specified. If multiple mappings can
+ be applied to a single path, the first mapping encountered is used.
 
 .. option:: -coverage-watermark=<high>,<low>
 
@@ -543,3 +547,25 @@ OPTIONS
 
  Fail if an object file cannot be found for a binary ID present in the profile,
  neither on the command line nor via binary ID lookup.
+
+CONVERT-FOR-TESTING COMMAND
+---------------------------
+
+.. warning::
+  This command is for the LLVM developers who are working on ``llvm-cov`` only.
+
+SYNOPSIS
+^^^^^^^^
+
+:program:`llvm-cov convert-for-testing` *BIN* -o *OUT*
+
+DESCRIPTION
+^^^^^^^^^^^
+
+The :program:`llvm-cov convert-for-testing` command serves the purpose of
+testing `llvm-cov` itself. It can extract all code coverage data from the
+binary *BIN* to the file *OUT*, thereby reducing the size of test files. The
+output file typically bears the :program:`.covmapping` extension.
+
+The :program:`.covmapping` files can be read back by ``llvm-cov`` just as
+ordinary binary files.

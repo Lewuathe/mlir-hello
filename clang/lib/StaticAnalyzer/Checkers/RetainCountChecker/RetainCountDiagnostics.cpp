@@ -786,8 +786,6 @@ RefLeakReportVisitor::getEndPath(BugReporterContext &BRC,
   assert(RV);
 
   if (RV->getKind() == RefVal::ErrorLeakReturned) {
-    // FIXME: "create" only applies to CF objects.  Only "copy", "alloc",
-    // "retain" and "new" transfer ownership to the caller for NS objects.
     const Decl *D = &EndN->getCodeDecl();
 
     os << (isa<ObjCMethodDecl>(D) ? " is returned from a method "

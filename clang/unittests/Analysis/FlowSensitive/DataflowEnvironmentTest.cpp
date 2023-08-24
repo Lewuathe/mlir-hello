@@ -25,6 +25,7 @@ namespace {
 using namespace clang;
 using namespace dataflow;
 using ::clang::dataflow::test::getFieldValue;
+using ::testing::IsNull;
 using ::testing::NotNull;
 
 class EnvironmentTest : public ::testing::Test {
@@ -90,7 +91,7 @@ TEST_F(EnvironmentTest, CreateValueRecursiveType) {
   // Verify that the struct and the field (`R`) with first appearance of the
   // type is created successfully.
   Environment Env(DAContext, *Fun);
-  StructValue *SVal = cast<StructValue>(Env.createValue(Ty));
+  RecordValue *SVal = cast<RecordValue>(Env.createValue(Ty));
   PointerValue *PV = cast_or_null<PointerValue>(getFieldValue(SVal, *R, Env));
   EXPECT_THAT(PV, NotNull());
 }
@@ -170,7 +171,7 @@ TEST_F(EnvironmentTest, IncludeFieldsFromDefaultInitializers) {
   // Verify that the `X` field of `S` is populated when analyzing the
   // constructor, even though it is not referenced directly in the constructor.
   Environment Env(DAContext, *Constructor);
-  auto *Val = cast<StructValue>(Env.createValue(QTy));
+  auto *Val = cast<RecordValue>(Env.createValue(QTy));
   EXPECT_THAT(getFieldValue(Val, *XDecl, Env), NotNull());
 }
 
@@ -214,8 +215,8 @@ TEST_F(EnvironmentTest, InitGlobalVarsFieldFun) {
   // Verify the global variable is populated when we analyze `Target`.
   Environment Env(DAContext, *Fun);
   const auto *GlobalLoc =
-      cast<AggregateStorageLocation>(Env.getStorageLocation(*GlobalDecl));
-  const auto *GlobalVal = cast<StructValue>(Env.getValue(*GlobalLoc));
+      cast<RecordStorageLocation>(Env.getStorageLocation(*GlobalDecl));
+  const auto *GlobalVal = cast<RecordValue>(Env.getValue(*GlobalLoc));
   auto *BarVal = getFieldValue(GlobalVal, *BarDecl, Env);
   EXPECT_TRUE(isa<IntegerValue>(BarVal));
 }
@@ -250,6 +251,37 @@ TEST_F(EnvironmentTest, InitGlobalVarsConstructor) {
   // Verify the global variable is populated when we analyze `Target`.
   Environment Env(DAContext, *Ctor);
   EXPECT_THAT(Env.getValue(*Var), NotNull());
+}
+
+TEST_F(EnvironmentTest, RefreshRecordValue) {
+  using namespace ast_matchers;
+
+  std::string Code = R"cc(
+     struct S {};
+     void target () {
+       S s;
+       s;
+     }
+  )cc";
+
+  auto Unit =
+      tooling::buildASTFromCodeWithArgs(Code, {"-fsyntax-only", "-std=c++11"});
+  auto &Context = Unit->getASTContext();
+
+  ASSERT_EQ(Context.getDiagnostics().getClient()->getNumErrors(), 0U);
+
+  auto Results = match(functionDecl(hasName("target")).bind("target"), Context);
+  const auto *Target = selectFirst<FunctionDecl>("target", Results);
+  ASSERT_THAT(Target, NotNull());
+
+  Results = match(declRefExpr(to(varDecl(hasName("s")))).bind("s"), Context);
+  const auto *DRE = selectFirst<DeclRefExpr>("s", Results);
+  ASSERT_THAT(DRE, NotNull());
+
+  Environment Env(DAContext, *Target);
+  EXPECT_THAT(Env.getStorageLocation(*DRE), IsNull());
+  refreshRecordValue(*DRE, Env);
+  EXPECT_THAT(Env.getStorageLocation(*DRE), NotNull());
 }
 
 } // namespace

@@ -354,9 +354,6 @@ def Vector_MultiDimReductionOp :
                    "ArrayRef<bool>":$reductionMask, "CombiningKind":$kind)>
   ];
   let extraClassDeclaration = [{
-    static StringRef getKindAttrStrName() { return "kind"; }
-    static StringRef getReductionDimsAttrStrName() { return "reduction_dims"; }
-
     VectorType getSourceVectorType() {
       return ::llvm::cast<VectorType>(getSource().getType());
     }
@@ -466,7 +463,7 @@ def Vector_ShuffleOp :
                  TCresVTEtIsSameAsOpBase<0, 0>>,
      PredOpTrait<"second operand v2 and result have same element type",
                  TCresVTEtIsSameAsOpBase<0, 1>>,
-     DeclareOpInterfaceMethods<InferTypeOpInterface>]>,
+     InferTypeOpAdaptor]>,
      Arguments<(ins AnyVectorOfAnyRank:$v1, AnyVectorOfAnyRank:$v2,
                     I64ArrayAttr:$mask)>,
      Results<(outs AnyVector:$vector)> {
@@ -510,7 +507,6 @@ def Vector_ShuffleOp :
   let hasFolder = 1;
   let hasCanonicalizer = 1;
   let extraClassDeclaration = [{
-    static StringRef getMaskAttrStrName() { return "mask"; }
     VectorType getV1VectorType() {
       return ::llvm::cast<VectorType>(getV1().getType());
     }
@@ -576,8 +572,8 @@ def Vector_ExtractOp :
   Vector_Op<"extract", [Pure,
      PredOpTrait<"operand and result have same element type",
                  TCresVTEtIsSameAsOpBase<0, 0>>,
-     DeclareOpInterfaceMethods<InferTypeOpInterface>]>,
-    Arguments<(ins AnyVectorOfAnyRank:$vector, I64ArrayAttr:$position)>,
+     InferTypeOpAdaptorWithIsCompatible]>,
+    Arguments<(ins AnyVectorOfAnyRank:$vector, DenseI64ArrayAttr:$position)>,
     Results<(outs AnyType)> {
   let summary = "extract operation";
   let description = [{
@@ -593,17 +589,14 @@ def Vector_ExtractOp :
     ```
   }];
   let builders = [
-    OpBuilder<(ins "Value":$source, "ArrayRef<int64_t>":$position)>,
     // Convenience builder which assumes the values in `position` are defined by
     // ConstantIndexOp.
     OpBuilder<(ins "Value":$source, "ValueRange":$position)>
   ];
   let extraClassDeclaration = [{
-    static StringRef getPositionAttrStrName() { return "position"; }
     VectorType getSourceVectorType() {
       return ::llvm::cast<VectorType>(getVector().getType());
     }
-    static bool isCompatibleReturnTypes(TypeRange l, TypeRange r);
   }];
   let assemblyFormat = "$vector `` $position attr-dict `:` type($vector)";
   let hasCanonicalizer = 1;
@@ -695,7 +688,7 @@ def Vector_InsertOp :
      PredOpTrait<"source operand and result have same element type",
                  TCresVTEtIsSameAsOpBase<0, 0>>,
      AllTypesMatch<["dest", "res"]>]>,
-     Arguments<(ins AnyType:$source, AnyVectorOfAnyRank:$dest, I64ArrayAttr:$position)>,
+     Arguments<(ins AnyType:$source, AnyVectorOfAnyRank:$dest, DenseI64ArrayAttr:$position)>,
      Results<(outs AnyVectorOfAnyRank:$res)> {
   let summary = "insert operation";
   let description = [{
@@ -717,13 +710,10 @@ def Vector_InsertOp :
   }];
 
   let builders = [
-    OpBuilder<(ins "Value":$source, "Value":$dest,
-      "ArrayRef<int64_t>":$position)>,
     // Convenience builder which assumes all values are constant indices.
     OpBuilder<(ins "Value":$source, "Value":$dest, "ValueRange":$position)>
   ];
   let extraClassDeclaration = [{
-    static StringRef getPositionAttrStrName() { return "position"; }
     Type getSourceType() { return getSource().getType(); }
     VectorType getDestVectorType() {
       return ::llvm::cast<VectorType>(getDest().getType());
@@ -882,8 +872,6 @@ def Vector_InsertStridedSliceOp :
       "ArrayRef<int64_t>":$offsets, "ArrayRef<int64_t>":$strides)>
   ];
   let extraClassDeclaration = [{
-    static StringRef getOffsetsAttrStrName() { return "offsets"; }
-    static StringRef getStridesAttrStrName() { return "strides"; }
     VectorType getSourceVectorType() {
       return ::llvm::cast<VectorType>(getSource().getType());
     }
@@ -980,9 +968,6 @@ def Vector_OuterProductOp :
     }
     VectorType getResultVectorType() {
       return ::llvm::cast<VectorType>(getResult().getType());
-    }
-    static constexpr StringRef getKindAttrStrName() {
-      return "kind";
     }
     static CombiningKind getDefaultKind() {
       return CombiningKind::ADD;
@@ -1099,12 +1084,6 @@ def Vector_ReshapeOp :
     int64_t getNumOutputShapeSizes() { return getOutputShape().size(); }
 
     void getFixedVectorSizes(SmallVectorImpl<int64_t> &results);
-
-    static StringRef getFixedVectorSizesAttrStrName() {
-      return "fixed_vector_sizes";
-    }
-    static StringRef getInputShapeAttrStrName() { return "input_shape"; }
-    static StringRef getOutputShapeAttrStrName() { return "output_shape"; }
   }];
 
   let assemblyFormat = [{
@@ -1151,9 +1130,6 @@ def Vector_ExtractStridedSliceOp :
       "ArrayRef<int64_t>":$sizes, "ArrayRef<int64_t>":$strides)>
   ];
   let extraClassDeclaration = [{
-    static StringRef getOffsetsAttrStrName() { return "offsets"; }
-    static StringRef getSizesAttrStrName() { return "sizes"; }
-    static StringRef getStridesAttrStrName() { return "strides"; }
     VectorType getSourceVectorType() {
       return ::llvm::cast<VectorType>(getVector().getType());
     }
@@ -1178,7 +1154,8 @@ def Vector_TransferReadOp :
       DeclareOpInterfaceMethods<VectorUnrollOpInterface, ["getShapeForUnroll"]>,
       DeclareOpInterfaceMethods<MaskableOpInterface>,
       DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
-      AttrSizedOperandSegments
+      AttrSizedOperandSegments,
+      DestinationStyleOpInterface
     ]>,
     Arguments<(ins AnyShaped:$source,
                    Variadic<Index>:$indices,
@@ -1224,14 +1201,15 @@ def Vector_TransferReadOp :
     `0` are masked out and replaced with `padding`.
 
     An optional boolean array attribute `in_bounds` specifies for every vector
-    dimension if the transfer is guaranteed to be within the source bounds.
-    While the starting point of the transfer has to be in-bounds, accesses may
-    run out-of-bounds as indices increase. Broadcast dimensions must always be
-    in-bounds. If specified, the `in_bounds` array length has to be equal to the
-    vector rank. In absence of the attribute, accesses along all dimensions
-    (except for broadcasts) may run out-of-bounds. A `vector.transfer_read` can
-    be lowered to a simple load if all dimensions are specified to be within
-    bounds and no `mask` was specified.
+    dimension if the transfer is guaranteed to be within the source bounds. If
+    specified, the `in_bounds` array length has to be equal to the vector rank.
+    If set to "false", accesses (including the starting point) may run
+    out-of-bounds along the respective vector dimension as the index increases.
+    Broadcast dimensions must always be in-bounds. In absence of the attribute,
+    accesses along all vector dimensions (except for broadcasts) may run
+    out-of-bounds. A `vector.transfer_read` can be lowered to a simple load if
+    all dimensions are specified to be within bounds and no `mask` was
+    specified. Note that non-vector dimensions *must* always be in-bounds.
 
     This operation is called 'read' by opposition to 'load' because the
     super-vector granularity is generally not representable with a single
@@ -1400,6 +1378,10 @@ def Vector_TransferReadOp :
   let extraClassDeclaration = [{
     // MaskableOpInterface methods.
     bool supportsPassthru() { return true; }
+
+    std::pair<int64_t, int64_t> getDpsInitsPositionRange() {
+      return {0, 0};  // empty range (no init operands)
+    }
   }];
 
   let hasCanonicalizer = 1;
@@ -1465,13 +1447,14 @@ def Vector_TransferWriteOp :
     is `0` are masked out.
 
     An optional boolean array attribute `in_bounds` specifies for every vector
-    dimension if the transfer is guaranteed to be within the source bounds.
-    While the starting point of the transfer has to be in-bounds, accesses may
-    run out-of-bounds as indices increase. If specified, the `in_bounds` array
-    length has to be equal to the vector rank. In absence of the attribute,
-    accesses along all dimensions may run out-of-bounds. A
-    `vector.transfer_write` can be lowered to a simple store if all dimensions
-    are specified to be within bounds and no `mask` was specified.
+    dimension if the transfer is guaranteed to be within the source bounds. If
+    specified, the `in_bounds` array length has to be equal to the vector rank.
+    If set to "false", accesses (including the starting point) may run
+    out-of-bounds along the respective vector dimension as the index increases.
+    In absence of the attribute, accesses along all vector dimensions may run
+    out-of-bounds. A `vector.transfer_write` can be lowered to a simple store if
+    all dimensions are specified to be within bounds and no `mask` was
+    specified. Note that non-vector dimensions *must* always be in-bounds.
 
     This operation is called 'write' by opposition to 'store' because the
     super-vector granularity is generally not representable with a single
@@ -2283,9 +2266,6 @@ def Vector_ConstantMaskOp :
     ```
   }];
 
-  let extraClassDeclaration = [{
-    static StringRef getMaskDimSizesAttrStrName() { return "mask_dim_sizes"; }
-  }];
   let assemblyFormat = "$mask_dim_sizes attr-dict `:` type(results)";
   let hasVerifier = 1;
 }
@@ -2328,6 +2308,13 @@ def Vector_CreateMaskOp :
     // Build with mixed static/dynamic operands.
     OpBuilder<(ins "VectorType":$type, "ArrayRef<OpFoldResult>":$mixedOperands)>
   ];
+
+  let extraClassDeclaration = [{
+    /// Return the result type of this op.
+    VectorType getVectorType() {
+      return cast<VectorType>(getOperation()->getResultTypes()[0]);
+    }
+  }];
 
   let hasCanonicalizer = 1;
   let hasVerifier = 1;
@@ -2468,7 +2455,6 @@ def Vector_TransposeOp :
       return ::llvm::cast<VectorType>(getResult().getType());
     }
     void getTransp(SmallVectorImpl<int64_t> &results);
-    static StringRef getTranspAttrStrName() { return "transp"; }
   }];
   let assemblyFormat = [{
     $vector `,` $transp attr-dict `:` type($vector) `to` type($result)
@@ -2478,33 +2464,66 @@ def Vector_TransposeOp :
   let hasVerifier = 1;
 }
 
+def PrintPunctuation : I32EnumAttr<"PrintPunctuation",
+                                  "Punctuation for separating vectors or vector elements", [
+  I32EnumAttrCase<"NoPunctuation", 0, "no_punctuation">,
+  I32EnumAttrCase<"NewLine", 1, "newline">,
+  I32EnumAttrCase<"Comma", 2, "comma">,
+  I32EnumAttrCase<"Open", 3, "open">,
+  I32EnumAttrCase<"Close", 4, "close">
+]> {
+  let cppNamespace = "::mlir::vector";
+  let genSpecializedAttr = 0;
+}
+
+def Vector_PrintPunctuation : EnumAttr<Vector_Dialect, PrintPunctuation, "punctuation"> {
+  let assemblyFormat = "`<` $value `>`";
+}
+
 def Vector_PrintOp :
   Vector_Op<"print", []>,
-  Arguments<(ins Type<Or<[
+  Arguments<(ins Optional<Type<Or<[
     AnyVectorOfAnyRank.predicate,
     AnyInteger.predicate, Index.predicate, AnyFloat.predicate
-  ]>>:$source)> {
+  ]>>>:$source, DefaultValuedAttr<Vector_PrintPunctuation,
+                      "::mlir::vector::PrintPunctuation::NewLine">:$punctuation)
+  > {
   let summary = "print operation (for testing and debugging)";
   let description = [{
-    Prints the source vector (or scalar) to stdout in human readable
-    format (for testing and debugging). No return value.
+    Prints the source vector (or scalar) to stdout in a human-readable format
+    (for testing and debugging). No return value.
 
     Example:
 
     ```mlir
-    %0 = arith.constant 0.0 : f32
-    %1 = vector.broadcast %0 : f32 to vector<4xf32>
-    vector.print %1 : vector<4xf32>
+    %v = arith.constant dense<0.0> : vector<4xf32>
+    vector.print %v : vector<4xf32>
+    ```
 
-    when lowered to LLVM, the vector print is unrolled into
-    elementary printing method calls that at runtime will yield
+    When lowered to LLVM, the vector print is decomposed into elementary
+    printing method calls that at runtime will yield:
 
+    ```
     ( 0.0, 0.0, 0.0, 0.0 )
+    ```
 
-    on stdout when linked with a small runtime support library,
-    which only needs to provide a few printing methods (single
-    value for all data types, opening/closing bracket, comma,
-    newline).
+    This is printed to stdout via a small runtime support library, which only
+    needs to provide a few printing methods (single value for all data
+    types, opening/closing bracket, comma, newline).
+
+    By default `vector.print` adds a newline after the vector, but this can be
+    controlled by the `punctuation` attribute. For example, to print a comma
+    after instead do:
+
+    ```mlir
+    vector.print %v : vector<4xf32> punctuation <comma>
+    ```
+
+    Note that it is possible to use the punctuation attribute alone. The
+    following will print a single newline:
+
+    ```mlir
+    vector.print punctuation <newline>
     ```
   }];
   let extraClassDeclaration = [{
@@ -2512,7 +2531,13 @@ def Vector_PrintOp :
       return getSource().getType();
     }
   }];
-  let assemblyFormat = "$source attr-dict `:` type($source)";
+  let builders = [
+    OpBuilder<(ins "PrintPunctuation":$punctuation), [{
+      build($_builder, $_state, {}, punctuation);
+    }]>,
+  ];
+
+  let assemblyFormat = "($source^ `:` type($source))? (`punctuation` $punctuation^)? attr-dict";
 }
 
 //===----------------------------------------------------------------------===//
@@ -2733,8 +2758,6 @@ def Vector_ScanOp :
                    CArg<"bool", "true">:$inclusive)>
   ];
   let extraClassDeclaration = [{
-    static StringRef getKindAttrStrName() { return "kind"; }
-    static StringRef getReductionDimAttrStrName() { return "reduction_dim"; }
     VectorType getSourceType() {
       return ::llvm::cast<VectorType>(getSource().getType());
     }

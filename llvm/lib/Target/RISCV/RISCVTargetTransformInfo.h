@@ -123,6 +123,10 @@ public:
     return ST->useRVVForFixedLengthVectors() ? 16 : 0;
   }
 
+  InstructionCost getVRGatherVVCost(MVT VT);
+  InstructionCost getVRGatherVICost(MVT VT);
+  InstructionCost getVSlideCost(MVT VT);
+
   InstructionCost getShuffleCost(TTI::ShuffleKind Kind, VectorType *Tp,
                                  ArrayRef<int> Mask,
                                  TTI::TargetCostKind CostKind, int Index,
@@ -286,9 +290,9 @@ public:
     case RecurKind::UMax:
     case RecurKind::FMin:
     case RecurKind::FMax:
-    case RecurKind::SelectICmp:
-    case RecurKind::SelectFCmp:
     case RecurKind::FMulAdd:
+    case RecurKind::IAnyOf:
+    case RecurKind::FAnyOf:
       return true;
     default:
       return false;

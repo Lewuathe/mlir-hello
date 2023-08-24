@@ -158,10 +158,6 @@ public:
                           MachineBasicBlock &RestoreMBB, Register SGPR,
                           RegScavenger *RS) const;
 
-  bool supportsBackwardScavenger() const override {
-    return true;
-  }
-
   bool eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
                            unsigned FIOperandNum,
                            RegScavenger *RS) const override;
@@ -447,6 +443,11 @@ public:
   unsigned getSubRegAlignmentNumBits(const TargetRegisterClass *RC,
                                      unsigned SubReg) const;
 };
+
+namespace AMDGPU {
+/// Get the size in bits of a register from the register class \p RC.
+unsigned getRegBitWidth(const TargetRegisterClass &RC);
+} // namespace AMDGPU
 
 } // End namespace llvm
 

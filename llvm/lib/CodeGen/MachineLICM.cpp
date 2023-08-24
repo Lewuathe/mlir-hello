@@ -314,19 +314,17 @@ INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_END(EarlyMachineLICM, "early-machinelicm",
                     "Early Machine Loop Invariant Code Motion", false, false)
 
-static void addSubLoopsToWorkList(MachineLoop *Loop,
-                                  SmallVectorImpl<MachineLoop *> &Worklist,
-                                  bool PreRA) {
-  // Add loop to worklist
-  Worklist.push_back(Loop);
-
-  // If it is pre-ra LICM, add sub loops to worklist.
-  if (PreRA && !Loop->isInnermost()) {
-    MachineLoop::iterator MLI = Loop->begin();
-    MachineLoop::iterator MLE = Loop->end();
-    for (; MLI != MLE; ++MLI)
-      addSubLoopsToWorkList(*MLI, Worklist, PreRA);
-  }
+/// Test if the given loop is the outer-most loop that has a unique predecessor.
+static bool LoopIsOuterMostWithPredecessor(MachineLoop *CurLoop) {
+  // Check whether this loop even has a unique predecessor.
+  if (!CurLoop->getLoopPredecessor())
+    return false;
+  // Ok, now check to see if any of its outer loops do.
+  for (MachineLoop *L = CurLoop->getParentLoop(); L; L = L->getParentLoop())
+    if (L->getLoopPredecessor())
+      return false;
+  // None of them did, so this is the outermost with a unique predecessor.
+  return true;
 }
 
 bool MachineLICMBase::runOnMachineFunction(MachineFunction &MF) {
@@ -368,17 +366,18 @@ bool MachineLICMBase::runOnMachineFunction(MachineFunction &MF) {
   DT  = &getAnalysis<MachineDominatorTree>();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
 
-  SmallVector<MachineLoop *, 8> Worklist;
-
-  MachineLoopInfo::iterator MLII = MLI->begin();
-  MachineLoopInfo::iterator MLIE = MLI->end();
-  for (; MLII != MLIE; ++MLII)
-    addSubLoopsToWorkList(*MLII, Worklist, PreRegAlloc);
-
+  SmallVector<MachineLoop *, 8> Worklist(MLI->begin(), MLI->end());
   while (!Worklist.empty()) {
     CurLoop = Worklist.pop_back_val();
     CurPreheader = nullptr;
     ExitBlocks.clear();
+
+    // If this is done before regalloc, only visit outer-most preheader-sporting
+    // loops.
+    if (PreRegAlloc && !LoopIsOuterMostWithPredecessor(CurLoop)) {
+      Worklist.append(CurLoop->begin(), CurLoop->end());
+      continue;
+    }
 
     CurLoop->getExitBlocks(ExitBlocks);
 
@@ -539,6 +538,10 @@ void MachineLICMBase::HoistRegionPostRA() {
         PhysRegDefs.set(*AI);
     }
 
+    // Funclet entry blocks will clobber all registers
+    if (const uint32_t *Mask = BB->getBeginClobberMask(TRI))
+      PhysRegClobbers.setBitsNotInMask(Mask);
+
     SpeculationState = SpeculateUnknown;
     for (MachineInstr &MI : *BB)
       ProcessMI(&MI, PhysRegDefs, PhysRegClobbers, StoredFIs, Candidates);
@@ -604,7 +607,7 @@ void MachineLICMBase::AddToLiveIns(MCRegister Reg) {
       for (MachineOperand &MO : MI.all_uses()) {
         if (!MO.getReg())
           continue;
-        if (MO.getReg() == Reg || TRI->isSuperRegister(Reg, MO.getReg()))
+        if (TRI->isSuperRegisterEq(Reg, MO.getReg()))
           MO.setIsKill(false);
       }
     }

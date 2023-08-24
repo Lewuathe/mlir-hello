@@ -66,9 +66,9 @@ static cl::opt<bool> EnableMemCpyOptWithoutLibcalls(
 
 STATISTIC(NumMemCpyInstr, "Number of memcpy instructions deleted");
 STATISTIC(NumMemSetInfer, "Number of memsets inferred");
-STATISTIC(NumMoveToCpy,   "Number of memmoves converted to memcpy");
-STATISTIC(NumCpyToSet,    "Number of memcpys converted to memset");
-STATISTIC(NumCallSlot,    "Number of call slot optimizations performed");
+STATISTIC(NumMoveToCpy, "Number of memmoves converted to memcpy");
+STATISTIC(NumCpyToSet, "Number of memcpys converted to memset");
+STATISTIC(NumCallSlot, "Number of call slot optimizations performed");
 STATISTIC(NumStackMove, "Number of stack-move optimizations performed");
 
 namespace {
@@ -357,21 +357,13 @@ Instruction *MemCpyOptPass::tryMergingIntoMemset(Instruction *StartInst,
 
   // Keeps track of the last memory use or def before the insertion point for
   // the new memset. The new MemoryDef for the inserted memsets will be inserted
-  // after MemInsertPoint. It points to either LastMemDef or to the last user
-  // before the insertion point of the memset, if there are any such users.
+  // after MemInsertPoint.
   MemoryUseOrDef *MemInsertPoint = nullptr;
-  // Keeps track of the last MemoryDef between StartInst and the insertion point
-  // for the new memset. This will become the defining access of the inserted
-  // memsets.
-  MemoryDef *LastMemDef = nullptr;
   for (++BI; !BI->isTerminator(); ++BI) {
     auto *CurrentAcc = cast_or_null<MemoryUseOrDef>(
         MSSAU->getMemorySSA()->getMemoryAccess(&*BI));
-    if (CurrentAcc) {
+    if (CurrentAcc)
       MemInsertPoint = CurrentAcc;
-      if (auto *CurrentDef = dyn_cast<MemoryDef>(CurrentAcc))
-        LastMemDef = CurrentDef;
-    }
 
     // Calls that only access inaccessible memory do not block merging
     // accessible stores.
@@ -475,16 +467,13 @@ Instruction *MemCpyOptPass::tryMergingIntoMemset(Instruction *StartInst,
     if (!Range.TheStores.empty())
       AMemSet->setDebugLoc(Range.TheStores[0]->getDebugLoc());
 
-    assert(LastMemDef && MemInsertPoint &&
-           "Both LastMemDef and MemInsertPoint need to be set");
     auto *NewDef =
         cast<MemoryDef>(MemInsertPoint->getMemoryInst() == &*BI
                             ? MSSAU->createMemoryAccessBefore(
-                                  AMemSet, LastMemDef, MemInsertPoint)
+                                  AMemSet, nullptr, MemInsertPoint)
                             : MSSAU->createMemoryAccessAfter(
-                                  AMemSet, LastMemDef, MemInsertPoint));
+                                  AMemSet, nullptr, MemInsertPoint));
     MSSAU->insertDef(NewDef, /*RenameUses=*/true);
-    LastMemDef = NewDef;
     MemInsertPoint = NewDef;
 
     // Zap all the stores.
@@ -693,7 +682,7 @@ bool MemCpyOptPass::processStoreOfLoad(StoreInst *SI, LoadInst *LI,
 
       auto *LastDef =
           cast<MemoryDef>(MSSAU->getMemorySSA()->getMemoryAccess(SI));
-      auto *NewAccess = MSSAU->createMemoryAccessAfter(M, LastDef, LastDef);
+      auto *NewAccess = MSSAU->createMemoryAccessAfter(M, nullptr, LastDef);
       MSSAU->insertDef(cast<MemoryDef>(NewAccess), /*RenameUses=*/true);
 
       eraseInstruction(SI);
@@ -814,7 +803,7 @@ bool MemCpyOptPass::processStore(StoreInst *SI, BasicBlock::iterator &BBI) {
       // store, so we do not need to rename uses.
       auto *StoreDef = cast<MemoryDef>(MSSA->getMemoryAccess(SI));
       auto *NewAccess = MSSAU->createMemoryAccessBefore(
-          M, StoreDef->getDefiningAccess(), StoreDef);
+          M, nullptr, StoreDef);
       MSSAU->insertDef(cast<MemoryDef>(NewAccess), /*RenameUses=*/false);
 
       eraseInstruction(SI);
@@ -1203,7 +1192,7 @@ bool MemCpyOptPass::processMemCpyMemCpyDependence(MemCpyInst *M,
 
   assert(isa<MemoryDef>(MSSAU->getMemorySSA()->getMemoryAccess(M)));
   auto *LastDef = cast<MemoryDef>(MSSAU->getMemorySSA()->getMemoryAccess(M));
-  auto *NewAccess = MSSAU->createMemoryAccessAfter(NewM, LastDef, LastDef);
+  auto *NewAccess = MSSAU->createMemoryAccessAfter(NewM, nullptr, LastDef);
   MSSAU->insertDef(cast<MemoryDef>(NewAccess), /*RenameUses=*/true);
 
   // Remove the instruction we're replacing.
@@ -1315,7 +1304,7 @@ bool MemCpyOptPass::processMemSetMemCpyDependence(MemCpyInst *MemCpy,
   auto *LastDef =
       cast<MemoryDef>(MSSAU->getMemorySSA()->getMemoryAccess(MemCpy));
   auto *NewAccess = MSSAU->createMemoryAccessBefore(
-      NewMemSet, LastDef->getDefiningAccess(), LastDef);
+      NewMemSet, nullptr, LastDef);
   MSSAU->insertDef(cast<MemoryDef>(NewAccess), /*RenameUses=*/true);
 
   eraseInstruction(MemSet);
@@ -1420,7 +1409,7 @@ bool MemCpyOptPass::performMemCpyToMemSetOptzn(MemCpyInst *MemCpy,
                            CopySize, MemCpy->getDestAlign());
   auto *LastDef =
       cast<MemoryDef>(MSSAU->getMemorySSA()->getMemoryAccess(MemCpy));
-  auto *NewAccess = MSSAU->createMemoryAccessAfter(NewM, LastDef, LastDef);
+  auto *NewAccess = MSSAU->createMemoryAccessAfter(NewM, nullptr, LastDef);
   MSSAU->insertDef(cast<MemoryDef>(NewAccess), /*RenameUses=*/true);
 
   return true;
@@ -1522,20 +1511,20 @@ bool MemCpyOptPass::performStackMoveOptzn(Instruction *Load, Instruction *Store,
             FirstUser = UI;
           if (!LastUser || LastUser->comesBefore(UI))
             LastUser = UI;
-          if (UI->hasMetadata(LLVMContext::MD_noalias))
-            NoAliasInstrs.insert(UI);
           if (UI->isLifetimeStartOrEnd()) {
             // We note the locations of these intrinsic calls so that we can
             // delete them later if the optimization succeeds, this is safe
             // since both llvm.lifetime.start and llvm.lifetime.end intrinsics
-            // conceptually fill all the bytes of the alloca with an undefined
-            // value.
+            // practically fill all the bytes of the alloca with an undefined
+            // value, although conceptually marked as alive/dead.
             int64_t Size = cast<ConstantInt>(UI->getOperand(0))->getSExtValue();
             if (Size < 0 || Size == DestSize) {
               LifetimeMarkers.push_back(UI);
               continue;
             }
           }
+          if (UI->hasMetadata(LLVMContext::MD_noalias))
+            NoAliasInstrs.insert(UI);
           if (!ModRefCallback(UI))
             return false;
         }
@@ -1608,12 +1597,23 @@ bool MemCpyOptPass::performStackMoveOptzn(Instruction *Load, Instruction *Store,
     // Create a new lifetime start marker before the first user of src or alloca
     // users.
     Builder.SetInsertPoint(FirstUser->getParent(), FirstUser->getIterator());
-    Builder.CreateLifetimeStart(SrcAlloca, AllocaSize);
+    auto *Start = Builder.CreateLifetimeStart(SrcAlloca, AllocaSize);
+    auto *FirstMA = MSSA->getMemoryAccess(FirstUser);
+    auto *StartMA = MSSAU->createMemoryAccessBefore(Start, nullptr, FirstMA);
+    MSSAU->insertDef(cast<MemoryDef>(StartMA), /*RenameUses=*/true);
 
     // Create a new lifetime end marker after the last user of src or alloca
     // users.
-    Builder.SetInsertPoint(LastUser->getParent(), ++LastUser->getIterator());
-    Builder.CreateLifetimeEnd(SrcAlloca, AllocaSize);
+    // FIXME: If the last user is the terminator for the bb, we can insert
+    // lifetime.end marker to the immidiate post-dominator, but currently do
+    // nothing.
+    if (!LastUser->isTerminator()) {
+      Builder.SetInsertPoint(LastUser->getParent(), ++LastUser->getIterator());
+      auto *End = Builder.CreateLifetimeEnd(SrcAlloca, AllocaSize);
+      auto *LastMA = MSSA->getMemoryAccess(LastUser);
+      auto *EndMA = MSSAU->createMemoryAccessAfter(End, nullptr, LastMA);
+      MSSAU->insertDef(cast<MemoryDef>(EndMA), /*RenameUses=*/true);
+    }
 
     // Remove all other lifetime markers.
     for (Instruction *I : LifetimeMarkers)
@@ -1659,7 +1659,7 @@ bool MemCpyOptPass::processMemCpy(MemCpyInst *M, BasicBlock::iterator &BBI) {
         auto *LastDef =
             cast<MemoryDef>(MSSAU->getMemorySSA()->getMemoryAccess(M));
         auto *NewAccess =
-            MSSAU->createMemoryAccessAfter(NewM, LastDef, LastDef);
+            MSSAU->createMemoryAccessAfter(NewM, nullptr, LastDef);
         MSSAU->insertDef(cast<MemoryDef>(NewAccess), /*RenameUses=*/true);
 
         eraseInstruction(M);

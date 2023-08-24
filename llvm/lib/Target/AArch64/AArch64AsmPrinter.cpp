@@ -138,9 +138,9 @@ public:
     SetupMachineFunction(MF);
 
     if (STI->isTargetCOFF()) {
-      bool Internal = MF.getFunction().hasInternalLinkage();
-      COFF::SymbolStorageClass Scl = Internal ? COFF::IMAGE_SYM_CLASS_STATIC
-                                              : COFF::IMAGE_SYM_CLASS_EXTERNAL;
+      bool Local = MF.getFunction().hasLocalLinkage();
+      COFF::SymbolStorageClass Scl =
+          Local ? COFF::IMAGE_SYM_CLASS_STATIC : COFF::IMAGE_SYM_CLASS_EXTERNAL;
       int Type =
         COFF::IMAGE_SYM_DTYPE_FUNCTION << COFF::SCT_COMPLEX_TYPE_SHIFT;
 
@@ -1330,7 +1330,7 @@ void AArch64AsmPrinter::LowerFAULTING_OP(const MachineInstr &FaultingMI) {
 void AArch64AsmPrinter::emitFMov0(const MachineInstr &MI) {
   Register DestReg = MI.getOperand(0).getReg();
   if (STI->hasZeroCycleZeroingFP() && !STI->hasZeroCycleZeroingFPWorkaround() &&
-      STI->hasNEON()) {
+      STI->isNeonAvailable()) {
     // Convert H/S register to corresponding D register
     if (AArch64::H0 <= DestReg && DestReg <= AArch64::H31)
       DestReg = AArch64::D0 + (DestReg - AArch64::H0);
@@ -1453,8 +1453,13 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
       return;
   }
   case AArch64::MOVIv2d_ns:
-    // If the target has <rdar://problem/16473581>, lower this
-    // instruction to movi.16b instead.
+    // It is generally beneficial to rewrite "fmov s0, wzr" to "movi d0, #0".
+    // as movi is more efficient across all cores. Newer cores can eliminate
+    // fmovs early and there is no difference with movi, but this not true for
+    // all implementations.
+    //
+    // The floating-point version doesn't quite work in rare cases on older
+    // CPUs, so on those targets we lower this instruction to movi.16b instead.
     if (STI->hasZeroCycleZeroingFPWorkaround() &&
         MI->getOperand(1).getImm() == 0) {
       MCInst TmpInst;

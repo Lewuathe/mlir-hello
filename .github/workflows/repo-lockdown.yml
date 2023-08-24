@@ -8,6 +8,13 @@ on:
       - 'libunwind/**'
       - 'runtimes/**'
       - 'lldb/**'
+      - '.github/**'
+      - 'clang/lib/Format/**'
+      - 'clang/include/clang/Format/**'
+      - 'clang/docs/**'
+      - 'clang/unitests/Format/**'
+      - 'clang/tools/clang-format/**'
+      - 'llvm/utils/git/**'
 
 permissions:
   pull-requests: write

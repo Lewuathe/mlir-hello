@@ -490,6 +490,20 @@ Every processor supports every OS ABI (see :ref:`amdgpu-os`) with the following 
                                                                         work-item                       Add product
                                                                         IDs                             names.
 
+     ``gfx1150``                 ``amdgcn``   APU   - cumode          - Architected                   *TBA*
+                                                    - wavefrontsize64   flat
+                                                                        scratch                       .. TODO::
+                                                                      - Packed
+                                                                        work-item                       Add product
+                                                                        IDs                             names.
+
+     ``gfx1151``                 ``amdgcn``   APU   - cumode          - Architected                   *TBA*
+                                                    - wavefrontsize64   flat
+                                                                        scratch                       .. TODO::
+                                                                      - Packed
+                                                                        work-item                       Add product
+                                                                        IDs                             names.
+
      =========== =============== ============ ===== ================= =============== =============== ======================
 
 .. _amdgpu-target-features:
@@ -948,38 +962,64 @@ The AMDGPU backend implements the following LLVM IR intrinsics.
 .. table:: AMDGPU LLVM IR Intrinsics
   :name: amdgpu-llvm-ir-intrinsics-table
 
-  =========================================  ==========================================================
-  LLVM Intrinsic                             Description
-  =========================================  ==========================================================
-  llvm.amdgcn.log                            Provides direct access to v_log_f32 and v_log_f16
-                                             (on targets with half support). Peforms log2 function.
+  ==============================================   ==========================================================
+  LLVM Intrinsic                                   Description
+  ==============================================   ==========================================================
+  llvm.amdgcn.sqrt                                 Provides direct access to v_sqrt_f64, v_sqrt_f32 and v_sqrt_f16
+                                                   (on targets with half support). Peforms sqrt function.
 
-  llvm.amdgcn.exp2                           Provides direct access to v_exp_f32 and v_exp_f16
-                                             (on targets with half support). Performs exp2 function.
+  llvm.amdgcn.log                                  Provides direct access to v_log_f32 and v_log_f16
+                                                   (on targets with half support). Peforms log2 function.
 
-  :ref:`llvm.frexp <int_frexp>`              Implemented for half, float and double.
+  llvm.amdgcn.exp2                                 Provides direct access to v_exp_f32 and v_exp_f16
+                                                   (on targets with half support). Performs exp2 function.
 
-  :ref:`llvm.log2 <int_log2>`                Implemented for float and half (and vectors of float or
-                                             half). Not implemented for double. Hardware provides
-                                             1ULP accuracy for float, and 0.51ULP for half. Float
-                                             instruction does not natively support denormal
-                                             inputs. Backend will optimize out denormal scaling if
-                                             marked with the :ref:`afn <fastmath_afn>` flag.
+  :ref:`llvm.frexp <int_frexp>`                    Implemented for half, float and double.
 
-  :ref:`llvm.log <int_log>`                  Implemented for float and half (and vectors).
+  :ref:`llvm.log2 <int_log2>`                      Implemented for float and half (and vectors of float or
+                                                   half). Not implemented for double. Hardware provides
+                                                   1ULP accuracy for float, and 0.51ULP for half. Float
+                                                   instruction does not natively support denormal
+                                                   inputs.
 
-  :ref:`llvm.exp <int_exp>`                  Implemented for float and half (and vectors).
+  :ref:`llvm.sqrt <int_sqrt>`                      Implemented for double, float and half (and vectors).
 
-  :ref:`llvm.log10 <int_log10>`              Implemented for float and half (and vectors).
+  :ref:`llvm.log <int_log>`                        Implemented for float and half (and vectors).
 
-  :ref:`llvm.exp2 <int_exp2>`                Implemented for float and half (and vectors of float or
-                                             half). Not implemented for double. Hardware provides
-                                             1ULP accuracy for float, and 0.51ULP for half. Float
-                                             instruction does not natively support denormal
-                                             inputs. Backend will optimize out denormal scaling if
-                                             marked with the :ref:`afn <fastmath_afn>` flag.
+  :ref:`llvm.exp <int_exp>`                        Implemented for float and half (and vectors).
 
-  =========================================  ==========================================================
+  :ref:`llvm.log10 <int_log10>`                    Implemented for float and half (and vectors).
+
+  :ref:`llvm.exp2 <int_exp2>`                      Implemented for float and half (and vectors of float or
+                                                   half). Not implemented for double. Hardware provides
+                                                   1ULP accuracy for float, and 0.51ULP for half. Float
+                                                   instruction does not natively support denormal
+                                                   inputs.
+
+  :ref:`llvm.stacksave.p5 <int_stacksave>`         Implemented, must use the alloca address space.
+  :ref:`llvm.stackrestore.p5 <int_stackrestore>`   Implemented, must use the alloca address space.
+
+  llvm.amdgcn.wave.reduce.umin                     Performs an arithmetic unsigned min reduction on the unsigned values
+                                                   provided by each lane in the wavefront.
+                                                   Intrinsic takes a hint for reduction strategy using second operand
+                                                   0: Target default preference,
+                                                   1: `Iterative strategy`, and
+                                                   2: `DPP`.
+                                                   If target does not support the DPP operations (e.g. gfx6/7),
+                                                   reduction will be performed using default iterative strategy.
+                                                   Intrinsic is currently only implemented for i32.
+
+  llvm.amdgcn.wave.reduce.umax                     Performs an arithmetic unsigned max reduction on the unsigned values
+                                                   provided by each lane in the wavefront.
+                                                   Intrinsic takes a hint for reduction strategy using second operand
+                                                   0: Target default preference,
+                                                   1: `Iterative strategy`, and
+                                                   2: `DPP`.
+                                                   If target does not support the DPP operations (e.g. gfx6/7),
+                                                   reduction will be performed using default iterative strategy.
+                                                   Intrinsic is currently only implemented for i32.
+
+  ==============================================   ==========================================================
 
 .. TODO::
 
@@ -1489,14 +1529,14 @@ The AMDGPU backend uses the following ELF header:
      ``EF_AMDGPU_MACH_AMDGCN_GFX940``     0x040      ``gfx940``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1100``    0x041      ``gfx1100``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1013``    0x042      ``gfx1013``
-     *reserved*                           0x043      Reserved.
+     ``EF_AMDGPU_MACH_AMDGCN_GFX1150``    0x043      ``gfx1150``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1103``    0x044      ``gfx1103``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1036``    0x045      ``gfx1036``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1101``    0x046      ``gfx1101``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1102``    0x047      ``gfx1102``
      *reserved*                           0x048      Reserved.
      *reserved*                           0x049      Reserved.
-     *reserved*                           0x04a      Reserved.
+     ``EF_AMDGPU_MACH_AMDGCN_GFX1151``    0x04a      ``gfx1151``
      ``EF_AMDGPU_MACH_AMDGCN_GFX941``     0x04b      ``gfx941``
      ``EF_AMDGPU_MACH_AMDGCN_GFX942``     0x04c      ``gfx942``
      ==================================== ========== =============================
@@ -13770,6 +13810,10 @@ On entry to a function:
 9.  All other registers are unspecified.
 10. Any necessary ``s_waitcnt`` has been performed to ensure memory is available
     to the function.
+11. Use pass-by-reference (byref) in stead of pass-by-value (byval) for struct
+    arguments in C ABI. Callee is responsible for allocating stack memory and
+    copying the value of the struct if modified. Note that the backend still
+    supports byval for struct arguments.
 
 On exit from a function:
 

@@ -9,7 +9,7 @@
 // This test ensures that we can enable the hardened mode on a per-TU basis regardless of how the library was built.
 
 // Debug mode would additionally trigger the error that hardened and debug modes are mutually exclusive.
-// UNSUPPORTED: libcpp-has-debug-mode
+// UNSUPPORTED: libcpp-hardening-mode=debug
 // `check_assertion.h` is only available starting from C++11.
 // UNSUPPORTED: c++03
 // `check_assertion.h` requires Unix headers.
@@ -22,9 +22,9 @@
 #include "check_assertion.h"
 
 int main(int, char**) {
-  _LIBCPP_ASSERT_UNCATEGORIZED(true, "Should not fire");
+  _LIBCPP_ASSERT_VALID_ELEMENT_ACCESS(true, "Should not fire");
   TEST_LIBCPP_ASSERT_FAILURE([] {
-    _LIBCPP_ASSERT_UNCATEGORIZED(false, "Should fire");
+    _LIBCPP_ASSERT_VALID_ELEMENT_ACCESS(false, "Should fire");
   }(), "Should fire");
 
   return 0;
