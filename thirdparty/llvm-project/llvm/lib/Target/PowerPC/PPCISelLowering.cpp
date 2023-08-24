@@ -122,11 +122,6 @@ cl::desc("don't always align innermost loop to 32 bytes on ppc"), cl::Hidden);
 static cl::opt<bool> UseAbsoluteJumpTables("ppc-use-absolute-jumptables",
 cl::desc("use absolute jump tables on ppc"), cl::Hidden);
 
-static cl::opt<bool> EnableQuadwordAtomics(
-    "ppc-quadword-atomics",
-    cl::desc("enable quadword lock-free atomic operations"), cl::init(false),
-    cl::Hidden);
-
 static cl::opt<bool>
     DisablePerfectShuffle("ppc-disable-perfect-shuffle",
                           cl::desc("disable vector permute decomposition"),
@@ -1371,12 +1366,12 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
     setLibcallName(RTLIB::MULO_I64, nullptr);
   }
 
-  if (!isPPC64)
-    setMaxAtomicSizeInBitsSupported(32);
-  else if (shouldInlineQuadwordAtomics())
+  if (shouldInlineQuadwordAtomics())
     setMaxAtomicSizeInBitsSupported(128);
-  else
+  else if (isPPC64)
     setMaxAtomicSizeInBitsSupported(64);
+  else
+    setMaxAtomicSizeInBitsSupported(32);
 
   setStackPointerRegisterToSaveRestore(isPPC64 ? PPC::X1 : PPC::R1);
 
@@ -18479,11 +18474,7 @@ CCAssignFn *PPCTargetLowering::ccAssignFnForCall(CallingConv::ID CC,
 }
 
 bool PPCTargetLowering::shouldInlineQuadwordAtomics() const {
-  // TODO: 16-byte atomic type support for AIX is in progress; we should be able
-  // to inline 16-byte atomic ops on AIX too in the future.
-  return Subtarget.isPPC64() &&
-         (EnableQuadwordAtomics || !Subtarget.getTargetTriple().isOSAIX()) &&
-         Subtarget.hasQuadwordAtomics();
+  return Subtarget.isPPC64() && Subtarget.hasQuadwordAtomics();
 }
 
 TargetLowering::AtomicExpansionKind
@@ -18546,9 +18537,7 @@ Value *PPCTargetLowering::emitMaskedAtomicRMWIntrinsic(
   Value *IncrLo = Builder.CreateTrunc(Incr, Int64Ty, "incr_lo");
   Value *IncrHi =
       Builder.CreateTrunc(Builder.CreateLShr(Incr, 64), Int64Ty, "incr_hi");
-  Value *Addr =
-      Builder.CreateBitCast(AlignedAddr, Type::getInt8PtrTy(M->getContext()));
-  Value *LoHi = Builder.CreateCall(RMW, {Addr, IncrLo, IncrHi});
+  Value *LoHi = Builder.CreateCall(RMW, {AlignedAddr, IncrLo, IncrHi});
   Value *Lo = Builder.CreateExtractValue(LoHi, 0, "lo");
   Value *Hi = Builder.CreateExtractValue(LoHi, 1, "hi");
   Lo = Builder.CreateZExt(Lo, ValTy, "lo64");
@@ -18573,11 +18562,9 @@ Value *PPCTargetLowering::emitMaskedAtomicCmpXchgIntrinsic(
   Value *NewLo = Builder.CreateTrunc(NewVal, Int64Ty, "new_lo");
   Value *NewHi =
       Builder.CreateTrunc(Builder.CreateLShr(NewVal, 64), Int64Ty, "new_hi");
-  Value *Addr =
-      Builder.CreateBitCast(AlignedAddr, Type::getInt8PtrTy(M->getContext()));
   emitLeadingFence(Builder, CI, Ord);
   Value *LoHi =
-      Builder.CreateCall(IntCmpXchg, {Addr, CmpLo, CmpHi, NewLo, NewHi});
+      Builder.CreateCall(IntCmpXchg, {AlignedAddr, CmpLo, CmpHi, NewLo, NewHi});
   emitTrailingFence(Builder, CI, Ord);
   Value *Lo = Builder.CreateExtractValue(LoHi, 0, "lo");
   Value *Hi = Builder.CreateExtractValue(LoHi, 1, "hi");

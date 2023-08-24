@@ -62,8 +62,12 @@ StorageLocation &DataflowAnalysisContext::createStorageLocation(QualType Type) {
   if (!Type.isNull() && Type->isRecordType()) {
     llvm::DenseMap<const ValueDecl *, StorageLocation *> FieldLocs;
     for (const FieldDecl *Field : getModeledFields(Type))
-      FieldLocs.insert({Field, &createStorageLocation(Field->getType())});
-    return arena().create<AggregateStorageLocation>(Type, std::move(FieldLocs));
+      if (Field->getType()->isReferenceType())
+        FieldLocs.insert({Field, nullptr});
+      else
+        FieldLocs.insert({Field, &createStorageLocation(
+                                     Field->getType().getNonReferenceType())});
+    return arena().create<RecordStorageLocation>(Type, std::move(FieldLocs));
   }
   return arena().create<ScalarStorageLocation>(Type);
 }
@@ -72,7 +76,7 @@ StorageLocation &
 DataflowAnalysisContext::getStableStorageLocation(const VarDecl &D) {
   if (auto *Loc = getStorageLocation(D))
     return *Loc;
-  auto &Loc = createStorageLocation(D.getType());
+  auto &Loc = createStorageLocation(D.getType().getNonReferenceType());
   setStorageLocation(D, Loc);
   return Loc;
 }

@@ -266,8 +266,7 @@ void ExecuteRegionOp::getCanonicalizationPatterns(RewritePatternSet &results,
 /// correspond to a constant value for each operand, or null if that operand is
 /// not a constant.
 void ExecuteRegionOp::getSuccessorRegions(
-    std::optional<unsigned> index, ArrayRef<Attribute> operands,
-    SmallVectorImpl<RegionSuccessor> &regions) {
+    std::optional<unsigned> index, SmallVectorImpl<RegionSuccessor> &regions) {
   // If the predecessor is the ExecuteRegionOp, branch into the body.
   if (!index) {
     regions.push_back(RegionSuccessor(&getRegion()));
@@ -284,8 +283,27 @@ void ExecuteRegionOp::getSuccessorRegions(
 
 MutableOperandRange
 ConditionOp::getMutableSuccessorOperands(std::optional<unsigned> index) {
+  assert((!index || index == getParentOp().getAfter().getRegionNumber()) &&
+         "condition op can only exit the loop or branch to the after"
+         "region");
   // Pass all operands except the condition to the successor region.
   return getArgsMutable();
+}
+
+void ConditionOp::getSuccessorRegions(
+    ArrayRef<Attribute> operands, SmallVectorImpl<RegionSuccessor> &regions) {
+  FoldAdaptor adaptor(operands, *this);
+
+  WhileOp whileOp = getParentOp();
+
+  // Condition can either lead to the after region or back to the parent op
+  // depending on whether the condition is true or not.
+  auto boolAttr = dyn_cast_or_null<BoolAttr>(adaptor.getCondition());
+  if (!boolAttr || boolAttr.getValue())
+    regions.emplace_back(&whileOp.getAfter(),
+                         whileOp.getAfter().getArguments());
+  if (!boolAttr || !boolAttr.getValue())
+    regions.emplace_back(whileOp.getResults());
 }
 
 //===----------------------------------------------------------------------===//
@@ -534,13 +552,8 @@ ForOp mlir::scf::getForInductionVarOwner(Value val) {
 
 /// Return operands used when entering the region at 'index'. These operands
 /// correspond to the loop iterator operands, i.e., those excluding the
-/// induction variable. LoopOp only has one region, so 0 is the only valid value
-/// for `index`.
-OperandRange ForOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
-  assert(index && *index == 0 && "invalid region index");
-
-  // The initial operands map to the loop arguments after the induction
-  // variable.
+/// induction variable.
+OperandRange ForOp::getEntrySuccessorOperands(std::optional<unsigned> index) {
   return getInitArgs();
 }
 
@@ -550,17 +563,10 @@ OperandRange ForOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
 /// correspond to a constant value for each operand, or null if that operand is
 /// not a constant.
 void ForOp::getSuccessorRegions(std::optional<unsigned> index,
-                                ArrayRef<Attribute> operands,
                                 SmallVectorImpl<RegionSuccessor> &regions) {
-  // If the predecessor is the ForOp, branch into the body using the iterator
-  // arguments.
-  if (!index) {
-    regions.push_back(RegionSuccessor(&getLoopBody(), getRegionIterArgs()));
-    return;
-  }
-
-  // Otherwise, the loop may branch back to itself or the parent operation.
-  assert(*index == 0 && "expected loop region");
+  // Both the operation itself and the region may be branching into the body or
+  // back into the operation itself. It is possible for loop not to enter the
+  // body.
   regions.push_back(RegionSuccessor(&getLoopBody(), getRegionIterArgs()));
   regions.push_back(RegionSuccessor(getResults()));
 }
@@ -1376,7 +1382,7 @@ ParseResult ForallOp::parse(OpAsmParser &parser, OperationState &result) {
   result.addAttribute("staticLowerBound", staticLbs);
   result.addAttribute("staticUpperBound", staticUbs);
   result.addAttribute("staticStep", staticSteps);
-  result.addAttribute("operand_segment_sizes",
+  result.addAttribute("operandSegmentSizes",
                       parser.getBuilder().getDenseI32ArrayAttr(
                           {static_cast<int32_t>(dynamicLbs.size()),
                            static_cast<int32_t>(dynamicUbs.size()),
@@ -1411,7 +1417,7 @@ void ForallOp::build(
   result.addAttribute(getStaticStepAttrName(result.name),
                       b.getDenseI64ArrayAttr(staticSteps));
   result.addAttribute(
-      "operand_segment_sizes",
+      "operandSegmentSizes",
       b.getDenseI32ArrayAttr({static_cast<int32_t>(dynamicLbs.size()),
                               static_cast<int32_t>(dynamicUbs.size()),
                               static_cast<int32_t>(dynamicSteps.size()),
@@ -1524,9 +1530,9 @@ public:
     SmallVector<OpFoldResult> mixedLowerBound(op.getMixedLowerBound());
     SmallVector<OpFoldResult> mixedUpperBound(op.getMixedUpperBound());
     SmallVector<OpFoldResult> mixedStep(op.getMixedStep());
-    if (failed(foldDynamicIndexList(rewriter, mixedLowerBound)) &&
-        failed(foldDynamicIndexList(rewriter, mixedUpperBound)) &&
-        failed(foldDynamicIndexList(rewriter, mixedStep)))
+    if (failed(foldDynamicIndexList(mixedLowerBound)) &&
+        failed(foldDynamicIndexList(mixedUpperBound)) &&
+        failed(foldDynamicIndexList(mixedStep)))
       return failure();
 
     rewriter.updateRootInPlace(op, [&]() {
@@ -1612,7 +1618,7 @@ struct ForallOpSingleOrZeroIterationDimsFolder
                                       op.getOutputs(), std::nullopt, nullptr);
     newOp.getBodyRegion().getBlocks().clear();
     // The new loop needs to keep all attributes from the old one, except for
-    // "operand_segment_sizes" and static loop bound attributes which capture
+    // "operandSegmentSizes" and static loop bound attributes which capture
     // the outdated information of the old iteration domain.
     SmallVector<StringAttr> elidedAttrs{newOp.getOperandSegmentSizesAttrName(),
                                         newOp.getStaticLowerBoundAttrName(),
@@ -1726,16 +1732,11 @@ void ForallOp::getCanonicalizationPatterns(RewritePatternSet &results,
 /// correspond to a constant value for each operand, or null if that operand is
 /// not a constant.
 void ForallOp::getSuccessorRegions(std::optional<unsigned> index,
-                                   ArrayRef<Attribute> operands,
                                    SmallVectorImpl<RegionSuccessor> &regions) {
-  // If the predecessor is ForallOp, branch into the body with empty arguments.
-  if (!index) {
-    regions.push_back(RegionSuccessor(&getRegion()));
-    return;
-  }
-
-  // Otherwise, the loop should branch back to the parent operation.
-  assert(*index == 0 && "expected loop region");
+  // Both the operation itself and the region may be branching into the body or
+  // back into the operation itself. It is possible for loop not to enter the
+  // body.
+  regions.push_back(RegionSuccessor(&getRegion()));
   regions.push_back(RegionSuccessor());
 }
 
@@ -1841,12 +1842,11 @@ bool mlir::scf::insideMutuallyExclusiveBranches(Operation *a, Operation *b) {
 
 LogicalResult
 IfOp::inferReturnTypes(MLIRContext *ctx, std::optional<Location> loc,
-                       ValueRange operands, DictionaryAttr attrs,
-                       OpaqueProperties properties, RegionRange regions,
+                       IfOp::Adaptor adaptor,
                        SmallVectorImpl<Type> &inferredReturnTypes) {
-  if (regions.empty())
+  if (adaptor.getRegions().empty())
     return failure();
-  Region *r = regions.front();
+  Region *r = &adaptor.getThenRegion();
   if (r->empty())
     return failure();
   Block &b = r->front();
@@ -2012,7 +2012,6 @@ void IfOp::print(OpAsmPrinter &p) {
 /// correspond to a constant value for each operand, or null if that operand is
 /// not a constant.
 void IfOp::getSuccessorRegions(std::optional<unsigned> index,
-                               ArrayRef<Attribute> operands,
                                SmallVectorImpl<RegionSuccessor> &regions) {
   // The `then` and the `else` region branch back to the parent operation.
   if (index) {
@@ -2020,26 +2019,30 @@ void IfOp::getSuccessorRegions(std::optional<unsigned> index,
     return;
   }
 
+  regions.push_back(RegionSuccessor(&getThenRegion()));
+
   // Don't consider the else region if it is empty.
   Region *elseRegion = &this->getElseRegion();
   if (elseRegion->empty())
-    elseRegion = nullptr;
+    regions.push_back(RegionSuccessor());
+  else
+    regions.push_back(RegionSuccessor(elseRegion));
+}
 
-  // Otherwise, the successor is dependent on the condition.
-  bool condition;
-  if (auto condAttr = llvm::dyn_cast_or_null<IntegerAttr>(operands.front())) {
-    condition = condAttr.getValue().isOne();
-  } else {
-    // If the condition isn't constant, both regions may be executed.
-    regions.push_back(RegionSuccessor(&getThenRegion()));
-    // If the else region does not exist, it is not a viable successor.
-    if (elseRegion)
-      regions.push_back(RegionSuccessor(elseRegion));
-    return;
+void IfOp::getEntrySuccessorRegions(ArrayRef<Attribute> operands,
+                                    SmallVectorImpl<RegionSuccessor> &regions) {
+  FoldAdaptor adaptor(operands, *this);
+  auto boolAttr = dyn_cast_or_null<BoolAttr>(adaptor.getCondition());
+  if (!boolAttr || boolAttr.getValue())
+    regions.emplace_back(&getThenRegion());
+
+  // If the else region is empty, execution continues after the parent op.
+  if (!boolAttr || !boolAttr.getValue()) {
+    if (!getElseRegion().empty())
+      regions.emplace_back(&getElseRegion());
+    else
+      regions.emplace_back(getResults());
   }
-
-  // Add the successor regions using the condition.
-  regions.push_back(RegionSuccessor(condition ? &getThenRegion() : elseRegion));
 }
 
 LogicalResult IfOp::fold(FoldAdaptor adaptor,
@@ -2846,7 +2849,7 @@ ParseResult ParallelOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseRegion(*body, ivs))
     return failure();
 
-  // Set `operand_segment_sizes` attribute.
+  // Set `operandSegmentSizes` attribute.
   result.addAttribute(
       ParallelOp::getOperandSegmentSizeAttr(),
       builder.getDenseI32ArrayAttr({static_cast<int32_t>(lower.size()),
@@ -3039,17 +3042,11 @@ void ParallelOp::getCanonicalizationPatterns(RewritePatternSet &results,
 /// correspond to a constant value for each operand, or null if that operand is
 /// not a constant.
 void ParallelOp::getSuccessorRegions(
-    std::optional<unsigned> index, ArrayRef<Attribute> operands,
-    SmallVectorImpl<RegionSuccessor> &regions) {
-  // If the predecessor is ParallelOp, branch into the body with empty
-  // arguments.
-  if (!index) {
-    regions.push_back(RegionSuccessor(&getRegion()));
-    return;
-  }
-
-  assert(*index == 0 && "expected loop region");
-  // Otherwise, the loop should branch back to the parent operation.
+    std::optional<unsigned> index, SmallVectorImpl<RegionSuccessor> &regions) {
+  // Both the operation itself and the region may be branching into the body or
+  // back into the operation itself. It is possible for loop not to enter the
+  // body.
+  regions.push_back(RegionSuccessor(&getRegion()));
   regions.push_back(RegionSuccessor());
 }
 
@@ -3172,7 +3169,7 @@ void WhileOp::build(::mlir::OpBuilder &odsBuilder,
     afterBuilder(odsBuilder, odsState.location, afterBlock->getArguments());
 }
 
-OperandRange WhileOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
+OperandRange WhileOp::getEntrySuccessorOperands(std::optional<unsigned> index) {
   assert(index && *index == 0 &&
          "WhileOp is expected to branch only to the first region");
 
@@ -3180,23 +3177,22 @@ OperandRange WhileOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
 }
 
 ConditionOp WhileOp::getConditionOp() {
-  return cast<ConditionOp>(getBefore().front().getTerminator());
+  return cast<ConditionOp>(getBeforeBody()->getTerminator());
 }
 
 YieldOp WhileOp::getYieldOp() {
-  return cast<YieldOp>(getAfter().front().getTerminator());
+  return cast<YieldOp>(getAfterBody()->getTerminator());
 }
 
 Block::BlockArgListType WhileOp::getBeforeArguments() {
-  return getBefore().front().getArguments();
+  return getBeforeBody()->getArguments();
 }
 
 Block::BlockArgListType WhileOp::getAfterArguments() {
-  return getAfter().front().getArguments();
+  return getAfterBody()->getArguments();
 }
 
 void WhileOp::getSuccessorRegions(std::optional<unsigned> index,
-                                  ArrayRef<Attribute> operands,
                                   SmallVectorImpl<RegionSuccessor> &regions) {
   // The parent op always branches to the condition region.
   if (!index) {
@@ -3211,13 +3207,8 @@ void WhileOp::getSuccessorRegions(std::optional<unsigned> index,
     return;
   }
 
-  // Try to narrow the successor to the condition region.
-  assert(!operands.empty() && "expected at least one operand");
-  auto cond = llvm::dyn_cast_or_null<BoolAttr>(operands[0]);
-  if (!cond || !cond.getValue())
-    regions.emplace_back(getResults());
-  if (!cond || cond.getValue())
-    regions.emplace_back(&getAfter(), getAfter().getArguments());
+  regions.emplace_back(getResults());
+  regions.emplace_back(&getAfter(), getAfter().getArguments());
 }
 
 /// Parses a `while` op.
@@ -3269,8 +3260,7 @@ ParseResult scf::WhileOp::parse(OpAsmParser &parser, OperationState &result) {
 
 /// Prints a `while` op.
 void scf::WhileOp::print(OpAsmPrinter &p) {
-  printInitializationList(p, getBefore().front().getArguments(), getInits(),
-                          " ");
+  printInitializationList(p, getBeforeArguments(), getInits(), " ");
   p << " : ";
   p.printFunctionalType(getInits().getTypes(), getResults().getTypes());
   p << ' ';
@@ -3420,7 +3410,7 @@ struct RemoveLoopInvariantArgsFromBeforeBlock
 
   LogicalResult matchAndRewrite(WhileOp op,
                                 PatternRewriter &rewriter) const override {
-    Block &afterBlock = op.getAfter().front();
+    Block &afterBlock = *op.getAfterBody();
     Block::BlockArgListType beforeBlockArgs = op.getBeforeArguments();
     ConditionOp condOp = op.getConditionOp();
     OperandRange condOpArgs = condOp.getArgs();
@@ -3502,7 +3492,7 @@ struct RemoveLoopInvariantArgsFromBeforeBlock
         &newWhile.getBefore(), /*insertPt*/ {},
         ValueRange(newYieldOpArgs).getTypes(), newBeforeBlockArgLocs);
 
-    Block &beforeBlock = op.getBefore().front();
+    Block &beforeBlock = *op.getBeforeBody();
     SmallVector<Value> newBeforeBlockArgs(beforeBlock.getNumArguments());
     // For each i-th before block argument we find it's replacement value as :-
     //   1. If i-th before block argument is a loop invariant, we fetch it's
@@ -3572,7 +3562,7 @@ struct RemoveLoopInvariantValueYielded : public OpRewritePattern<WhileOp> {
 
   LogicalResult matchAndRewrite(WhileOp op,
                                 PatternRewriter &rewriter) const override {
-    Block &beforeBlock = op.getBefore().front();
+    Block &beforeBlock = *op.getBeforeBody();
     ConditionOp condOp = op.getConditionOp();
     OperandRange condOpArgs = condOp.getArgs();
 
@@ -3625,7 +3615,7 @@ struct RemoveLoopInvariantValueYielded : public OpRewritePattern<WhileOp> {
         *rewriter.createBlock(&newWhile.getAfter(), /*insertPt*/ {},
                               newAfterBlockType, newAfterBlockArgLocs);
 
-    Block &afterBlock = op.getAfter().front();
+    Block &afterBlock = *op.getAfterBody();
     // Since a new scf.condition op was created, we need to fetch the new
     // `after` block arguments which will be used while replacing operations of
     // previous scf.while's `after` blocks. We'd also be fetching new result
@@ -3742,7 +3732,7 @@ struct WhileUnusedResult : public OpRewritePattern<WhileOp> {
     rewriter.inlineRegionBefore(op.getBefore(), newWhile.getBefore(),
                                 newWhile.getBefore().begin());
 
-    Block &afterBlock = op.getAfter().front();
+    Block &afterBlock = *op.getAfterBody();
     rewriter.mergeBlocks(&afterBlock, &newAfterBlock, newAfterBlockArgs);
 
     rewriter.replaceOp(op, newResults);
@@ -3783,8 +3773,7 @@ struct WhileCmpCond : public OpRewritePattern<scf::WhileOp> {
     if (!cmp)
       return failure();
     bool changed = false;
-    for (auto tup :
-         llvm::zip(cond.getArgs(), op.getAfter().front().getArguments())) {
+    for (auto tup : llvm::zip(cond.getArgs(), op.getAfterArguments())) {
       for (size_t opIdx = 0; opIdx < 2; opIdx++) {
         if (std::get<0>(tup) != cmp.getOperand(opIdx))
           continue;
@@ -3848,8 +3837,8 @@ struct WhileRemoveUnusedArgs : public OpRewritePattern<WhileOp> {
       }
     }
 
-    Block &beforeBlock = op.getBefore().front();
-    Block &afterBlock = op.getAfter().front();
+    Block &beforeBlock = *op.getBeforeBody();
+    Block &afterBlock = *op.getAfterBody();
 
     beforeBlock.eraseArguments(argsToErase);
 
@@ -3857,8 +3846,8 @@ struct WhileRemoveUnusedArgs : public OpRewritePattern<WhileOp> {
     auto newWhileOp =
         rewriter.create<WhileOp>(loc, op.getResultTypes(), newInits,
                                  /*beforeBody*/ nullptr, /*afterBody*/ nullptr);
-    Block &newBeforeBlock = newWhileOp.getBefore().front();
-    Block &newAfterBlock = newWhileOp.getAfter().front();
+    Block &newBeforeBlock = *newWhileOp.getBeforeBody();
+    Block &newAfterBlock = *newWhileOp.getAfterBody();
 
     OpBuilder::InsertionGuard g(rewriter);
     rewriter.setInsertionPoint(yield);
@@ -3908,8 +3897,8 @@ struct WhileRemoveDuplicatedResults : public OpRewritePattern<WhileOp> {
     auto newWhileOp = rewriter.create<scf::WhileOp>(
         loc, argsRange.getTypes(), op.getInits(), /*beforeBody*/ nullptr,
         /*afterBody*/ nullptr);
-    Block &newBeforeBlock = newWhileOp.getBefore().front();
-    Block &newAfterBlock = newWhileOp.getAfter().front();
+    Block &newBeforeBlock = *newWhileOp.getBeforeBody();
+    Block &newAfterBlock = *newWhileOp.getAfterBody();
 
     SmallVector<Value> afterArgsMapping;
     SmallVector<Value> resultsMapping;
@@ -3926,8 +3915,8 @@ struct WhileRemoveDuplicatedResults : public OpRewritePattern<WhileOp> {
     rewriter.replaceOpWithNewOp<ConditionOp>(condOp, condOp.getCondition(),
                                              argsRange);
 
-    Block &beforeBlock = op.getBefore().front();
-    Block &afterBlock = op.getAfter().front();
+    Block &beforeBlock = *op.getBeforeBody();
+    Block &afterBlock = *op.getAfterBody();
 
     rewriter.mergeBlocks(&beforeBlock, &newBeforeBlock,
                          newBeforeBlock.getArguments());
@@ -4034,7 +4023,7 @@ Block &scf::IndexSwitchOp::getCaseBlock(unsigned idx) {
 }
 
 void IndexSwitchOp::getSuccessorRegions(
-    std::optional<unsigned> index, ArrayRef<Attribute> operands,
+    std::optional<unsigned> index,
     SmallVectorImpl<RegionSuccessor> &successors) {
   // All regions branch back to the parent op.
   if (index) {
@@ -4042,19 +4031,25 @@ void IndexSwitchOp::getSuccessorRegions(
     return;
   }
 
+  llvm::copy(getRegions(), std::back_inserter(successors));
+}
+
+void IndexSwitchOp::getEntrySuccessorRegions(
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<RegionSuccessor> &successors) {
+  FoldAdaptor adaptor(operands, *this);
+
   // If a constant was not provided, all regions are possible successors.
-  auto operandValue = llvm::dyn_cast_or_null<IntegerAttr>(operands.front());
-  if (!operandValue) {
-    for (Region &caseRegion : getCaseRegions())
-      successors.emplace_back(&caseRegion);
-    successors.emplace_back(&getDefaultRegion());
+  auto arg = dyn_cast_or_null<IntegerAttr>(adaptor.getArg());
+  if (!arg) {
+    llvm::copy(getRegions(), std::back_inserter(successors));
     return;
   }
 
-  // Otherwise, try to find a case with a matching value. If not, the default
-  // region is the only successor.
+  // Otherwise, try to find a case with a matching value. If not, the
+  // default region is the only successor.
   for (auto [caseValue, caseRegion] : llvm::zip(getCases(), getCaseRegions())) {
-    if (caseValue == operandValue.getInt()) {
+    if (caseValue == arg.getInt()) {
       successors.emplace_back(&caseRegion);
       return;
     }

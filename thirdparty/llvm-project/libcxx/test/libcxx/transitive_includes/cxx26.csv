@@ -50,6 +50,7 @@ bitset climits
 bitset cstddef
 bitset cstdint
 bitset cstring
+bitset cwchar
 bitset initializer_list
 bitset iosfwd
 bitset limits
@@ -71,7 +72,6 @@ chrono cmath
 chrono compare
 chrono cstddef
 chrono cstdint
-chrono cstdlib
 chrono ctime
 chrono initializer_list
 chrono limits
@@ -87,6 +87,7 @@ chrono string_view
 chrono tuple
 chrono version
 cinttypes cstdint
+cmath limits
 cmath version
 codecvt cctype
 codecvt clocale
@@ -214,7 +215,6 @@ format array
 format cmath
 format cstddef
 format cstdint
-format cstdlib
 format initializer_list
 format limits
 format locale
@@ -454,11 +454,21 @@ ostream streambuf
 ostream string
 ostream typeinfo
 ostream version
+print array
+print cerrno
+print cmath
 print cstddef
 print cstdint
+print cstdio
 print initializer_list
 print limits
+print locale
+print new
+print optional
+print stdexcept
+print string
 print string_view
+print tuple
 print version
 queue compare
 queue cstddef
@@ -567,7 +577,10 @@ stdexcept iosfwd
 stop_token atomic
 stop_token cstddef
 stop_token cstdint
+stop_token cstring
+stop_token ctime
 stop_token limits
+stop_token ratio
 stop_token thread
 stop_token version
 streambuf cstdint
@@ -615,7 +628,6 @@ thread cerrno
 thread compare
 thread cstddef
 thread cstdint
-thread cstdlib
 thread ctime
 thread initializer_list
 thread iosfwd
@@ -691,7 +703,6 @@ vector climits
 vector compare
 vector cstddef
 vector cstdint
-vector cstdlib
 vector cstring
 vector cwchar
 vector initializer_list

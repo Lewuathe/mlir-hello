@@ -749,7 +749,6 @@ void TargetInstrInfo::lowerCopy(MachineInstr *MI,
   if (MI->getNumOperands() > 2)
     transferImplicitOperands(MI, TRI);
   MI->eraseFromParent();
-  return;
 }
 
 bool TargetInstrInfo::hasReassociableOperands(
@@ -1119,7 +1118,7 @@ MachineTraceStrategy TargetInstrInfo::getMachineCombinerTraceStrategy() const {
   return MachineTraceStrategy::TS_MinInstrCount;
 }
 
-bool TargetInstrInfo::isReallyTriviallyReMaterializableGeneric(
+bool TargetInstrInfo::isReallyTriviallyReMaterializable(
     const MachineInstr &MI) const {
   const MachineFunction &MF = *MI.getMF();
   const MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -1449,6 +1448,22 @@ TargetInstrInfo::describeLoadedValue(const MachineInstr &MI,
   }
 
   return std::nullopt;
+}
+
+// Get the call frame size just before MI.
+unsigned TargetInstrInfo::getCallFrameSizeAt(MachineInstr &MI) const {
+  // Search backwards from MI for the most recent call frame instruction.
+  MachineBasicBlock *MBB = MI.getParent();
+  for (auto &AdjI : reverse(make_range(MBB->instr_begin(), MI.getIterator()))) {
+    if (AdjI.getOpcode() == getCallFrameSetupOpcode())
+      return getFrameTotalSize(AdjI);
+    if (AdjI.getOpcode() == getCallFrameDestroyOpcode())
+      return 0;
+  }
+
+  // If none was found, use the call frame size from the start of the basic
+  // block.
+  return MBB->getCallFrameSize();
 }
 
 /// Both DefMI and UseMI must be valid.  By default, call directly to the

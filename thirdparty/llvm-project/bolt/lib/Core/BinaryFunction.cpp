@@ -182,9 +182,9 @@ static SMLoc findDebugLineInformationForInstructionAt(
   // We use the pointer in SMLoc to store an instance of DebugLineTableRowRef,
   // which occupies 64 bits. Thus, we can only proceed if the struct fits into
   // the pointer itself.
-  assert(sizeof(decltype(SMLoc().getPointer())) >=
-             sizeof(DebugLineTableRowRef) &&
-         "Cannot fit instruction debug line information into SMLoc's pointer");
+  static_assert(
+      sizeof(decltype(SMLoc().getPointer())) >= sizeof(DebugLineTableRowRef),
+      "Cannot fit instruction debug line information into SMLoc's pointer");
 
   SMLoc NullResult = DebugLineTableRowRef::NULL_ROW.toSMLoc();
   uint32_t RowIndex = LineTable->lookupAddress(
@@ -1639,16 +1639,20 @@ void BinaryFunction::postProcessJumpTables() {
         JT.Entries.push_back(Label);
         continue;
       }
-      // Create local label for targets cannot be reached by other fragments
-      // Otherwise, secondary entry point to target function
+      // Create a local label for targets that cannot be reached by other
+      // fragments. Otherwise, create a secondary entry point in the target
+      // function.
       BinaryFunction *TargetBF =
           BC.getBinaryFunctionContainingAddress(EntryAddress);
-      if (uint64_t Offset = EntryAddress - TargetBF->getAddress()) {
-        MCSymbol *Label = (HasOneParent && TargetBF == this)
-                              ? getOrCreateLocalLabel(EntryAddress, true)
-                              : TargetBF->addEntryPointAtOffset(Offset);
-        JT.Entries.push_back(Label);
+      MCSymbol *Label;
+      if (HasOneParent && TargetBF == this) {
+        Label = getOrCreateLocalLabel(EntryAddress, true);
+      } else {
+        const uint64_t Offset = EntryAddress - TargetBF->getAddress();
+        Label = Offset ? TargetBF->addEntryPointAtOffset(Offset)
+                       : TargetBF->getSymbol();
       }
+      JT.Entries.push_back(Label);
     }
   }
 
@@ -2217,8 +2221,8 @@ void BinaryFunction::calculateMacroOpFusionStats() {
                       << Twine::utohexstr(getAddress() + Offset)
                       << " in function " << *this << "; executed "
                       << BB.getKnownExecutionCount() << " times.\n");
-    ++BC.MissedMacroFusionPairs;
-    BC.MissedMacroFusionExecCount += BB.getKnownExecutionCount();
+    ++BC.Stats.MissedMacroFusionPairs;
+    BC.Stats.MissedMacroFusionExecCount += BB.getKnownExecutionCount();
   }
 }
 
@@ -2301,6 +2305,12 @@ void BinaryFunction::removeConditionalTailCalls() {
 
     // This branch is no longer a conditional tail call.
     BC.MIB->unsetConditionalTailCall(*CTCInstr);
+
+    // Move offset from CTCInstr to TailCallInstr.
+    if (std::optional<uint32_t> Offset = BC.MIB->getOffset(*CTCInstr)) {
+      BC.MIB->setOffset(TailCallInstr, *Offset);
+      BC.MIB->clearOffset(*CTCInstr);
+    }
   }
 
   insertBasicBlocks(std::prev(end()), std::move(NewBlocks),
@@ -2843,6 +2853,14 @@ bool BinaryFunction::finalizeCFIState() {
 
 bool BinaryFunction::requiresAddressTranslation() const {
   return opts::EnableBAT || hasSDTMarker() || hasPseudoProbe();
+}
+
+bool BinaryFunction::requiresAddressMap() const {
+  if (isInjected())
+    return false;
+
+  return opts::UpdateDebugSections || isMultiEntry() ||
+         requiresAddressTranslation();
 }
 
 uint64_t BinaryFunction::getInstructionCount() const {
@@ -4108,17 +4126,16 @@ void BinaryFunction::updateOutputValues(const MCAsmLayout &Layout) {
           assert(FragmentBaseAddress == FF.getAddress());
         else
           assert(FragmentBaseAddress == getOutputAddress());
+        (void)FragmentBaseAddress;
       }
 
-      const uint64_t BBOffset = Layout.getSymbolOffset(*BB->getLabel());
-      const uint64_t BBAddress = FragmentBaseAddress + BBOffset;
+      const uint64_t BBAddress =
+          *BC.getIOAddressMap().lookup(BB->getInputOffset() + getAddress());
       BB->setOutputStartAddress(BBAddress);
 
       if (PrevBB)
         PrevBB->setOutputEndAddress(BBAddress);
       PrevBB = BB;
-
-      BB->updateOutputValues(Layout);
     }
 
     PrevBB->setOutputEndAddress(PrevBB->isSplit()
@@ -4171,9 +4188,8 @@ uint64_t BinaryFunction::translateInputToOutputAddress(uint64_t Address) const {
 
   // Check if the address is associated with an instruction that is tracked
   // by address translation.
-  auto KV = InputOffsetToAddressMap.find(Address - getAddress());
-  if (KV != InputOffsetToAddressMap.end())
-    return KV->second;
+  if (auto OutputAddress = BC.getIOAddressMap().lookup(Address))
+    return *OutputAddress;
 
   // FIXME: #18950828 - we rely on relative offsets inside basic blocks to stay
   //        intact. Instead we can use pseudo instructions and/or annotations.

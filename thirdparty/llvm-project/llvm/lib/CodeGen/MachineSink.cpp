@@ -288,8 +288,7 @@ static bool blockPrologueInterferes(const MachineBasicBlock *BB,
       if (!Reg)
         continue;
       if (MO.isUse()) {
-        if (Reg.isPhysical() &&
-            (TII->isIgnorableUse(MO) || (MRI && MRI->isConstantPhysReg(Reg))))
+        if (Reg.isPhysical() && MRI && MRI->isConstantPhysReg(Reg))
           continue;
         if (PI->modifiesRegister(Reg, TRI))
           return true;
@@ -916,7 +915,7 @@ MachineSinking::GetAllSortedSuccessors(MachineInstr &MI, MachineBasicBlock *MBB,
       AllSuccs, [this](const MachineBasicBlock *L, const MachineBasicBlock *R) {
         uint64_t LHSFreq = MBFI ? MBFI->getBlockFreq(L).getFrequency() : 0;
         uint64_t RHSFreq = MBFI ? MBFI->getBlockFreq(R).getFrequency() : 0;
-        bool HasBlockFreq = LHSFreq != 0 && RHSFreq != 0;
+        bool HasBlockFreq = LHSFreq != 0 || RHSFreq != 0;
         return HasBlockFreq ? LHSFreq < RHSFreq
                             : CI->getCycleDepth(L) < CI->getCycleDepth(R);
       });
@@ -1007,16 +1006,24 @@ MachineSinking::FindSuccToSinkTo(MachineInstr &MI, MachineBasicBlock *MBB,
   if (MBB == SuccToSinkTo)
     return nullptr;
 
+  if (!SuccToSinkTo)
+    return nullptr;
+
   // It's not safe to sink instructions to EH landing pad. Control flow into
   // landing pad is implicitly defined.
-  if (SuccToSinkTo && SuccToSinkTo->isEHPad())
+  if (SuccToSinkTo->isEHPad())
     return nullptr;
 
   // It ought to be okay to sink instructions into an INLINEASM_BR target, but
   // only if we make sure that MI occurs _before_ an INLINEASM_BR instruction in
   // the source block (which this code does not yet do). So for now, forbid
   // doing so.
-  if (SuccToSinkTo && SuccToSinkTo->isInlineAsmBrIndirectTarget())
+  if (SuccToSinkTo->isInlineAsmBrIndirectTarget())
+    return nullptr;
+
+  MachineBasicBlock::const_iterator InsertPos =
+      SuccToSinkTo->SkipPHIsAndLabels(SuccToSinkTo->begin());
+  if (blockPrologueInterferes(SuccToSinkTo, InsertPos, MI, TRI, TII, MRI))
     return nullptr;
 
   return SuccToSinkTo;
@@ -1378,7 +1385,7 @@ bool MachineSinking::SinkInstruction(MachineInstr &MI, bool &SawStore,
 
   // If the instruction to move defines a dead physical register which is live
   // when leaving the basic block, don't move it because it could turn into a
-  // "zombie" define of that preg. E.g., EFLAGS. (<rdar://problem/8030636>)
+  // "zombie" define of that preg. E.g., EFLAGS.
   for (const MachineOperand &MO : MI.all_defs()) {
     Register Reg = MO.getReg();
     if (Reg == 0 || !Reg.isPhysical())
@@ -1697,10 +1704,9 @@ static void updateLiveIn(MachineInstr *MI, MachineBasicBlock *SuccBB,
   for (auto U : UsedOpsInCopy) {
     Register SrcReg = MI->getOperand(U).getReg();
     LaneBitmask Mask;
-    for (MCRegUnitMaskIterator S(SrcReg, TRI); S.isValid(); ++S) {
+    for (MCRegUnitMaskIterator S(SrcReg, TRI); S.isValid(); ++S)
       Mask |= (*S).second;
-    }
-    SuccBB->addLiveIn(SrcReg, Mask.any() ? Mask : LaneBitmask::getAll());
+    SuccBB->addLiveIn(SrcReg, Mask);
   }
   SuccBB->sortUniqueLiveIns();
 }

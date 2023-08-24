@@ -422,6 +422,7 @@ private:
           FormatToken *PrevPrev = Prev->getPreviousNonComment();
           FormatToken *Next = CurrentToken->Next;
           if (PrevPrev && PrevPrev->is(tok::identifier) &&
+              PrevPrev->isNot(TT_TypeName) &&
               Prev->isOneOf(tok::star, tok::amp, tok::ampamp) &&
               CurrentToken->is(tok::identifier) && Next->isNot(tok::equal)) {
             Prev->setType(TT_BinaryOperator);
@@ -2508,6 +2509,8 @@ private:
     const FormatToken *PrevToken = Tok.getPreviousNonComment();
     if (!PrevToken)
       return TT_UnaryOperator;
+    if (PrevToken->is(TT_TypeName))
+      return TT_PointerOrReference;
 
     const FormatToken *NextToken = Tok.getNextNonComment();
 
@@ -3355,7 +3358,9 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) const {
     if (Current->is(TT_LineComment)) {
       if (Prev->is(BK_BracedInit) && Prev->opensScope()) {
         Current->SpacesRequiredBefore =
-            (Style.Cpp11BracedListStyle && !Style.SpacesInParentheses) ? 0 : 1;
+            (Style.Cpp11BracedListStyle && !Style.SpacesInParensOptions.Other)
+                ? 0
+                : 1;
       } else if (Prev->is(TT_VerilogMultiLineListLParen)) {
         Current->SpacesRequiredBefore = 0;
       } else {
@@ -3769,9 +3774,9 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
   if ((Left.is(tok::l_paren) && Right.is(tok::r_paren)) ||
       (Left.is(tok::l_brace) && Left.isNot(BK_Block) &&
        Right.is(tok::r_brace) && Right.isNot(BK_Block))) {
-    return Style.SpaceInEmptyParentheses;
+    return Style.SpacesInParensOptions.InEmptyParentheses;
   }
-  if (Style.SpacesInConditionalStatement) {
+  if (Style.SpacesInParensOptions.InConditionalStatements) {
     const FormatToken *LeftParen = nullptr;
     if (Left.is(tok::l_paren))
       LeftParen = &Left;
@@ -3810,8 +3815,8 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
   if (Left.is(tok::l_paren) || Right.is(tok::r_paren)) {
     return (Right.is(TT_CastRParen) ||
             (Left.MatchingParen && Left.MatchingParen->is(TT_CastRParen)))
-               ? Style.SpacesInCStyleCastParentheses
-               : Style.SpacesInParentheses;
+               ? Style.SpacesInParensOptions.InCStyleCasts
+               : Style.SpacesInParensOptions.Other;
   }
   if (Right.isOneOf(tok::semi, tok::comma))
     return false;
@@ -4037,7 +4042,8 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
   if ((Left.is(tok::l_brace) && Left.isNot(BK_Block)) ||
       (Right.is(tok::r_brace) && Right.MatchingParen &&
        Right.MatchingParen->isNot(BK_Block))) {
-    return Style.Cpp11BracedListStyle ? Style.SpacesInParentheses : true;
+    return Style.Cpp11BracedListStyle ? Style.SpacesInParensOptions.Other
+                                      : true;
   }
   if (Left.is(TT_BlockComment)) {
     // No whitespace in x(/*foo=*/1), except for JavaScript.
@@ -4699,7 +4705,7 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
            !(Left.isOneOf(tok::l_paren, tok::r_paren, tok::l_square,
                           tok::kw___super, TT_TemplateOpener,
                           TT_TemplateCloser)) ||
-           (Left.is(tok::l_paren) && Style.SpacesInParentheses);
+           (Left.is(tok::l_paren) && Style.SpacesInParensOptions.Other);
   }
   if ((Left.is(TT_TemplateOpener)) != (Right.is(TT_TemplateCloser)))
     return ShouldAddSpacesInAngles();
@@ -4755,16 +4761,6 @@ isItAnEmptyLambdaAllowed(const FormatToken &Tok,
 static bool isAllmanLambdaBrace(const FormatToken &Tok) {
   return Tok.is(tok::l_brace) && Tok.is(BK_Block) &&
          !Tok.isOneOf(TT_ObjCBlockLBrace, TT_DictLiteral);
-}
-
-// Returns the first token on the line that is not a comment.
-static const FormatToken *getFirstNonComment(const AnnotatedLine &Line) {
-  const FormatToken *Next = Line.First;
-  if (!Next)
-    return Next;
-  if (Next->is(tok::comment))
-    Next = Next->getNextNonComment();
-  return Next;
 }
 
 bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
@@ -5038,7 +5034,7 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
     return Right.HasUnescapedNewline;
 
   if (isAllmanBrace(Left) || isAllmanBrace(Right)) {
-    auto FirstNonComment = getFirstNonComment(Line);
+    auto *FirstNonComment = Line.getFirstNonComment();
     bool AccessSpecifier =
         FirstNonComment &&
         FirstNonComment->isOneOf(Keywords.kw_internal, tok::kw_public,
@@ -5194,30 +5190,6 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
     // If there was a comment between `}` an `key` above, then `key` would be
     // put on a new line anyways.
     if (Left.isOneOf(tok::r_brace, tok::greater, tok::r_square))
-      return true;
-  }
-
-  // Deal with lambda arguments in C++ - we want consistent line breaks whether
-  // they happen to be at arg0, arg1 or argN. The selection is a bit nuanced
-  // as aggressive line breaks are placed when the lambda is not the last arg.
-  if ((Style.Language == FormatStyle::LK_Cpp ||
-       Style.Language == FormatStyle::LK_ObjC) &&
-      Left.is(tok::l_paren) && Left.BlockParameterCount > 0 &&
-      !Right.isOneOf(tok::l_paren, TT_LambdaLSquare)) {
-    // Multiple lambdas in the same function call force line breaks.
-    if (Left.BlockParameterCount > 1)
-      return true;
-
-    // A lambda followed by another arg forces a line break.
-    if (!Left.Role)
-      return false;
-    auto Comma = Left.Role->lastComma();
-    if (!Comma)
-      return false;
-    auto Next = Comma->getNextNonComment();
-    if (!Next)
-      return false;
-    if (!Next->isOneOf(TT_LambdaLSquare, tok::l_brace, tok::caret))
       return true;
   }
 

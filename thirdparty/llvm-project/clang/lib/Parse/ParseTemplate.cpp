@@ -248,11 +248,15 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
                                     : MultiTemplateParamsArg(),
         TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation,
         AnonRecord);
+    Actions.ActOnDefinedDeclarationSpecifier(Decl);
     assert(!AnonRecord &&
            "Anonymous unions/structs should not be valid with template");
     DS.complete(Decl);
     return Decl;
   }
+
+  if (DS.hasTagDefinition())
+    Actions.ActOnDefinedDeclarationSpecifier(DS.getRepAsDecl());
 
   // Move the attributes from the prefix into the DS.
   if (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation)
@@ -1744,6 +1748,7 @@ void Parser::ParseLateTemplatedFuncDef(LateParsedTemplate &LPT) {
 
   // Parsing should occur with empty FP pragma stack and FP options used in the
   // point of the template definition.
+  Sema::FpPragmaStackSaveRAII SavedStack(Actions);
   Actions.resetFPOptions(LPT.FPO);
 
   assert(!LPT.Toks.empty() && "Empty body!");

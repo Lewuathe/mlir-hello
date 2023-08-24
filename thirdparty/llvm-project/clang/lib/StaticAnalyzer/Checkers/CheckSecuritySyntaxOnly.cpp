@@ -466,7 +466,8 @@ void WalkAST::checkCall_bzero(const CallExpr *CE, const FunctionDecl *FD) {
 
 
 //===----------------------------------------------------------------------===//
-// Check: Any use of 'gets' is insecure.
+// Check: Any use of 'gets' is insecure. Most man pages literally says this.
+//
 // Implements (part of): 300-BSI (buildsecurityin.us-cert.gov)
 // CWE-242: Use of Inherently Dangerous Function
 //===----------------------------------------------------------------------===//
@@ -845,7 +846,13 @@ bool WalkAST::checkCall_strCommon(const CallExpr *CE, const FunctionDecl *FD) {
 }
 
 //===----------------------------------------------------------------------===//
-// Check: Linear congruent random number generators should not be used
+// Check: Linear congruent random number generators should not be used,
+// i.e. rand(), random().
+//
+// E. Bach, "Efficient prediction of Marsaglia-Zaman random number generators,"
+// in IEEE Transactions on Information Theory, vol. 44, no. 3, pp. 1253-1257,
+// May 1998, https://doi.org/10.1109/18.669305
+//
 // CWE-338: Use of cryptographically weak prng
 //===----------------------------------------------------------------------===//
 
@@ -887,10 +894,7 @@ void WalkAST::checkCall_rand(const CallExpr *CE, const FunctionDecl *FD) {
                      CE->getCallee()->getSourceRange());
 }
 
-//===----------------------------------------------------------------------===//
-// Check: 'random' should not be used
-//===----------------------------------------------------------------------===//
-
+// See justification for rand().
 void WalkAST::checkCall_random(const CallExpr *CE, const FunctionDecl *FD) {
   if (!CheckRand || !filter.check_rand)
     return;
@@ -986,7 +990,18 @@ void WalkAST::checkMsg_decodeValueOfObjCType(const ObjCMessageExpr *ME) {
 }
 
 //===----------------------------------------------------------------------===//
-// Check: Should check whether privileges are dropped successfully.
+// Check: The caller should always verify that the privileges
+// were dropped successfully.
+//
+// Some library functions, like setuid() and setgid(), should always be used
+// with a check of the return value to verify that the function completed
+// successfully.  If the drop fails, the software will continue to run
+// with the raised privileges, which might provide additional access
+// to unprivileged users.
+//
+// (Note that this check predates __attribute__((warn_unused_result)).
+// Do we still need it now that we have a compiler warning for this?
+// Are these standard functions already annotated this way?)
 //===----------------------------------------------------------------------===//
 
 void WalkAST::checkUncheckedReturnValue(CallExpr *CE) {

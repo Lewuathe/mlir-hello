@@ -37,6 +37,7 @@
 #include "llvm/IR/IntrinsicsBPF.h"
 #include "llvm/IR/IntrinsicsDirectX.h"
 #include "llvm/IR/IntrinsicsHexagon.h"
+#include "llvm/IR/IntrinsicsLoongArch.h"
 #include "llvm/IR/IntrinsicsMips.h"
 #include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/IntrinsicsPowerPC.h"
@@ -1609,12 +1610,7 @@ static bool matchIntrinsicType(
       if (!ThisArgVecTy || !ReferenceType ||
           (ReferenceType->getElementCount() != ThisArgVecTy->getElementCount()))
         return true;
-      PointerType *ThisArgEltTy =
-          dyn_cast<PointerType>(ThisArgVecTy->getElementType());
-      if (!ThisArgEltTy)
-        return true;
-      return !ThisArgEltTy->isOpaqueOrPointeeTypeMatches(
-          ReferenceType->getElementType());
+      return !ThisArgVecTy->getElementType()->isPointerTy();
     }
     case IITDescriptor::VecElementArgument: {
       if (D.getArgumentNumber() >= ArgTys.size())
@@ -1883,7 +1879,7 @@ void Function::allocHungoffUselist() {
   setNumHungOffUseOperands(3);
 
   // Initialize the uselist with placeholder operands to allow traversal.
-  auto *CPN = ConstantPointerNull::get(Type::getInt1PtrTy(getContext(), 0));
+  auto *CPN = ConstantPointerNull::get(PointerType::get(getContext(), 0));
   Op<0>().set(CPN);
   Op<1>().set(CPN);
   Op<2>().set(CPN);
@@ -1895,8 +1891,7 @@ void Function::setHungoffOperand(Constant *C) {
     allocHungoffUselist();
     Op<Idx>().set(C);
   } else if (getNumOperands()) {
-    Op<Idx>().set(
-        ConstantPointerNull::get(Type::getInt1PtrTy(getContext(), 0)));
+    Op<Idx>().set(ConstantPointerNull::get(PointerType::get(getContext(), 0)));
   }
 }
 

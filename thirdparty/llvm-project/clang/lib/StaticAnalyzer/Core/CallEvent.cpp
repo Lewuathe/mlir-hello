@@ -766,7 +766,8 @@ RuntimeDefinition CXXInstanceCall::getRuntimeDefinition() const {
     // DynamicTypeInfo when an object is cast, we can't actually be sure the
     // DynamicTypeInfo is up to date. This assert should be re-enabled once
     // this is fixed.
-    //assert(!MD->getParent()->isDerivedFrom(RD) && "Bad DynamicTypeInfo");
+    //
+    // assert(!MD->getParent()->isDerivedFrom(RD) && "Bad DynamicTypeInfo");
 
     return {};
   }

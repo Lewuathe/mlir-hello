@@ -1215,6 +1215,14 @@ struct StaticTensorGenerate : public OpRewritePattern<GenerateOp> {
     SmallVector<int64_t> newShape;
     operandsAndShape(resultType, dynamicExtents, newOperands, newShape);
 
+    for (int64_t newdim : newShape) {
+      // This check also occurs in the verifier, but we need it here too
+      // since intermediate passes may have some replaced dynamic dimensions
+      // by constants.
+      if (newdim < 0 && !ShapedType::isDynamic(newdim))
+        return failure();
+    }
+
     if (newOperands.size() == tensorFromElements.getDynamicExtents().size())
       return failure();
 
@@ -1912,20 +1920,14 @@ public:
     if (!canFoldIntoConsumerOp(castOp))
       return failure();
 
-    /// Deduce the type of the result to use for the canonicalized operation.
+    // Create folded extract.
     Location loc = sliceOp.getLoc();
-    auto sliceOpType = sliceOp.getType();
-    RankedTensorType resultType =
-        ExtractSliceOp::inferCanonicalRankReducedResultType(
-            sliceOpType.getRank(), sliceOp.getSourceType(),
-            sliceOp.getMixedOffsets(), sliceOp.getMixedSizes(),
-            sliceOp.getMixedStrides());
     Value newResult = rewriter.create<ExtractSliceOp>(
-        loc, resultType, castOp.getSource(), sliceOp.getOffsets(),
+        loc, sliceOp.getType(), castOp.getSource(), sliceOp.getOffsets(),
         sliceOp.getSizes(), sliceOp.getStrides(), sliceOp.getStaticOffsets(),
         sliceOp.getStaticSizes(), sliceOp.getStaticStrides());
-    if (newResult.getType() != sliceOpType)
-      newResult = rewriter.create<CastOp>(loc, sliceOpType, newResult);
+    if (newResult.getType() != sliceOp.getType())
+      newResult = rewriter.create<CastOp>(loc, sliceOp.getType(), newResult);
     rewriter.replaceOp(sliceOp, newResult);
     return success();
   }
@@ -2126,7 +2128,8 @@ static Value foldExtractAfterInsertSlice(ExtractSliceOp extractOp) {
 }
 
 OpFoldResult ExtractSliceOp::fold(FoldAdaptor adaptor) {
-  if (auto splat = llvm::dyn_cast_if_present<SplatElementsAttr>(adaptor.getSource())) {
+  if (auto splat =
+          llvm::dyn_cast_if_present<SplatElementsAttr>(adaptor.getSource())) {
     auto resultType = llvm::cast<ShapedType>(getResult().getType());
     if (resultType.hasStaticShape())
       return splat.resizeSplat(resultType);
@@ -2308,9 +2311,9 @@ public:
     SmallVector<OpFoldResult> mixedStrides(insertSliceOp.getMixedStrides());
 
     // No constant operands were folded, just return;
-    if (failed(foldDynamicIndexList(rewriter, mixedOffsets)) &&
-        failed(foldDynamicIndexList(rewriter, mixedSizes)) &&
-        failed(foldDynamicIndexList(rewriter, mixedStrides)))
+    if (failed(foldDynamicIndexList(mixedOffsets)) &&
+        failed(foldDynamicIndexList(mixedSizes)) &&
+        failed(foldDynamicIndexList(mixedStrides)))
       return failure();
 
     // Create the new op in canonical form.

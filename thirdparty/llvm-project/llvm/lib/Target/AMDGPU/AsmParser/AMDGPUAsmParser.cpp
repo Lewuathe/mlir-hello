@@ -1312,8 +1312,6 @@ private:
                              unsigned RegWidth);
   void cvtMubufImpl(MCInst &Inst, const OperandVector &Operands,
                     bool IsAtomic);
-  void cvtDSImpl(MCInst &Inst, const OperandVector &Operands,
-                 bool IsGdsHardcoded);
 
 public:
   enum AMDGPUMatchResultTy {
@@ -1382,6 +1380,8 @@ public:
   bool hasA16() const { return AMDGPU::hasA16(getSTI()); }
 
   bool hasG16() const { return AMDGPU::hasG16(getSTI()); }
+
+  bool hasGDS() const { return AMDGPU::hasGDS(getSTI()); }
 
   bool isSI() const {
     return AMDGPU::isSI(getSTI());
@@ -1567,9 +1567,6 @@ public:
   bool tryParseFmt(const char *Pref, int64_t MaxVal, int64_t &Val);
   bool matchDfmtNfmt(int64_t &Dfmt, int64_t &Nfmt, StringRef FormatStr, SMLoc Loc);
 
-  void cvtDSOffset01(MCInst &Inst, const OperandVector &Operands);
-  void cvtDS(MCInst &Inst, const OperandVector &Operands) { cvtDSImpl(Inst, Operands, false); }
-  void cvtDSGds(MCInst &Inst, const OperandVector &Operands) { cvtDSImpl(Inst, Operands, true); }
   void cvtExp(MCInst &Inst, const OperandVector &Operands);
 
   bool parseCnt(int64_t &IntVal);
@@ -1645,6 +1642,7 @@ private:
   bool validateAGPRLdSt(const MCInst &Inst) const;
   bool validateVGPRAlign(const MCInst &Inst) const;
   bool validateBLGP(const MCInst &Inst, const OperandVector &Operands);
+  bool validateDS(const MCInst &Inst, const OperandVector &Operands);
   bool validateGWS(const MCInst &Inst, const OperandVector &Operands);
   bool validateDivScale(const MCInst &Inst);
   bool validateWaitCnt(const MCInst &Inst, const OperandVector &Operands);
@@ -1992,7 +1990,7 @@ bool AMDGPUOperand::isVRegWithInputMods() const {
   return isRegClass(AMDGPU::VGPR_32RegClassID) ||
          // GFX90A allows DPP on 64-bit operands.
          (isRegClass(AMDGPU::VReg_64RegClassID) &&
-          AsmParser->getFeatureBits()[AMDGPU::Feature64BitDPP]);
+          AsmParser->getFeatureBits()[AMDGPU::FeatureDPALU_DPP]);
 }
 
 bool AMDGPUOperand::isT16VRegWithInputMods() const {
@@ -4198,15 +4196,12 @@ bool AMDGPUAsmParser::validateDPP(const MCInst &Inst,
     return true;
   unsigned DppCtrl = Inst.getOperand(DppCtrlIdx).getImm();
 
-  if (!AMDGPU::isLegal64BitDPPControl(DppCtrl)) {
-    // DPP64 is supported for row_newbcast only.
-    int Src0Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src0);
-    if (Src0Idx >= 0 &&
-        getMRI()->getSubReg(Inst.getOperand(Src0Idx).getReg(), AMDGPU::sub1)) {
-      SMLoc S = getImmLoc(AMDGPUOperand::ImmTyDppCtrl, Operands);
-      Error(S, "64 bit dpp only supports row_newbcast");
-      return false;
-    }
+  if (!AMDGPU::isLegalDPALU_DPPControl(DppCtrl) &&
+      AMDGPU::isDPALU_DPP(MII.get(Opc))) {
+    // DP ALU DPP is supported for row_newbcast only on GFX9*
+    SMLoc S = getImmLoc(AMDGPUOperand::ImmTyDppCtrl, Operands);
+    Error(S, "DP ALU dpp only supports row_newbcast");
+    return false;
   }
 
   return true;
@@ -4408,6 +4403,29 @@ bool AMDGPUAsmParser::validateWaitCnt(const MCInst &Inst,
   SMLoc RegLoc = getRegLoc(Reg, Operands);
   Error(RegLoc, "src0 must be null");
   return false;
+}
+
+bool AMDGPUAsmParser::validateDS(const MCInst &Inst,
+                                 const OperandVector &Operands) {
+  uint64_t TSFlags = MII.get(Inst.getOpcode()).TSFlags;
+  if ((TSFlags & SIInstrFlags::DS) == 0)
+    return true;
+  if (TSFlags & SIInstrFlags::GWS)
+    return validateGWS(Inst, Operands);
+  // Only validate GDS for non-GWS instructions.
+  if (hasGDS())
+    return true;
+  int GDSIdx =
+      AMDGPU::getNamedOperandIdx(Inst.getOpcode(), AMDGPU::OpName::gds);
+  if (GDSIdx < 0)
+    return true;
+  unsigned GDS = Inst.getOperand(GDSIdx).getImm();
+  if (GDS) {
+    SMLoc S = getImmLoc(AMDGPUOperand::ImmTyGDS, Operands);
+    Error(S, "gds modifier is not supported on this GPU");
+    return false;
+  }
+  return true;
 }
 
 // gfx90a has an undocumented limitation:
@@ -4618,7 +4636,7 @@ bool AMDGPUAsmParser::validateInstruction(const MCInst &Inst,
       "invalid register class: vgpr tuples must be 64 bit aligned");
     return false;
   }
-  if (!validateGWS(Inst, Operands)) {
+  if (!validateDS(Inst, Operands)) {
     return false;
   }
 
@@ -6280,75 +6298,8 @@ ParseStatus AMDGPUAsmParser::parseBLGP(OperandVector &Operands) {
 }
 
 //===----------------------------------------------------------------------===//
-// ds
+// Exp
 //===----------------------------------------------------------------------===//
-
-void AMDGPUAsmParser::cvtDSOffset01(MCInst &Inst,
-                                    const OperandVector &Operands) {
-  OptionalImmIndexMap OptionalIdx;
-
-  for (unsigned i = 1, e = Operands.size(); i != e; ++i) {
-    AMDGPUOperand &Op = ((AMDGPUOperand &)*Operands[i]);
-
-    // Add the register arguments
-    if (Op.isReg()) {
-      Op.addRegOperands(Inst, 1);
-      continue;
-    }
-
-    // Handle optional arguments
-    OptionalIdx[Op.getImmTy()] = i;
-  }
-
-  addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyOffset0);
-  addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyOffset1);
-  addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyGDS);
-
-  Inst.addOperand(MCOperand::createReg(AMDGPU::M0)); // m0
-}
-
-void AMDGPUAsmParser::cvtDSImpl(MCInst &Inst, const OperandVector &Operands,
-                                bool IsGdsHardcoded) {
-  OptionalImmIndexMap OptionalIdx;
-  const MCInstrDesc &Desc = MII.get(Inst.getOpcode());
-  AMDGPUOperand::ImmTy OffsetType = AMDGPUOperand::ImmTyOffset;
-
-  for (unsigned i = 1, e = Operands.size(); i != e; ++i) {
-    AMDGPUOperand &Op = ((AMDGPUOperand &)*Operands[i]);
-
-    auto TiedTo =
-        Desc.getOperandConstraint(Inst.getNumOperands(), MCOI::TIED_TO);
-
-    if (TiedTo != -1) {
-      assert((unsigned)TiedTo < Inst.getNumOperands());
-      Inst.addOperand(Inst.getOperand(TiedTo));
-    }
-
-    // Add the register arguments
-    if (Op.isReg()) {
-      Op.addRegOperands(Inst, 1);
-      continue;
-    }
-
-    if (Op.isToken() && Op.getToken() == "gds") {
-      IsGdsHardcoded = true;
-      continue;
-    }
-
-    // Handle optional arguments
-    OptionalIdx[Op.getImmTy()] = i;
-
-    if (Op.getImmTy() == AMDGPUOperand::ImmTySwizzle)
-      OffsetType = AMDGPUOperand::ImmTySwizzle;
-  }
-
-  addOptionalImmOperand(Inst, Operands, OptionalIdx, OffsetType);
-
-  if (!IsGdsHardcoded) {
-    addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyGDS);
-  }
-  Inst.addOperand(MCOperand::createReg(AMDGPU::M0)); // m0
-}
 
 void AMDGPUAsmParser::cvtExp(MCInst &Inst, const OperandVector &Operands) {
   OptionalImmIndexMap OptionalIdx;

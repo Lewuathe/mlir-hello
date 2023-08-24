@@ -14,8 +14,23 @@ using namespace mlir::sparse_tensor;
 using namespace mlir::sparse_tensor::ir_detail;
 
 //===----------------------------------------------------------------------===//
+// `VarKind` helpers.
+//===----------------------------------------------------------------------===//
+
+/// For use in foreach loops.
+static constexpr const VarKind everyVarKind[] = {
+    VarKind::Dimension, VarKind::Symbol, VarKind::Level};
+
+//===----------------------------------------------------------------------===//
 // `Var` implementation.
 //===----------------------------------------------------------------------===//
+
+std::string Var::str() const {
+  std::string str;
+  llvm::raw_string_ostream os(str);
+  print(os);
+  return os.str();
+}
 
 void Var::print(AsmPrinter &printer) const { print(printer.getStream()); }
 
@@ -32,14 +47,18 @@ void Var::dump() const {
 // `Ranks` implementation.
 //===----------------------------------------------------------------------===//
 
+bool Ranks::operator==(Ranks const &other) const {
+  for (const auto vk : everyVarKind)
+    if (getRank(vk) != other.getRank(vk))
+      return false;
+  return true;
+}
+
 bool Ranks::isValid(DimLvlExpr expr) const {
-  // FIXME(wrengr): we have cases without affine expr at an early point
-  if (!expr.getAffineExpr())
-    return true;
-  // Each `DimLvlExpr` only allows one kind of non-symbol variable.
+  assert(expr);
+  // Compute the maximum identifiers for symbol-vars and dim/lvl-vars
+  // (each `DimLvlExpr` only allows one kind of non-symbol variable).
   int64_t maxSym = -1, maxVar = -1;
-  // TODO(wrengr): If we run into ASan issues, that may be due to the
-  // "`{{...}}`" syntax; so we may want to try using local-variables instead.
   mlir::getMaxDimAndSymbol<ArrayRef<AffineExpr>>({{expr.getAffineExpr()}},
                                                  maxVar, maxSym);
   // TODO(wrengr): We may want to add a call to `LLVM_DEBUG` like
@@ -52,12 +71,14 @@ bool Ranks::isValid(DimLvlExpr expr) const {
 // `VarSet` implementation.
 //===----------------------------------------------------------------------===//
 
-static constexpr const VarKind everyVarKind[] = {
-    VarKind::Dimension, VarKind::Symbol, VarKind::Level};
-
 VarSet::VarSet(Ranks const &ranks) {
+  // NOTE: We must not use `reserve` here, since that doesn't change
+  // the `size` of the bitvectors and therefore will result in unexpected
+  // OOB errors.  Either `resize` or copy/move-ctor work; we opt for the
+  // move-ctor since it should be (marginally) more efficient.
   for (const auto vk : everyVarKind)
-    impl[vk].reserve(ranks.getRank(vk));
+    impl[vk] = llvm::SmallBitVector(ranks.getRank(vk));
+  assert(getRanks() == ranks);
 }
 
 bool VarSet::contains(Var var) const {
@@ -67,10 +88,6 @@ bool VarSet::contains(Var var) const {
   // bugs in client code.
   const llvm::SmallBitVector &bits = impl[var.getKind()];
   const auto num = var.getNum();
-  // FIXME(wrengr): If we `assert(num < bits.size())` then
-  // "roundtrip_encoding.mlir" will fail.  So we need to figure out
-  // where exactly the OOB `var` is coming from, to determine whether
-  // that's a logic bug or not.
   return num < bits.size() && bits[num];
 }
 
@@ -105,7 +122,7 @@ bool VarSet::occursIn(DimLvlExpr expr) const {
 }
 
 void VarSet::add(Var var) {
-  // NOTE: `SmallBitVactor::operator[]` will raise assertion errors for OOB.
+  // NOTE: `SmallBitVector::operator[]` will raise assertion errors for OOB.
   impl[var.getKind()][var.getNum()] = true;
 }
 
@@ -242,10 +259,10 @@ std::pair<VarInfo::ID, bool> VarEnv::create(StringRef name, llvm::SMLoc loc,
 }
 
 std::optional<std::pair<VarInfo::ID, bool>>
-VarEnv::lookupOrCreate(CreationPolicy policy, StringRef name, llvm::SMLoc loc,
+VarEnv::lookupOrCreate(Policy creationPolicy, StringRef name, llvm::SMLoc loc,
                        VarKind vk) {
-  switch (policy) {
-  case CreationPolicy::MustNot: {
+  switch (creationPolicy) {
+  case Policy::MustNot: {
     const auto oid = lookup(name);
     if (!oid)
       return std::nullopt; // Doesn't exist, but must not create.
@@ -254,9 +271,9 @@ VarEnv::lookupOrCreate(CreationPolicy policy, StringRef name, llvm::SMLoc loc,
 #endif // NDEBUG
     return std::make_pair(*oid, false);
   }
-  case CreationPolicy::May:
+  case Policy::May:
     return create(name, loc, vk, /*verifyUsage=*/true);
-  case CreationPolicy::Must: {
+  case Policy::Must: {
     const auto res = create(name, loc, vk, /*verifyUsage=*/false);
     // const auto id = res.first;
     const auto didCreate = res.second;
@@ -265,7 +282,7 @@ VarEnv::lookupOrCreate(CreationPolicy policy, StringRef name, llvm::SMLoc loc,
     return res;
   }
   }
-  llvm_unreachable("unknown CreationPolicy");
+  llvm_unreachable("unknown Policy");
 }
 
 Var VarEnv::bindUnusedVar(VarKind vk) { return Var(vk, nextNum[vk]++); }
@@ -294,18 +311,6 @@ InFlightDiagnostic VarEnv::emitErrorIfAnyUnbound(AsmParser &parser) const {
       return parser.emitError(var.getLoc(),
                               "Unbound variable: " + var.getName());
   return {};
-}
-
-void VarEnv::addVars(
-    SmallVectorImpl<std::pair<StringRef, AffineExpr>> &dimsAndSymbols,
-    VarKind vk, MLIRContext *context) const {
-  for (const auto &var : vars) {
-    if (var.getKind() == vk) {
-      assert(var.hasNum());
-      dimsAndSymbols.push_back(std::make_pair(
-          var.getName(), getAffineDimExpr(*var.getNum(), context)));
-    }
-  }
 }
 
 //===----------------------------------------------------------------------===//

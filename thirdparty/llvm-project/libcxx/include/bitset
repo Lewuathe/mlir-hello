@@ -113,6 +113,7 @@ template <size_t N> struct hash<std::bitset<N>>;
 */
 
 #include <__algorithm/fill.h>
+#include <__algorithm/find.h>
 #include <__assert> // all public C++ headers provide the assertion handler
 #include <__bit_reference>
 #include <__config>
@@ -1012,7 +1013,7 @@ _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX23
 size_t
 bitset<_Size>::count() const _NOEXCEPT
 {
-    return static_cast<size_t>(_VSTD::__count_bool_true(base::__make_iter(0), _Size));
+    return static_cast<size_t>(_VSTD::__count_bool<true>(base::__make_iter(0), _Size));
 }
 
 template <size_t _Size>

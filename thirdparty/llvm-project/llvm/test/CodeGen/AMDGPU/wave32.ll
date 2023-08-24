@@ -1476,9 +1476,9 @@ define amdgpu_kernel void @test_preserve_condition_undef_flag(float %arg, i32 %a
 ; GFX1032-NEXT:    s_load_dword s2, s[0:1], 0x2c
 ; GFX1032-NEXT:    s_load_dword s3, s[0:1], 0x24
 ; GFX1032-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX1032-NEXT:    v_cmp_ngt_f32_e64 s0, s2, 0
-; GFX1032-NEXT:    v_cmp_nlt_f32_e64 s1, s2, 1.0
-; GFX1032-NEXT:    v_cmp_nlt_f32_e64 s2, s3, 1.0
+; GFX1032-NEXT:    v_cmp_nlt_f32_e64 s0, s2, 1.0
+; GFX1032-NEXT:    v_cmp_nlt_f32_e64 s1, s3, 1.0
+; GFX1032-NEXT:    v_cmp_ngt_f32_e64 s2, s2, 0
 ; GFX1032-NEXT:    s_or_b32 s0, s0, s1
 ; GFX1032-NEXT:    s_or_b32 s0, s0, s2
 ; GFX1032-NEXT:    s_and_b32 vcc_lo, exec_lo, s0
@@ -1493,12 +1493,12 @@ define amdgpu_kernel void @test_preserve_condition_undef_flag(float %arg, i32 %a
 ; GFX1064-LABEL: test_preserve_condition_undef_flag:
 ; GFX1064:       ; %bb.0: ; %bb0
 ; GFX1064-NEXT:    s_clause 0x1
-; GFX1064-NEXT:    s_load_dword s2, s[0:1], 0x2c
-; GFX1064-NEXT:    s_load_dword s4, s[0:1], 0x24
+; GFX1064-NEXT:    s_load_dword s4, s[0:1], 0x2c
+; GFX1064-NEXT:    s_load_dword s2, s[0:1], 0x24
 ; GFX1064-NEXT:    s_waitcnt lgkmcnt(0)
-; GFX1064-NEXT:    v_cmp_ngt_f32_e64 s[0:1], s2, 0
+; GFX1064-NEXT:    v_cmp_nlt_f32_e64 s[0:1], s4, 1.0
 ; GFX1064-NEXT:    v_cmp_nlt_f32_e64 s[2:3], s2, 1.0
-; GFX1064-NEXT:    v_cmp_nlt_f32_e64 s[4:5], s4, 1.0
+; GFX1064-NEXT:    v_cmp_ngt_f32_e64 s[4:5], s4, 0
 ; GFX1064-NEXT:    s_or_b64 s[0:1], s[0:1], s[2:3]
 ; GFX1064-NEXT:    s_or_b64 s[0:1], s[0:1], s[4:5]
 ; GFX1064-NEXT:    s_and_b64 vcc, exec, s[0:1]
@@ -2489,8 +2489,7 @@ define amdgpu_kernel void @icmp64(i32 %n, i32 %s) {
 ; GFX1032-NEXT:    v_cmp_le_u32_e32 vcc_lo, s0, v0
 ; GFX1032-NEXT:    v_cndmask_b32_e32 v0, v0, v1, vcc_lo
 ; GFX1032-NEXT:    v_cmp_eq_u32_e32 vcc_lo, 0, v0
-; GFX1032-NEXT:    v_alignbit_b32 v0, 0, vcc_lo, 1
-; GFX1032-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX1032-NEXT:    s_lshr_b32 s0, vcc_lo, 1
 ; GFX1032-NEXT:    s_ff1_i32_b32 s0, s0
 ; GFX1032-NEXT:    s_min_u32 s0, s0, s1
 ; GFX1032-NEXT:    s_cmp_gt_u32 s0, 9
@@ -2587,9 +2586,8 @@ define amdgpu_kernel void @fcmp64(float %n, float %s) {
 ; GFX1032-NEXT:    v_trunc_f32_e32 v1, v1
 ; GFX1032-NEXT:    v_fma_f32 v0, -v1, s0, v0
 ; GFX1032-NEXT:    v_cmp_eq_f32_e32 vcc_lo, 0, v0
-; GFX1032-NEXT:    v_alignbit_b32 v1, 0, vcc_lo, 1
+; GFX1032-NEXT:    s_lshr_b32 s0, vcc_lo, 1
 ; GFX1032-NEXT:    v_cmp_nlg_f32_e32 vcc_lo, 0, v0
-; GFX1032-NEXT:    v_readfirstlane_b32 s0, v1
 ; GFX1032-NEXT:    s_ff1_i32_b32 s0, s0
 ; GFX1032-NEXT:    s_min_u32 s0, s0, s1
 ; GFX1032-NEXT:    s_cmp_gt_u32 s0, 9

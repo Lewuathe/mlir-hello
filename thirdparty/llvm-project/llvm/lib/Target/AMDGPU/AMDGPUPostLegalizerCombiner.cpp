@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutor.h"
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutorImpl.h"
 #include "llvm/CodeGen/GlobalISel/GISelKnownBits.h"
+#include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/MIPatternMatch.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -265,17 +266,20 @@ void AMDGPUPostLegalizerCombinerImpl::applyUCharToFloat(
 bool AMDGPUPostLegalizerCombinerImpl::matchRcpSqrtToRsq(
     MachineInstr &MI,
     std::function<void(MachineIRBuilder &)> &MatchInfo) const {
+  auto getRcpSrc = [=](const MachineInstr &MI) -> MachineInstr * {
+    if (!MI.getFlag(MachineInstr::FmContract))
+      return nullptr;
 
-  auto getRcpSrc = [=](const MachineInstr &MI) {
-    MachineInstr *ResMI = nullptr;
-    if (MI.getOpcode() == TargetOpcode::G_INTRINSIC &&
-        MI.getIntrinsicID() == Intrinsic::amdgcn_rcp)
-      ResMI = MRI.getVRegDef(MI.getOperand(2).getReg());
-
-    return ResMI;
+    if (auto *GI = dyn_cast<GIntrinsic>(&MI)) {
+      if (GI->is(Intrinsic::amdgcn_rcp))
+        return MRI.getVRegDef(MI.getOperand(2).getReg());
+    }
+    return nullptr;
   };
 
-  auto getSqrtSrc = [=](const MachineInstr &MI) {
+  auto getSqrtSrc = [=](const MachineInstr &MI) -> MachineInstr * {
+    if (!MI.getFlag(MachineInstr::FmContract))
+      return nullptr;
     MachineInstr *SqrtSrcMI = nullptr;
     auto Match =
         mi_match(MI.getOperand(0).getReg(), MRI, m_GFSqrt(m_MInstr(SqrtSrcMI)));
@@ -287,7 +291,7 @@ bool AMDGPUPostLegalizerCombinerImpl::matchRcpSqrtToRsq(
   // rcp(sqrt(x))
   if ((RcpSrcMI = getRcpSrc(MI)) && (SqrtSrcMI = getSqrtSrc(*RcpSrcMI))) {
     MatchInfo = [SqrtSrcMI, &MI](MachineIRBuilder &B) {
-      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)}, false)
+      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)})
           .addUse(SqrtSrcMI->getOperand(0).getReg())
           .setMIFlags(MI.getFlags());
     };
@@ -297,13 +301,12 @@ bool AMDGPUPostLegalizerCombinerImpl::matchRcpSqrtToRsq(
   // sqrt(rcp(x))
   if ((SqrtSrcMI = getSqrtSrc(MI)) && (RcpSrcMI = getRcpSrc(*SqrtSrcMI))) {
     MatchInfo = [RcpSrcMI, &MI](MachineIRBuilder &B) {
-      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)}, false)
+      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)})
           .addUse(RcpSrcMI->getOperand(0).getReg())
           .setMIFlags(MI.getFlags());
     };
     return true;
   }
-
   return false;
 }
 

@@ -212,6 +212,8 @@ namespace {
     bool matchAddress(SDValue N, X86ISelAddressMode &AM);
     bool matchVectorAddress(SDValue N, X86ISelAddressMode &AM);
     bool matchAdd(SDValue &N, X86ISelAddressMode &AM, unsigned Depth);
+    SDValue matchIndexRecursively(SDValue N, X86ISelAddressMode &AM,
+                                  unsigned Depth);
     bool matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
                                  unsigned Depth);
     bool matchVectorAddressRecursively(SDValue N, X86ISelAddressMode &AM,
@@ -1939,8 +1941,8 @@ static bool foldMaskAndShiftToExtract(SelectionDAG &DAG, SDValue N,
   SDValue NewMask = DAG.getConstant(0xff, DL, XVT);
   SDValue Srl = DAG.getNode(ISD::SRL, DL, XVT, X, Eight);
   SDValue And = DAG.getNode(ISD::AND, DL, XVT, Srl, NewMask);
-  SDValue ShlCount = DAG.getConstant(ScaleLog, DL, MVT::i8);
   SDValue Ext = DAG.getZExtOrTrunc(And, DL, VT);
+  SDValue ShlCount = DAG.getConstant(ScaleLog, DL, MVT::i8);
   SDValue Shl = DAG.getNode(ISD::SHL, DL, VT, Ext, ShlCount);
 
   // Insert the new nodes into the topological ordering. We must do this in
@@ -1949,12 +1951,11 @@ static bool foldMaskAndShiftToExtract(SelectionDAG &DAG, SDValue N,
   // essentially a pre-flattened and pre-sorted sequence of nodes. There is no
   // hierarchy left to express.
   insertDAGNode(DAG, N, Eight);
-  insertDAGNode(DAG, N, Srl);
   insertDAGNode(DAG, N, NewMask);
+  insertDAGNode(DAG, N, Srl);
   insertDAGNode(DAG, N, And);
+  insertDAGNode(DAG, N, Ext);
   insertDAGNode(DAG, N, ShlCount);
-  if (Ext != And)
-    insertDAGNode(DAG, N, Ext);
   insertDAGNode(DAG, N, Shl);
   DAG.ReplaceAllUsesWith(N, Shl);
   DAG.RemoveDeadNode(N.getNode());
@@ -2202,6 +2203,49 @@ static bool foldMaskedShiftToBEXTR(SelectionDAG &DAG, SDValue N,
   return false;
 }
 
+// Attempt to peek further into a scaled index register, collecting additional
+// extensions / offsets / etc. Returns /p N if we can't peek any further.
+SDValue X86DAGToDAGISel::matchIndexRecursively(SDValue N,
+                                               X86ISelAddressMode &AM,
+                                               unsigned Depth) {
+  assert(AM.IndexReg.getNode() == nullptr && "IndexReg already matched");
+  assert((AM.Scale == 1 || AM.Scale == 2 || AM.Scale == 4 || AM.Scale == 8) &&
+         "Illegal index scale");
+
+  // Limit recursion.
+  if (Depth >= SelectionDAG::MaxRecursionDepth)
+    return N;
+
+  // index: add(x,c) -> index: x, disp + c
+  if (CurDAG->isBaseWithConstantOffset(N)) {
+    auto *AddVal = cast<ConstantSDNode>(N.getOperand(1));
+    uint64_t Offset = (uint64_t)AddVal->getSExtValue() * AM.Scale;
+    if (!foldOffsetIntoAddress(Offset, AM))
+      return matchIndexRecursively(N.getOperand(0), AM, Depth + 1);
+  }
+
+  // index: add(x,x) -> index: x, scale * 2
+  if (N.getOpcode() == ISD::ADD && N.getOperand(0) == N.getOperand(1)) {
+    if (AM.Scale <= 4) {
+      AM.Scale *= 2;
+      return matchIndexRecursively(N.getOperand(0), AM, Depth + 1);
+    }
+  }
+
+  // index: shl(x,i) -> index: x, scale * (1 << i)
+  if (N.getOpcode() == X86ISD::VSHLI) {
+    uint64_t ShiftAmt = N.getConstantOperandVal(1);
+    uint64_t ScaleAmt = 1ULL << ShiftAmt;
+    if ((AM.Scale * ScaleAmt) <= 8) {
+      AM.Scale *= ScaleAmt;
+      return matchIndexRecursively(N.getOperand(0), AM, Depth + 1);
+    }
+  }
+
+  // TODO: Handle extensions, shifted masks etc.
+  return N;
+}
+
 bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
                                               unsigned Depth) {
   SDLoc dl(N);
@@ -2210,7 +2254,7 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
     AM.dump(CurDAG);
   });
   // Limit recursion.
-  if (Depth > 5)
+  if (Depth >= SelectionDAG::MaxRecursionDepth)
     return matchAddressBase(N, AM);
 
   // If this is already a %rip relative address, we can only merge immediates
@@ -2279,21 +2323,9 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
       // the base doesn't end up getting used, a post-processing step
       // in MatchAddress turns (,x,2) into (x,x), which is cheaper.
       if (Val == 1 || Val == 2 || Val == 3) {
-        AM.Scale = 1 << Val;
         SDValue ShVal = N.getOperand(0);
-
-        // Okay, we know that we have a scale by now.  However, if the scaled
-        // value is an add of something and a constant, we can fold the
-        // constant into the disp field here.
-        if (CurDAG->isBaseWithConstantOffset(ShVal)) {
-          AM.IndexReg = ShVal.getOperand(0);
-          auto *AddVal = cast<ConstantSDNode>(ShVal.getOperand(1));
-          uint64_t Disp = (uint64_t)AddVal->getSExtValue() << Val;
-          if (!foldOffsetIntoAddress(Disp, AM))
-            return false;
-        }
-
-        AM.IndexReg = ShVal;
+        AM.Scale = 1 << Val;
+        AM.IndexReg = matchIndexRecursively(ShVal, AM, Depth + 1);
         return false;
       }
     }
@@ -2659,8 +2691,14 @@ bool X86DAGToDAGISel::selectVectorAddr(MemSDNode *Parent, SDValue BasePtr,
                                        SDValue &Index, SDValue &Disp,
                                        SDValue &Segment) {
   X86ISelAddressMode AM;
-  AM.IndexReg = IndexOp;
   AM.Scale = cast<ConstantSDNode>(ScaleOp)->getZExtValue();
+
+  // Attempt to match index patterns, as long as we're not relying on implicit
+  // sign-extension, which is performed BEFORE scale.
+  if (IndexOp.getScalarValueSizeInBits() == BasePtr.getScalarValueSizeInBits())
+    AM.IndexReg = matchIndexRecursively(IndexOp, AM, 0);
+  else
+    AM.IndexReg = IndexOp;
 
   unsigned AddrSpace = Parent->getPointerInfo().getAddrSpace();
   if (AddrSpace == X86AS::GS)
@@ -3504,9 +3542,11 @@ bool X86DAGToDAGISel::foldLoadStoreIntoMemOperand(SDNode *Node) {
 //   b) x & ~(-1 << nbits)
 //   c) x &  (-1 >> (32 - y))
 //   d) x << (32 - y) >> (32 - y)
+//   e) (1 << nbits) - 1
 bool X86DAGToDAGISel::matchBitExtract(SDNode *Node) {
   assert(
-      (Node->getOpcode() == ISD::AND || Node->getOpcode() == ISD::SRL) &&
+      (Node->getOpcode() == ISD::ADD || Node->getOpcode() == ISD::AND ||
+       Node->getOpcode() == ISD::SRL) &&
       "Should be either an and-mask, or right-shift after clearing high bits.");
 
   // BEXTR is BMI instruction, BZHI is BMI2 instruction. We need at least one.
@@ -3692,6 +3732,8 @@ bool X86DAGToDAGISel::matchBitExtract(SDNode *Node) {
       if (!matchLowBitMask(Mask))
         return false;
     }
+  } else if (matchLowBitMask(SDValue(Node, 0))) {
+    X = CurDAG->getAllOnesConstant(SDLoc(Node), NVT);
   } else if (!matchPatternD(Node))
     return false;
 
@@ -5067,6 +5109,9 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
 
     [[fallthrough]];
   case ISD::ADD:
+    if (Opcode == ISD::ADD && matchBitExtract(Node))
+      return;
+    [[fallthrough]];
   case ISD::SUB: {
     // Try to avoid folding immediates with multiple uses for optsize.
     // This code tries to select to register form directly to avoid going

@@ -161,6 +161,9 @@ enum : uint64_t {
 
   // Is never uniform.
   IsNeverUniform = UINT64_C(1) << 61,
+
+  // ds_gws_* instructions.
+  GWS = UINT64_C(1) << 62,
 };
 
 // v_cmp_class_* etc. use a 10-bit mask for what operation is checked.
@@ -250,6 +253,7 @@ enum OperandType : unsigned {
 // NEG and SEXT share same bit-mask because they can't be set simultaneously.
 namespace SISrcMods {
   enum : unsigned {
+   NONE = 0,
    NEG = 1 << 0,   // Floating-point negate modifier
    ABS = 1 << 1,   // Floating-point absolute modifier
    SEXT = 1 << 0,  // Integer sign-extend modifier

@@ -14,7 +14,7 @@
 // The ability to set a custom abort message is required to compare the assertion message.
 // XFAIL: availability-verbose_abort-missing
 // Debug mode is mutually exclusive with hardened mode.
-// UNSUPPORTED: libcpp-has-debug-mode
+// UNSUPPORTED: libcpp-hardening-mode=debug
 // Ignore the warning about `_LIBCPP_ENABLE_ASSERTIONS` being deprecated.
 // ADDITIONAL_COMPILE_FLAGS: -Wno-error -D_LIBCPP_ENABLE_ASSERTIONS=1
 
@@ -24,9 +24,9 @@
 int main(int, char**) {
   static_assert(_LIBCPP_ENABLE_HARDENED_MODE == 1, "Hardened mode should be implicitly enabled");
 
-  _LIBCPP_ASSERT_UNCATEGORIZED(true, "Should not fire");
+  _LIBCPP_ASSERT_VALID_ELEMENT_ACCESS(true, "Should not fire");
   TEST_LIBCPP_ASSERT_FAILURE([] {
-    _LIBCPP_ASSERT_UNCATEGORIZED(false, "Should fire");
+    _LIBCPP_ASSERT_VALID_ELEMENT_ACCESS(false, "Should fire");
   }(), "Should fire");
 
   return 0;

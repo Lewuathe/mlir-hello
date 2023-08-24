@@ -184,24 +184,32 @@ public:
   void exitCurrentLoop(RewriterBase &rewriter, Location loc,
                        MutableArrayRef<Value> reduc = {});
 
+  /// Get the range of values for all induction variables.
+  auto getLoopIVsRange() const {
+    return llvm::map_range(loopStack, [](const LoopInfo &li) { return li.iv; });
+  }
+
   /// Fills the out-parameter with the loop induction variables for all
   /// loops in the current loop-stack.  The variables are given in the
   /// same order as the loop-stack, hence `ivs` should be indexed into
   /// by `LoopOrd` (not `LoopId`).
-  void getLoopIVs(SmallVectorImpl<Value> &ivs) const {
-    ivs.clear();
-    ivs.reserve(getCurrentDepth());
-    for (auto &l : loopStack)
-      ivs.push_back(l.iv);
+  SmallVector<Value> getLoopIVs() const {
+    return llvm::to_vector(getLoopIVsRange());
   }
 
   /// Gets the current depth of the loop-stack.  The result is given
   /// the type `LoopOrd` for the same reason as one-past-the-end iterators.
-  LoopOrd getCurrentDepth() const { return loopStack.size(); }
+  LoopOrd getCurrentDepth() const {
+    return llvm::range_size(getLoopIVsRange());
+  }
 
   /// Gets loop induction variable for the given `LoopOrd`.
   Value getLoopIV(LoopOrd n) const {
-    return n < getCurrentDepth() ? loopStack[n].iv : Value();
+    if (n >= getCurrentDepth())
+      return Value();
+    auto it = getLoopIVsRange().begin();
+    std::advance(it, n);
+    return *it;
   }
 
   /// Gets the total number of manifest tensors (excluding the synthetic
@@ -558,40 +566,6 @@ private:
                      MutableArrayRef<Value> reduc);
 
   //
-  // View-based-reshape methods.
-  //
-
-  /// Get the collapse reassociation for `tensors[tid][dstLvl]`.
-  /// For unreshaped operands, the reassociation is simply an identity
-  /// transformation.
-  ///
-  /// NOTE: the result uses `Level` rather than the `int64_t` of
-  /// `ReassociationIndices`, since the former gives clarity to what
-  /// the values actually mean.
-  ///
-  /// TODO: why not do this computation when we first store the reassoc,
-  /// instead of doing it every time we look it up?
-  SmallVector<Level, 2> getCollapseReassociation(TensorId tid, Level dstLvl) {
-    assert(tid < getNumTensors() && "Invalid TensorId");
-    assert(collapseReassoc.size() == getNumTensors());
-    if (const auto reassoc = collapseReassoc[tid]) {
-      assert(!isSynTensor(tid) && !isOutputTensor(tid) &&
-             "Output/Synthetic tensor should not have reassociation");
-      // TODO: store the dstLvlRank in the LoopEmitter so that we can
-      // check `dstLvl < dstLvlRank` at the top; and only here need to
-      // assert that `reassoc.size() == dstLvlRank`.
-      assert(dstLvl < reassoc.size() && "Level is out-of-bounds");
-      const auto srcLvls = cast<ArrayAttr>(reassoc[dstLvl]);
-      return llvm::to_vector<2>(
-          llvm::map_range(srcLvls, [&](Attribute srcLvl) -> Level {
-            // TODO: replace this with the converter for `LevelAttr`.
-            return cast<IntegerAttr>(srcLvl).getValue().getZExtValue();
-          }));
-    }
-    return {dstLvl};
-  }
-
-  //
   // Slice-driven loop related methods.
   //
 
@@ -752,14 +726,6 @@ private:
 
   // sliceStack[tid] holds the generated slice stack on tid.
   std::vector<std::vector<SliceInfo>> sliceStack;
-
-  //
-  // View based reshape related-fields and methods
-  //
-
-  /// Collapse Reassociations related to a specific tensor
-  // TODO: support expand.
-  std::vector<ArrayAttr> collapseReassoc;
 
   /// TODO: not yet used, it should track the current level for each tensor
   /// to help eliminate `lvls` paramters from above APIs.

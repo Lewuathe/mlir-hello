@@ -1564,21 +1564,16 @@ void DwarfDebug::collectVariableInfoFromMFTable(
                     cast<DILocalVariable>(Var.first), Var.second);
     if (VI.inStackSlot())
       RegVar->initializeMMI(VI.Expr, VI.getStackSlot());
-    else {
-      MachineLocation MLoc(VI.getEntryValueRegister(), /*IsIndirect*/ true);
-      auto LocEntry = DbgValueLocEntry(MLoc);
-      RegVar->initializeDbgValue(DbgValueLoc(VI.Expr, LocEntry));
-    }
+    else
+      RegVar->initializeEntryValue(VI.getEntryValueRegister(), *VI.Expr);
     LLVM_DEBUG(dbgs() << "Created DbgVariable for " << VI.Var->getName()
                       << "\n");
 
     if (DbgVariable *DbgVar = MFVars.lookup(Var)) {
-      if (DbgVar->getValueLoc())
-        LLVM_DEBUG(dbgs() << "Dropping repeated entry value debug info for "
-                             "variable "
-                          << VI.Var->getName() << "\n");
-      else
+      if (DbgVar->hasFrameIndexExprs())
         DbgVar->addMMIEntry(*RegVar);
+      else
+        DbgVar->getEntryValue()->addExpr(VI.getEntryValueRegister(), *VI.Expr);
     } else if (InfoHolder.addScopeVariable(Scope, RegVar.get())) {
       MFVars.insert({Var, RegVar.get()});
       ConcreteEntities.push_back(std::move(RegVar));
@@ -2549,10 +2544,13 @@ void DwarfDebug::emitDebugPubSection(bool GnuStyle, StringRef Name,
   Asm->emitDwarfLengthOrOffset(TheU->getLength());
 
   // Emit the pubnames for this compilation unit.
-  for (const auto &GI : Globals) {
-    const char *Name = GI.getKeyData();
-    const DIE *Entity = GI.second;
-
+  SmallVector<std::pair<StringRef, const DIE *>, 0> Vec;
+  for (const auto &GI : Globals)
+    Vec.emplace_back(GI.first(), GI.second);
+  llvm::sort(Vec, [](auto &A, auto &B) {
+    return A.second->getOffset() < B.second->getOffset();
+  });
+  for (const auto &[Name, Entity] : Vec) {
     Asm->OutStreamer->AddComment("DIE offset");
     Asm->emitDwarfLengthOrOffset(Entity->getOffset());
 
@@ -2565,7 +2563,7 @@ void DwarfDebug::emitDebugPubSection(bool GnuStyle, StringRef Name,
     }
 
     Asm->OutStreamer->AddComment("External Name");
-    Asm->OutStreamer->emitBytes(StringRef(Name, GI.getKeyLength() + 1));
+    Asm->OutStreamer->emitBytes(StringRef(Name.data(), Name.size() + 1));
   }
 
   Asm->OutStreamer->AddComment("End Mark");

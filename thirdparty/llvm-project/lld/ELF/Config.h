@@ -53,8 +53,8 @@ enum ELFKind : uint8_t {
 };
 
 // For -Bno-symbolic, -Bsymbolic-non-weak-functions, -Bsymbolic-functions,
-// -Bsymbolic.
-enum class BsymbolicKind { None, NonWeakFunctions, Functions, All };
+// -Bsymbolic-non-weak, -Bsymbolic.
+enum class BsymbolicKind { None, NonWeakFunctions, Functions, NonWeak, All };
 
 // For --build-id.
 enum class BuildIdKind { None, Fast, Md5, Sha1, Hexstring, Uuid };
@@ -96,6 +96,9 @@ enum class SeparateSegmentKind { None, Code, Loadable };
 // For -z *stack
 enum class GnuStackKind { None, Exec, NoExec };
 
+// For --lto=
+enum LtoKind : uint8_t {UnifiedThin, UnifiedRegular, Default};
+
 struct SymbolVersion {
   llvm::StringRef name;
   bool isExternCpp;
@@ -122,7 +125,8 @@ private:
   void inferMachineType();
   void link(llvm::opt::InputArgList &args);
   template <class ELFT> void compileBitcodeFiles(bool skipLinkedOutput);
-
+  bool tryAddFatLTOFile(MemoryBufferRef mb, StringRef archiveName,
+                        uint64_t offsetInArchive, bool lazy);
   // True if we are in --whole-archive and --no-whole-archive.
   bool inWholeArchive = false;
 
@@ -202,6 +206,7 @@ struct Config {
       callGraphProfile;
   bool cmseImplib = false;
   bool allowMultipleDefinition;
+  bool fatLTOObjects;
   bool androidPackDynRelocs = false;
   bool armHasBlx = false;
   bool armHasMovtMovw = false;
@@ -414,6 +419,9 @@ struct Config {
   // this means to map the primary and thread stacks as PROT_MTE. Note: This is
   // not supported on Android 11 & 12.
   bool androidMemtagStack;
+
+  // When using a unified pre-link LTO pipeline, specify the backend LTO mode.
+  LtoKind ltoKind = LtoKind::Default;
 
   unsigned threadCount;
 

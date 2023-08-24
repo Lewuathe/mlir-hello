@@ -1654,16 +1654,6 @@ void OperationFormat::genParserVariadicSegmentResolution(Operator &op,
                                                          MethodBody &body) {
   if (!allOperands) {
     if (op.getTrait("::mlir::OpTrait::AttrSizedOperandSegments")) {
-      if (op.getDialect().usePropertiesForAttributes()) {
-        body << formatv("  "
-                        "result.getOrAddProperties<{0}::Properties>().operand_"
-                        "segment_sizes = "
-                        "(parser.getBuilder().getDenseI32ArrayAttr({{",
-                        op.getCppClassName());
-      } else {
-        body << "  result.addAttribute(\"operand_segment_sizes\", "
-             << "parser.getBuilder().getDenseI32ArrayAttr({";
-      }
       auto interleaveFn = [&](const NamedTypeConstraint &operand) {
         // If the operand is variadic emit the parsed size.
         if (operand.isVariableLength())
@@ -1671,8 +1661,19 @@ void OperationFormat::genParserVariadicSegmentResolution(Operator &op,
         else
           body << "1";
       };
-      llvm::interleaveComma(op.getOperands(), body, interleaveFn);
-      body << "}));\n";
+      if (op.getDialect().usePropertiesForAttributes()) {
+        body << "::llvm::copy(::llvm::ArrayRef<int32_t>({";
+        llvm::interleaveComma(op.getOperands(), body, interleaveFn);
+        body << formatv("}), "
+                        "result.getOrAddProperties<{0}::Properties>()."
+                        "operandSegmentSizes.begin());\n",
+                        op.getCppClassName());
+      } else {
+        body << "  result.addAttribute(\"operandSegmentSizes\", "
+             << "parser.getBuilder().getDenseI32ArrayAttr({";
+        llvm::interleaveComma(op.getOperands(), body, interleaveFn);
+        body << "}));\n";
+      }
     }
     for (const NamedTypeConstraint &operand : op.getOperands()) {
       if (!operand.isVariadicOfVariadic())
@@ -1697,16 +1698,6 @@ void OperationFormat::genParserVariadicSegmentResolution(Operator &op,
 
   if (!allResultTypes &&
       op.getTrait("::mlir::OpTrait::AttrSizedResultSegments")) {
-    if (op.getDialect().usePropertiesForAttributes()) {
-      body << formatv(
-          "  "
-          "result.getOrAddProperties<{0}::Properties>().result_segment_sizes = "
-          "(parser.getBuilder().getDenseI32ArrayAttr({{",
-          op.getCppClassName());
-    } else {
-      body << "  result.addAttribute(\"result_segment_sizes\", "
-           << "parser.getBuilder().getDenseI32ArrayAttr({";
-    }
     auto interleaveFn = [&](const NamedTypeConstraint &result) {
       // If the result is variadic emit the parsed size.
       if (result.isVariableLength())
@@ -1714,8 +1705,19 @@ void OperationFormat::genParserVariadicSegmentResolution(Operator &op,
       else
         body << "1";
     };
-    llvm::interleaveComma(op.getResults(), body, interleaveFn);
-    body << "}));\n";
+    if (op.getDialect().usePropertiesForAttributes()) {
+      body << "llvm::copy(ArrayRef<int32_t>({";
+      llvm::interleaveComma(op.getResults(), body, interleaveFn);
+      body << formatv("}), "
+                      "result.getOrAddProperties<{0}::Properties>()."
+                      "resultSegmentSizes.begin());\n",
+                      op.getCppClassName());
+    } else {
+      body << "  result.addAttribute(\"resultSegmentSizes\", "
+           << "parser.getBuilder().getDenseI32ArrayAttr({";
+      llvm::interleaveComma(op.getResults(), body, interleaveFn);
+      body << "}));\n";
+    }
   }
 }
 
@@ -1765,10 +1767,10 @@ static void genAttrDictPrinter(OperationFormat &fmt, Operator &op,
   // Elide the variadic segment size attributes if necessary.
   if (!fmt.allOperands &&
       op.getTrait("::mlir::OpTrait::AttrSizedOperandSegments"))
-    body << "  elidedAttrs.push_back(\"operand_segment_sizes\");\n";
+    body << "  elidedAttrs.push_back(\"operandSegmentSizes\");\n";
   if (!fmt.allResultTypes &&
       op.getTrait("::mlir::OpTrait::AttrSizedResultSegments"))
-    body << "  elidedAttrs.push_back(\"result_segment_sizes\");\n";
+    body << "  elidedAttrs.push_back(\"resultSegmentSizes\");\n";
   for (const StringRef key : fmt.inferredAttributes.keys())
     body << "  elidedAttrs.push_back(\"" << key << "\");\n";
   for (const NamedAttribute *attr : fmt.usedAttributes)
@@ -2957,12 +2959,18 @@ OpFormatParser::parseVariableImpl(SMLoc loc, StringRef name, Context ctx) {
   }
 
   if (const NamedProperty *property = findArg(op.getProperties(), name)) {
-    if (ctx != CustomDirectiveContext)
+    if (ctx != CustomDirectiveContext && ctx != RefDirectiveContext)
       return emitError(
           loc, "properties currently only supported in `custom` directive");
 
-    if (!seenProperties.insert(property).second)
-      return emitError(loc, "property '" + name + "' is already bound");
+    if (ctx == RefDirectiveContext) {
+      if (!seenProperties.count(property))
+        return emitError(loc, "property '" + name +
+                                  "' must be bound before it is referenced");
+    } else {
+      if (!seenProperties.insert(property).second)
+        return emitError(loc, "property '" + name + "' is already bound");
+    }
 
     return create<PropertyVariable>(property);
   }

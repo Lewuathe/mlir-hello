@@ -1303,7 +1303,7 @@ bool SimplifyCFGOpt::PerformValueComparisonIntoPredecessorFolding(
   }
   for (const std::pair<BasicBlock *, int /*Num*/> &NewSuccessor :
        NewSuccessors) {
-    for (auto I : seq(0, NewSuccessor.second)) {
+    for (auto I : seq(NewSuccessor.second)) {
       (void)I;
       AddPredecessorToBlock(NewSuccessor.first, Pred, BB);
     }
@@ -1808,9 +1808,18 @@ static bool canSinkInstructions(
   }
 
   const Instruction *I0 = Insts.front();
-  for (auto *I : Insts)
+  for (auto *I : Insts) {
     if (!I->isSameOperationAs(I0))
       return false;
+
+    // swifterror pointers can only be used by a load or store; sinking a load
+    // or store would require introducing a select for the pointer operand,
+    // which isn't allowed for swifterror pointers.
+    if (isa<StoreInst>(I) && I->getOperand(1)->isSwiftError())
+      return false;
+    if (isa<LoadInst>(I) && I->getOperand(0)->isSwiftError())
+      return false;
+  }
 
   // All instructions in Insts are known to be the same opcode. If they have a
   // use, check that the only user is a PHI or in the same block as the
@@ -3872,7 +3881,7 @@ static Value *ensureValueAvailableInSuccessor(Value *V, BasicBlock *BB,
   for (BasicBlock *PredBB : predecessors(Succ))
     if (PredBB != BB)
       PHI->addIncoming(
-          AlternativeV ? AlternativeV : UndefValue::get(V->getType()), PredBB);
+          AlternativeV ? AlternativeV : PoisonValue::get(V->getType()), PredBB);
   return PHI;
 }
 
@@ -4140,10 +4149,10 @@ static bool tryWidenCondBranchToCondBranch(BranchInst *PBI, BranchInst *BI,
   // 2) We can sink side effecting instructions into BI's fallthrough
   //    successor provided they doesn't contribute to computation of
   //    BI's condition.
-  Value *CondWB, *WC;
-  BasicBlock *IfTrueBB, *IfFalseBB;
-  if (!parseWidenableBranch(PBI, CondWB, WC, IfTrueBB, IfFalseBB) ||
-      IfTrueBB != BI->getParent() || !BI->getParent()->getSinglePredecessor())
+  BasicBlock *IfTrueBB = PBI->getSuccessor(0);
+  BasicBlock *IfFalseBB = PBI->getSuccessor(1);
+  if (!isWidenableBranch(PBI) || IfTrueBB != BI->getParent() ||
+      !BI->getParent()->getSinglePredecessor())
     return false;
   if (!IfFalseBB->phis().empty())
     return false; // TODO
@@ -5890,8 +5899,8 @@ static void removeSwitchAfterSelectFold(SwitchInst *SI, PHINode *PHI,
 
   // Remove the switch.
 
-  while (PHI->getBasicBlockIndex(SelectBB) >= 0)
-    PHI->removeIncomingValue(SelectBB);
+  PHI->removeIncomingValueIf(
+      [&](unsigned Idx) { return PHI->getIncomingBlock(Idx) == SelectBB; });
   PHI->addIncoming(SelectValue, SelectBB);
 
   SmallPtrSet<BasicBlock *, 4> RemovedSuccessors;
@@ -6978,7 +6987,8 @@ bool SimplifyCFGOpt::simplifyUncondBranch(BranchInst *BI,
   // branches to us and our successor, fold the comparison into the
   // predecessor and use logical operations to update the incoming value
   // for PHI nodes in common successor.
-  if (FoldBranchToCommonDest(BI, DTU, /*MSSAU=*/nullptr, &TTI,
+  if (Options.SpeculateBlocks &&
+      FoldBranchToCommonDest(BI, DTU, /*MSSAU=*/nullptr, &TTI,
                              Options.BonusInstThreshold))
     return requestResimplify();
   return false;
@@ -7048,7 +7058,8 @@ bool SimplifyCFGOpt::simplifyCondBranch(BranchInst *BI, IRBuilder<> &Builder) {
   // If this basic block is ONLY a compare and a branch, and if a predecessor
   // branches to us and one of our successors, fold the comparison into the
   // predecessor and use logical operations to pick the right destination.
-  if (FoldBranchToCommonDest(BI, DTU, /*MSSAU=*/nullptr, &TTI,
+  if (Options.SpeculateBlocks &&
+      FoldBranchToCommonDest(BI, DTU, /*MSSAU=*/nullptr, &TTI,
                              Options.BonusInstThreshold))
     return requestResimplify();
 
