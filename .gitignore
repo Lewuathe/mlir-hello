@@ -228,3 +228,4 @@ Temporary Items
 .idea
 
 build/*
+.vscode
