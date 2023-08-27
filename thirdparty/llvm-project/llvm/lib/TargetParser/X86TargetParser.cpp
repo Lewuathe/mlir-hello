@@ -42,9 +42,7 @@ public:
   }
 
   constexpr FeatureBitset &set(unsigned I) {
-    // GCC <6.2 crashes if this is written in a single statement.
-    uint32_t NewBits = Bits[I / 32] | (uint32_t(1) << (I % 32));
-    Bits[I / 32] = NewBits;
+    Bits[I / 32] |= uint32_t(1) << (I % 32);
     return *this;
   }
 
@@ -54,36 +52,26 @@ public:
   }
 
   constexpr FeatureBitset &operator&=(const FeatureBitset &RHS) {
-    for (unsigned I = 0, E = std::size(Bits); I != E; ++I) {
-      // GCC <6.2 crashes if this is written in a single statement.
-      uint32_t NewBits = Bits[I] & RHS.Bits[I];
-      Bits[I] = NewBits;
-    }
+    for (unsigned I = 0, E = std::size(Bits); I != E; ++I)
+      Bits[I] &= RHS.Bits[I];
     return *this;
   }
 
   constexpr FeatureBitset &operator|=(const FeatureBitset &RHS) {
-    for (unsigned I = 0, E = std::size(Bits); I != E; ++I) {
-      // GCC <6.2 crashes if this is written in a single statement.
-      uint32_t NewBits = Bits[I] | RHS.Bits[I];
-      Bits[I] = NewBits;
-    }
+    for (unsigned I = 0, E = std::size(Bits); I != E; ++I)
+      Bits[I] |= RHS.Bits[I];
     return *this;
   }
 
-  // gcc 5.3 miscompiles this if we try to write this using operator&=.
   constexpr FeatureBitset operator&(const FeatureBitset &RHS) const {
-    FeatureBitset Result;
-    for (unsigned I = 0, E = std::size(Bits); I != E; ++I)
-      Result.Bits[I] = Bits[I] & RHS.Bits[I];
+    FeatureBitset Result = *this;
+    Result &= RHS;
     return Result;
   }
 
-  // gcc 5.3 miscompiles this if we try to write this using operator&=.
   constexpr FeatureBitset operator|(const FeatureBitset &RHS) const {
-    FeatureBitset Result;
-    for (unsigned I = 0, E = std::size(Bits); I != E; ++I)
-      Result.Bits[I] = Bits[I] | RHS.Bits[I];
+    FeatureBitset Result = *this;
+    Result |= RHS;
     return Result;
   }
 
@@ -210,8 +198,7 @@ constexpr FeatureBitset FeaturesSapphireRapids =
     FeatureSERIALIZE | FeatureSHSTK | FeatureTSXLDTRK | FeatureUINTR |
     FeatureWAITPKG;
 constexpr FeatureBitset FeaturesGraniteRapids =
-    FeaturesSapphireRapids | FeatureAMX_FP16 | FeaturePREFETCHI |
-    FeatureAMX_COMPLEX;
+    FeaturesSapphireRapids | FeatureAMX_FP16 | FeaturePREFETCHI;
 
 // Intel Atom processors.
 // Bonnell has feature parity with Core2 and adds MOVBE.
@@ -234,10 +221,12 @@ constexpr FeatureBitset FeaturesAlderlake =
     FeatureCLDEMOTE | FeatureMOVDIR64B | FeatureMOVDIRI | FeatureWAITPKG |
     FeatureAVXVNNI | FeatureHRESET | FeatureWIDEKL;
 constexpr FeatureBitset FeaturesSierraforest =
-    FeaturesAlderlake | FeatureCMPCCXADD | FeatureAVXIFMA |
-    FeatureAVXNECONVERT | FeatureAVXVNNIINT8;
+    FeaturesAlderlake | FeatureCMPCCXADD | FeatureAVXIFMA | FeatureUINTR |
+    FeatureENQCMD | FeatureAVXNECONVERT | FeatureAVXVNNIINT8;
 constexpr FeatureBitset FeaturesGrandridge =
     FeaturesSierraforest | FeatureRAOINT;
+constexpr FeatureBitset FeaturesArrowlakeS = FeaturesSierraforest |
+    FeatureAVXVNNIINT16 | FeatureSHA512 | FeatureSM3 | FeatureSM4;
 
 // Geode Processor.
 constexpr FeatureBitset FeaturesGeode =
@@ -423,12 +412,23 @@ constexpr ProcInfo Processors[] = {
   { {"raptorlake"}, CK_Raptorlake, FEATURE_AVX2, FeaturesAlderlake, 'p', false },
   // Meteorlake microarchitecture based processors.
   { {"meteorlake"}, CK_Meteorlake, FEATURE_AVX2, FeaturesAlderlake, 'p', false },
+  // Arrowlake microarchitecture based processors.
+  { {"arrowlake"}, CK_Arrowlake, FEATURE_AVX2, FeaturesSierraforest, 'p', false },
+  { {"arrowlake-s"}, CK_ArrowlakeS, FEATURE_AVX2, FeaturesArrowlakeS, '\0', false },
+  { {"arrowlake_s"}, CK_ArrowlakeS, FEATURE_AVX2, FeaturesArrowlakeS, 'p', true },
+  // Lunarlake microarchitecture based processors.
+  { {"lunarlake"}, CK_Lunarlake, FEATURE_AVX2, FeaturesArrowlakeS, 'p', false },
+  // Gracemont microarchitecture based processors.
+  { {"gracemont"}, CK_Gracemont, FEATURE_AVX2, FeaturesAlderlake, 'p', false },
   // Sierraforest microarchitecture based processors.
   { {"sierraforest"}, CK_Sierraforest, FEATURE_AVX2, FeaturesSierraforest, 'p', false },
   // Grandridge microarchitecture based processors.
   { {"grandridge"}, CK_Grandridge, FEATURE_AVX2, FeaturesGrandridge, 'p', false },
   // Granite Rapids microarchitecture based processors.
   { {"graniterapids"}, CK_Graniterapids, FEATURE_AVX512BF16, FeaturesGraniteRapids, 'n', false },
+  // Granite Rapids D microarchitecture based processors.
+  { {"graniterapids-d"}, CK_GraniterapidsD, FEATURE_AVX512BF16, FeaturesGraniteRapids | FeatureAMX_COMPLEX, '\0', false },
+  { {"graniterapids_d"}, CK_GraniterapidsD, FEATURE_AVX512BF16, FeaturesGraniteRapids | FeatureAMX_COMPLEX, 'n', true },
   // Emerald Rapids microarchitecture based processors.
   { {"emeraldrapids"}, CK_Emeraldrapids, FEATURE_AVX512BF16, FeaturesSapphireRapids, 'n', false },
   // Knights Landing processor.
@@ -611,8 +611,10 @@ constexpr FeatureBitset ImpliedFeaturesFMA = FeatureAVX;
 constexpr FeatureBitset ImpliedFeaturesGFNI = FeatureSSE2;
 constexpr FeatureBitset ImpliedFeaturesPCLMUL = FeatureSSE2;
 constexpr FeatureBitset ImpliedFeaturesSHA = FeatureSSE2;
-constexpr FeatureBitset ImpliedFeaturesVAES = FeatureAES | FeatureAVX;
+constexpr FeatureBitset ImpliedFeaturesVAES = FeatureAES | FeatureAVX2;
 constexpr FeatureBitset ImpliedFeaturesVPCLMULQDQ = FeatureAVX | FeaturePCLMUL;
+constexpr FeatureBitset ImpliedFeaturesSM3 = FeatureAVX;
+constexpr FeatureBitset ImpliedFeaturesSM4 = FeatureAVX2;
 
 // AVX512 features.
 constexpr FeatureBitset ImpliedFeaturesAVX512CD = FeatureAVX512F;
@@ -652,9 +654,11 @@ constexpr FeatureBitset ImpliedFeaturesHRESET = {};
 constexpr FeatureBitset ImpliedFeaturesPREFETCHI = {};
 constexpr FeatureBitset ImpliedFeaturesCMPCCXADD = {};
 constexpr FeatureBitset ImpliedFeaturesRAOINT = {};
+constexpr FeatureBitset ImpliedFeaturesAVXVNNIINT16 = FeatureAVX2;
 constexpr FeatureBitset ImpliedFeaturesAVXVNNIINT8 = FeatureAVX2;
 constexpr FeatureBitset ImpliedFeaturesAVXIFMA = FeatureAVX2;
 constexpr FeatureBitset ImpliedFeaturesAVXNECONVERT = FeatureAVX2;
+constexpr FeatureBitset ImpliedFeaturesSHA512 = FeatureAVX2;
 constexpr FeatureBitset ImpliedFeaturesAVX512FP16 =
     FeatureAVX512BW | FeatureAVX512DQ | FeatureAVX512VL;
 // Key Locker Features

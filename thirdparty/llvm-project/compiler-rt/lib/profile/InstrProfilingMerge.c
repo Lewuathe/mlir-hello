@@ -38,6 +38,11 @@ uint64_t lprofGetLoadModuleSignature(void) {
          __llvm_profile_get_magic();
 }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
+
 /* Returns 1 if profile is not structurally compatible.  */
 COMPILER_RT_VISIBILITY
 int __llvm_profile_check_compatibility(const char *ProfileData,
@@ -48,7 +53,7 @@ int __llvm_profile_check_compatibility(const char *ProfileData,
   SrcDataStart =
       (__llvm_profile_data *)(ProfileData + sizeof(__llvm_profile_header) +
                               Header->BinaryIdsSize);
-  SrcDataEnd = SrcDataStart + Header->DataSize;
+  SrcDataEnd = SrcDataStart + Header->NumData;
 
   if (ProfileSize < sizeof(__llvm_profile_header))
     return 1;
@@ -56,10 +61,10 @@ int __llvm_profile_check_compatibility(const char *ProfileData,
   /* Check the header first.  */
   if (Header->Magic != __llvm_profile_get_magic() ||
       Header->Version != __llvm_profile_get_version() ||
-      Header->DataSize !=
+      Header->NumData !=
           __llvm_profile_get_num_data(__llvm_profile_begin_data(),
                                       __llvm_profile_end_data()) ||
-      Header->CountersSize !=
+      Header->NumCounters !=
           __llvm_profile_get_num_counters(__llvm_profile_begin_counters(),
                                           __llvm_profile_end_counters()) ||
       Header->NamesSize != (uint64_t)(__llvm_profile_end_names() -
@@ -69,8 +74,8 @@ int __llvm_profile_check_compatibility(const char *ProfileData,
 
   if (ProfileSize <
       sizeof(__llvm_profile_header) + Header->BinaryIdsSize +
-          Header->DataSize * sizeof(__llvm_profile_data) + Header->NamesSize +
-          Header->CountersSize * __llvm_profile_counter_entry_size())
+          Header->NumData * sizeof(__llvm_profile_data) + Header->NamesSize +
+          Header->NumCounters * __llvm_profile_counter_entry_size())
     return 1;
 
   for (SrcData = SrcDataStart,
@@ -104,6 +109,12 @@ int __llvm_profile_merge_from_buffer(const char *ProfileData,
         "Instead, merge raw profiles using the llvm-profdata tool.");
     return 1;
   }
+  if (__llvm_profile_get_version() & VARIANT_MASK_TEMPORAL_PROF) {
+    PROF_ERR("%s\n",
+             "Temporal profiles do not support profile merging at runtime. "
+             "Instead, merge raw profiles using the llvm-profdata tool.");
+    return 1;
+  }
 
   __llvm_profile_data *SrcDataStart, *SrcDataEnd, *SrcData, *DstData;
   __llvm_profile_header *Header = (__llvm_profile_header *)ProfileData;
@@ -115,10 +126,10 @@ int __llvm_profile_merge_from_buffer(const char *ProfileData,
   SrcDataStart =
       (__llvm_profile_data *)(ProfileData + sizeof(__llvm_profile_header) +
                               Header->BinaryIdsSize);
-  SrcDataEnd = SrcDataStart + Header->DataSize;
+  SrcDataEnd = SrcDataStart + Header->NumData;
   SrcCountersStart = (char *)SrcDataEnd;
   SrcNameStart = SrcCountersStart +
-                 Header->CountersSize * __llvm_profile_counter_entry_size();
+                 Header->NumCounters * __llvm_profile_counter_entry_size();
   SrcValueProfDataStart =
       SrcNameStart + Header->NamesSize +
       __llvm_profile_get_num_padding_bytes(Header->NamesSize);
@@ -183,3 +194,7 @@ int __llvm_profile_merge_from_buffer(const char *ProfileData,
 
   return 0;
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif

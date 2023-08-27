@@ -2795,7 +2795,7 @@ void Sema::CheckObjCPropertyAttributes(Decl *PDecl,
     }
 
     // FIXME: Implement warning dependent on NSCopying being
-    // implemented. (Please trim this list while you are at it.)
+    // implemented.
   }
 
   if (!(Attributes & ObjCPropertyAttribute::kind_copy) &&

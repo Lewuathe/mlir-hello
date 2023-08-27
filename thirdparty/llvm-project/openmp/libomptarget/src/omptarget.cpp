@@ -12,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "omptarget.h"
+#include "OmptCallback.h"
+#include "OmptInterface.h"
 #include "device.h"
 #include "private.h"
 #include "rtl.h"
@@ -24,6 +26,9 @@
 #include <vector>
 
 using llvm::SmallVector;
+#ifdef OMPT_SUPPORT
+using namespace llvm::omp::target::ompt;
+#endif
 
 int AsyncInfoTy::synchronize() {
   int Result = OFFLOAD_SUCCESS;
@@ -1670,6 +1675,17 @@ int target(ident_t *Loc, DeviceTy &Device, void *HostPtr,
   {
     assert(KernelArgs.NumArgs == TgtArgs.size() && "Argument count mismatch!");
     TIMESCOPE_WITH_NAME_AND_IDENT("Initiate Kernel Launch", Loc);
+
+#ifdef OMPT_SUPPORT
+    assert(KernelArgs.NumTeams[1] == 0 && KernelArgs.NumTeams[2] == 0 &&
+           "Multi dimensional launch not supported yet.");
+    /// RAII to establish tool anchors before and after kernel launch
+    int32_t NumTeams = KernelArgs.NumTeams[0];
+    // No need to guard this with OMPT_IF_BUILT
+    InterfaceRAII TargetSubmitRAII(
+        RegionInterface.getCallbacks<ompt_callback_target_submit>(), NumTeams);
+#endif
+
     Ret = Device.launchKernel(TgtEntryPtr, TgtArgs.data(), TgtOffsets.data(),
                               KernelArgs, AsyncInfo);
   }
@@ -1694,6 +1710,15 @@ int target(ident_t *Loc, DeviceTy &Device, void *HostPtr,
   }
 
   return OFFLOAD_SUCCESS;
+}
+
+/// Enables the record replay mechanism by pre-allocating MemorySize
+/// and informing the record-replayer of whether to store the output
+/// in some file.
+int target_activate_rr(DeviceTy &Device, uint64_t MemorySize, bool isRecord,
+                       bool SaveOutput) {
+  return Device.RTL->activate_record_replay(Device.DeviceID, MemorySize,
+                                            isRecord, SaveOutput);
 }
 
 /// Executes a kernel using pre-recorded information for loading to

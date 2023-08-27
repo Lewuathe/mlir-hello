@@ -17,6 +17,8 @@
 #include "llvm/Support/ScopedPrinter.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include <string>
+#include <vector>
 
 namespace clang {
 namespace clangd {
@@ -82,11 +84,13 @@ Config noHintsConfig() {
 }
 
 template <typename... ExpectedHints>
-void assertHints(InlayHintKind Kind, llvm::StringRef AnnotatedSource,
-                 ExpectedHints... Expected) {
+void assertHintsWithHeader(InlayHintKind Kind, llvm::StringRef AnnotatedSource,
+                           llvm::StringRef HeaderContent,
+                           ExpectedHints... Expected) {
   Annotations Source(AnnotatedSource);
   TestTU TU = TestTU::withCode(Source.code());
   TU.ExtraArgs.push_back("-std=c++20");
+  TU.HeaderCode = HeaderContent;
   auto AST = TU.build();
 
   EXPECT_THAT(hintsOfKind(AST, Kind),
@@ -95,6 +99,13 @@ void assertHints(InlayHintKind Kind, llvm::StringRef AnnotatedSource,
   // We'll hit an assertion failure if addInlayHint still gets called.
   WithContextValue WithCfg(Config::Key, noHintsConfig());
   EXPECT_THAT(inlayHints(AST, std::nullopt), IsEmpty());
+}
+
+template <typename... ExpectedHints>
+void assertHints(InlayHintKind Kind, llvm::StringRef AnnotatedSource,
+                 ExpectedHints... Expected) {
+  return assertHintsWithHeader(Kind, AnnotatedSource, "",
+                               std::move(Expected)...);
 }
 
 // Hack to allow expression-statements operating on parameter packs in C++14.
@@ -908,6 +919,26 @@ TEST(ParameterHints, ImplicitConstructor) {
   )cpp");
 }
 
+TEST(ParameterHints, FunctionPointer) {
+  assertParameterHints(
+      R"cpp(
+    void (*f1)(int param);
+    void (__stdcall *f2)(int param);
+    using f3_t = void(*)(int param);
+    f3_t f3;
+    using f4_t = void(__stdcall *)(int param);
+    f4_t f4;
+    void bar() {
+      f1($f1[[42]]);
+      f2($f2[[42]]);
+      f3($f3[[42]]);
+      f4($f4[[42]]);
+    }
+  )cpp",
+      ExpectedHint{"param: ", "f1"}, ExpectedHint{"param: ", "f2"},
+      ExpectedHint{"param: ", "f3"}, ExpectedHint{"param: ", "f4"});
+}
+
 TEST(ParameterHints, ArgMatchesParam) {
   assertParameterHints(R"cpp(
     void foo(int param);
@@ -1322,6 +1353,11 @@ TEST(TypeHints, DependentType) {
       // FIXME: It would be nice to show "T" as the hint.
       auto $var2[[var2]] = arg;
     }
+
+    template <typename T>
+    void bar(T arg) {
+      auto [a, b] = arg;
+    }
   )cpp");
 }
 
@@ -1431,8 +1467,7 @@ TEST(TypeHints, Decltype) {
 }
 
 TEST(TypeHints, SubstTemplateParameterAliases) {
-  assertTypeHints(
-      R"cpp(
+  llvm::StringRef Header = R"cpp(
   template <class T> struct allocator {};
 
   template <class T, class A>
@@ -1465,9 +1500,34 @@ TEST(TypeHints, SubstTemplateParameterAliases) {
 
     T elements[10];
   };
+  )cpp";
 
+  llvm::StringRef VectorIntPtr = R"cpp(
+    vector<int *> array;
+    auto $no_modifier[[x]] = array[3];
+    auto* $ptr_modifier[[ptr]] = &array[3];
+    auto& $ref_modifier[[ref]] = array[3];
+    auto& $at[[immutable]] = array.at(3);
+
+    auto $data[[data]] = array.data();
+    auto $allocator[[alloc]] = array.get_allocator();
+    auto $size[[size]] = array.size();
+    auto $begin[[begin]] = array.begin();
+    auto $end[[end]] = array.end();
+  )cpp";
+
+  assertHintsWithHeader(
+      InlayHintKind::Type, VectorIntPtr, Header,
+      ExpectedHint{": int *", "no_modifier"},
+      ExpectedHint{": int **", "ptr_modifier"},
+      ExpectedHint{": int *&", "ref_modifier"},
+      ExpectedHint{": int *const &", "at"}, ExpectedHint{": int **", "data"},
+      ExpectedHint{": allocator<int *>", "allocator"},
+      ExpectedHint{": size_type", "size"}, ExpectedHint{": iterator", "begin"},
+      ExpectedHint{": non_template_iterator", "end"});
+
+  llvm::StringRef VectorInt = R"cpp(
   vector<int> array;
-
   auto $no_modifier[[by_value]] = array[3];
   auto* $ptr_modifier[[ptr]] = &array[3];
   auto& $ref_modifier[[ref]] = array[3];
@@ -1478,8 +1538,19 @@ TEST(TypeHints, SubstTemplateParameterAliases) {
   auto $size[[size]] = array.size();
   auto $begin[[begin]] = array.begin();
   auto $end[[end]] = array.end();
+  )cpp";
 
+  assertHintsWithHeader(
+      InlayHintKind::Type, VectorInt, Header,
+      ExpectedHint{": int", "no_modifier"},
+      ExpectedHint{": int *", "ptr_modifier"},
+      ExpectedHint{": int &", "ref_modifier"},
+      ExpectedHint{": const int &", "at"}, ExpectedHint{": int *", "data"},
+      ExpectedHint{": allocator<int>", "allocator"},
+      ExpectedHint{": size_type", "size"}, ExpectedHint{": iterator", "begin"},
+      ExpectedHint{": non_template_iterator", "end"});
 
+  llvm::StringRef TypeAlias = R"cpp(
   // If the type alias is not of substituted template parameter type,
   // do not show desugared type.
   using VeryLongLongTypeName = my_iterator;
@@ -1494,16 +1565,11 @@ TEST(TypeHints, SubstTemplateParameterAliases) {
   using static_vector = basic_static_vector<T, allocator<T>>;
 
   auto $vector_name[[vec]] = static_vector<int>();
-  )cpp",
-      ExpectedHint{": int", "no_modifier"},
-      ExpectedHint{": int *", "ptr_modifier"},
-      ExpectedHint{": int &", "ref_modifier"},
-      ExpectedHint{": const int &", "at"}, ExpectedHint{": int *", "data"},
-      ExpectedHint{": allocator<int>", "allocator"},
-      ExpectedHint{": size_type", "size"}, ExpectedHint{": iterator", "begin"},
-      ExpectedHint{": non_template_iterator", "end"},
-      ExpectedHint{": Short", "short_name"},
-      ExpectedHint{": static_vector<int>", "vector_name"});
+  )cpp";
+
+  assertHintsWithHeader(InlayHintKind::Type, TypeAlias, Header,
+                        ExpectedHint{": Short", "short_name"},
+                        ExpectedHint{": static_vector<int>", "vector_name"});
 }
 
 TEST(DesignatorHints, Basic) {
@@ -1755,6 +1821,221 @@ TEST(BlockEndHints, Types) {
       ExpectedHint{" // struct S", "S"}, ExpectedHint{" // class C", "C"},
       ExpectedHint{" // union U", "U"}, ExpectedHint{" // enum E1", "E1"},
       ExpectedHint{" // enum class E2", "E2"});
+}
+
+TEST(BlockEndHints, If) {
+  assertBlockEndHints(
+      R"cpp(
+    void foo(bool cond) {
+       if (cond)
+          ;
+
+       if (cond) {
+       $simple[[}]]
+
+       if (cond) {
+       } else {
+       $ifelse[[}]]
+
+       if (cond) {
+       } else if (!cond) {
+       $elseif[[}]]
+
+       if (cond) {
+       } else {
+         if (!cond) {
+         $inner[[}]]
+       $outer[[}]]
+
+       if (auto X = cond) {
+       $init[[}]]
+
+       if (int i = 0; i > 10) {
+       $init_cond[[}]]
+    } // suppress
+  )cpp",
+      ExpectedHint{" // if cond", "simple"},
+      ExpectedHint{" // if cond", "ifelse"}, ExpectedHint{" // if", "elseif"},
+      ExpectedHint{" // if !cond", "inner"},
+      ExpectedHint{" // if cond", "outer"}, ExpectedHint{" // if X", "init"},
+      ExpectedHint{" // if i > 10", "init_cond"});
+}
+
+TEST(BlockEndHints, Loops) {
+  assertBlockEndHints(
+      R"cpp(
+    void foo() {
+       while (true)
+          ;
+
+       while (true) {
+       $while[[}]]
+
+       do {
+       } while (true);
+
+       for (;true;) {
+       $forcond[[}]]
+
+       for (int I = 0; I < 10; ++I) {
+       $forvar[[}]]
+
+       int Vs[] = {1,2,3};
+       for (auto V : Vs) {
+       $foreach[[}]]
+    } // suppress
+  )cpp",
+      ExpectedHint{" // while true", "while"},
+      ExpectedHint{" // for true", "forcond"},
+      ExpectedHint{" // for I", "forvar"},
+      ExpectedHint{" // for V", "foreach"});
+}
+
+TEST(BlockEndHints, Switch) {
+  assertBlockEndHints(
+      R"cpp(
+    void foo(int I) {
+      switch (I) {
+        case 0: break;
+      $switch[[}]]
+    } // suppress
+  )cpp",
+      ExpectedHint{" // switch I", "switch"});
+}
+
+TEST(BlockEndHints, PrintLiterals) {
+  assertBlockEndHints(
+      R"cpp(
+    void foo() {
+      while ("foo") {
+      $string[[}]]
+
+      while ("foo but this time it is very long") {
+      $string_long[[}]]
+
+      while (true) {
+      $boolean[[}]]
+
+      while (1) {
+      $integer[[}]]
+
+      while (1.5) {
+      $float[[}]]
+    } // suppress
+  )cpp",
+      ExpectedHint{" // while \"foo\"", "string"},
+      ExpectedHint{" // while \"foo but...\"", "string_long"},
+      ExpectedHint{" // while true", "boolean"},
+      ExpectedHint{" // while 1", "integer"},
+      ExpectedHint{" // while 1.5", "float"});
+}
+
+TEST(BlockEndHints, PrintRefs) {
+  assertBlockEndHints(
+      R"cpp(
+    namespace ns {
+      int Var;
+      int func();
+      struct S {
+        int Field;
+        int method() const;
+      }; // suppress
+    } // suppress
+    void foo() {
+      while (ns::Var) {
+      $var[[}]]
+
+      while (ns::func()) {
+      $func[[}]]
+
+      while (ns::S{}.Field) {
+      $field[[}]]
+
+      while (ns::S{}.method()) {
+      $method[[}]]
+    } // suppress
+  )cpp",
+      ExpectedHint{" // while Var", "var"},
+      ExpectedHint{" // while func", "func"},
+      ExpectedHint{" // while Field", "field"},
+      ExpectedHint{" // while method", "method"});
+}
+
+TEST(BlockEndHints, PrintConversions) {
+  assertBlockEndHints(
+      R"cpp(
+    struct S {
+      S(int);
+      S(int, int);
+      explicit operator bool();
+    }; // suppress
+    void foo(int I) {
+      while (float(I)) {
+      $convert_primitive[[}]]
+
+      while (S(I)) {
+      $convert_class[[}]]
+
+      while (S(I, I)) {
+      $construct_class[[}]]
+    } // suppress
+  )cpp",
+      ExpectedHint{" // while float", "convert_primitive"},
+      ExpectedHint{" // while S", "convert_class"},
+      ExpectedHint{" // while S", "construct_class"});
+}
+
+TEST(BlockEndHints, PrintOperators) {
+  std::string AnnotatedCode = R"cpp(
+    void foo(Integer I) {
+      while(++I){
+      $preinc[[}]]
+
+      while(I++){
+      $postinc[[}]]
+
+      while(+(I + I)){
+      $unary_complex[[}]]
+
+      while(I < 0){
+      $compare[[}]]
+
+      while((I + I) < I){
+      $lhs_complex[[}]]
+
+      while(I < (I + I)){
+      $rhs_complex[[}]]
+
+      while((I + I) < (I + I)){
+      $binary_complex[[}]]
+    } // suppress
+  )cpp";
+
+  // We can't store shared expectations in a vector, assertHints uses varargs.
+  auto AssertExpectedHints = [&](llvm::StringRef Code) {
+    assertBlockEndHints(Code, ExpectedHint{" // while ++I", "preinc"},
+                        ExpectedHint{" // while I++", "postinc"},
+                        ExpectedHint{" // while", "unary_complex"},
+                        ExpectedHint{" // while I < 0", "compare"},
+                        ExpectedHint{" // while ... < I", "lhs_complex"},
+                        ExpectedHint{" // while I < ...", "rhs_complex"},
+                        ExpectedHint{" // while", "binary_complex"});
+  };
+
+  // First with built-in operators.
+  AssertExpectedHints("using Integer = int;" + AnnotatedCode);
+  // And now with overloading!
+  AssertExpectedHints(R"cpp(
+    struct Integer {
+      explicit operator bool();
+      Integer operator++();
+      Integer operator++(int);
+      Integer operator+(Integer);
+      Integer operator+();
+      bool operator<(Integer);
+      bool operator<(int);
+    }; // suppress
+  )cpp" + AnnotatedCode);
 }
 
 TEST(BlockEndHints, TrailingSemicolon) {

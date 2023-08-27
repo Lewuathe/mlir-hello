@@ -40,7 +40,7 @@ endif()
 
 if(OS_NAME MATCHES "Linux")
   set(ALL_FUZZER_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${S390X}
-      ${RISCV64})
+      ${RISCV64} ${LOONGARCH64})
 elseif (OS_NAME MATCHES "Windows")
   set(ALL_FUZZER_SUPPORTED_ARCH ${X86} ${X86_64})
 elseif(OS_NAME MATCHES "Android")
@@ -85,7 +85,11 @@ endif()
 set(ALL_SHADOWCALLSTACK_SUPPORTED_ARCH ${ARM64})
 
 if (UNIX)
-set(ALL_ORC_SUPPORTED_ARCH ${X86_64} ${ARM64} ${ARM32})
+  if (OS_NAME MATCHES "Linux")
+    set(ALL_ORC_SUPPORTED_ARCH ${X86_64} ${ARM64} ${ARM32} ${PPC64})
+  else()
+    set(ALL_ORC_SUPPORTED_ARCH ${X86_64} ${ARM64} ${ARM32})
+  endif()
 endif()
 
 if (WIN32)

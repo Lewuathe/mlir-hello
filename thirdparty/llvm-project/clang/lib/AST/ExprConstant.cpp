@@ -50,6 +50,7 @@
 #include "clang/AST/StmtVisitor.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/Builtins.h"
+#include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/APFixedPoint.h"
 #include "llvm/ADT/SmallBitVector.h"
@@ -550,8 +551,8 @@ namespace {
     /// Temporaries - Temporary lvalues materialized within this stack frame.
     MapTy Temporaries;
 
-    /// CallLoc - The location of the call expression for this call.
-    SourceLocation CallLoc;
+    /// CallRange - The source range of the call expression for this call.
+    SourceRange CallRange;
 
     /// Index - The call index of this call.
     unsigned Index;
@@ -585,7 +586,7 @@ namespace {
     llvm::DenseMap<const ValueDecl *, FieldDecl *> LambdaCaptureFields;
     FieldDecl *LambdaThisCaptureField = nullptr;
 
-    CallStackFrame(EvalInfo &Info, SourceLocation CallLoc,
+    CallStackFrame(EvalInfo &Info, SourceRange CallRange,
                    const FunctionDecl *Callee, const LValue *This,
                    const Expr *CallExpr, CallRef Arguments);
     ~CallStackFrame();
@@ -629,7 +630,7 @@ namespace {
     void describe(llvm::raw_ostream &OS) const override;
 
     Frame *getCaller() const override { return Caller; }
-    SourceLocation getCallLocation() const override { return CallLoc; }
+    SourceRange getCallRange() const override { return CallRange; }
     const FunctionDecl *getCallee() const override { return Callee; }
 
     bool isStdFunction() const {
@@ -1016,6 +1017,34 @@ namespace {
       FFDiag(Loc, diag::note_constexpr_depth_limit_exceeded)
         << getLangOpts().ConstexprCallDepth;
       return false;
+    }
+
+    bool CheckArraySize(SourceLocation Loc, unsigned BitWidth,
+                        uint64_t ElemCount, bool Diag) {
+      // FIXME: GH63562
+      // APValue stores array extents as unsigned,
+      // so anything that is greater that unsigned would overflow when
+      // constructing the array, we catch this here.
+      if (BitWidth > ConstantArrayType::getMaxSizeBits(Ctx) ||
+          ElemCount > uint64_t(std::numeric_limits<unsigned>::max())) {
+        if (Diag)
+          FFDiag(Loc, diag::note_constexpr_new_too_large) << ElemCount;
+        return false;
+      }
+
+      // FIXME: GH63562
+      // Arrays allocate an APValue per element.
+      // We use the number of constexpr steps as a proxy for the maximum size
+      // of arrays to avoid exhausting the system resources, as initialization
+      // of each element is likely to take some number of steps anyway.
+      uint64_t Limit = Ctx.getLangOpts().ConstexprStepLimit;
+      if (ElemCount > Limit) {
+        if (Diag)
+          FFDiag(Loc, diag::note_constexpr_new_exceeds_limits)
+              << ElemCount << Limit;
+        return false;
+      }
+      return true;
     }
 
     std::pair<CallStackFrame *, unsigned>
@@ -1439,11 +1468,11 @@ void SubobjectDesignator::diagnosePointerArithmetic(EvalInfo &Info,
   setInvalid();
 }
 
-CallStackFrame::CallStackFrame(EvalInfo &Info, SourceLocation CallLoc,
+CallStackFrame::CallStackFrame(EvalInfo &Info, SourceRange CallRange,
                                const FunctionDecl *Callee, const LValue *This,
                                const Expr *CallExpr, CallRef Call)
     : Info(Info), Caller(Info.CurrentCall), Callee(Callee), This(This),
-      CallExpr(CallExpr), Arguments(Call), CallLoc(CallLoc),
+      CallExpr(CallExpr), Arguments(Call), CallRange(CallRange),
       Index(Info.NextCallIndex++) {
   Info.CurrentCall = this;
   ++Info.CallStackDepth;
@@ -1921,7 +1950,8 @@ void CallStackFrame::describe(raw_ostream &Out) const {
                       cast<CXXMethodDecl>(Callee)->isInstance();
 
   if (!IsMemberCall)
-    Out << *Callee << '(';
+    Callee->getNameForDiagnostic(Out, Info.Ctx.getPrintingPolicy(),
+                                 /*Qualified=*/false);
 
   if (This && IsMemberCall) {
     if (const auto *MCE = dyn_cast_if_present<CXXMemberCallExpr>(CallExpr)) {
@@ -1946,9 +1976,12 @@ void CallStackFrame::describe(raw_ostream &Out) const {
           Info.Ctx.getLValueReferenceType(This->Designator.MostDerivedType));
       Out << ".";
     }
-    Out << *Callee << '(';
+    Callee->getNameForDiagnostic(Out, Info.Ctx.getPrintingPolicy(),
+                                 /*Qualified=*/false);
     IsMemberCall = false;
   }
+
+  Out << '(';
 
   for (FunctionDecl::param_const_iterator I = Callee->param_begin(),
        E = Callee->param_end(); I != E; ++I, ++ArgIndex) {
@@ -1995,7 +2028,8 @@ static bool IsGlobalLValue(APValue::LValueBase B) {
 
   // ... a null pointer value, or a prvalue core constant expression of type
   // std::nullptr_t.
-  if (!B) return true;
+  if (!B)
+    return true;
 
   if (const ValueDecl *D = B.dyn_cast<const ValueDecl*>()) {
     // ... the address of an object with static storage duration,
@@ -2126,6 +2160,7 @@ static void NoteLValueLocation(EvalInfo &Info, APValue::LValueBase Base) {
       Info.Note((*Alloc)->AllocExpr->getExprLoc(),
                 diag::note_constexpr_dynamic_alloc_here);
   }
+
   // We have no information to show for a typeid(T) object.
 }
 
@@ -2415,9 +2450,16 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
     if (const CXXRecordDecl *CD = dyn_cast<CXXRecordDecl>(RD)) {
       unsigned BaseIndex = 0;
       for (const CXXBaseSpecifier &BS : CD->bases()) {
-        if (!CheckEvaluationResult(CERK, Info, DiagLoc, BS.getType(),
-                                   Value.getStructBase(BaseIndex), Kind,
-                                   /*SubobjectDecl=*/nullptr, CheckedTemps))
+        const APValue &BaseValue = Value.getStructBase(BaseIndex);
+        if (!BaseValue.hasValue()) {
+          SourceLocation TypeBeginLoc = BS.getBaseTypeLoc();
+          Info.FFDiag(TypeBeginLoc, diag::note_constexpr_uninitialized_base)
+              << BS.getType() << SourceRange(TypeBeginLoc, BS.getEndLoc());
+          return false;
+        }
+        if (!CheckEvaluationResult(CERK, Info, DiagLoc, BS.getType(), BaseValue,
+                                   Kind, /*SubobjectDecl=*/nullptr,
+                                   CheckedTemps))
           return false;
         ++BaseIndex;
       }
@@ -2756,16 +2798,16 @@ static bool CheckedIntArithmetic(EvalInfo &Info, const Expr *E,
     if (Info.checkingForUndefinedBehavior())
       Info.Ctx.getDiagnostics().Report(E->getExprLoc(),
                                        diag::warn_integer_constant_overflow)
-          << toString(Result, 10) << E->getType();
+          << toString(Result, 10) << E->getType() << E->getSourceRange();
     return HandleOverflow(Info, E, Value, E->getType());
   }
   return true;
 }
 
 /// Perform the given binary integer operation.
-static bool handleIntIntBinOp(EvalInfo &Info, const Expr *E, const APSInt &LHS,
-                              BinaryOperatorKind Opcode, APSInt RHS,
-                              APSInt &Result) {
+static bool handleIntIntBinOp(EvalInfo &Info, const BinaryOperator *E,
+                              const APSInt &LHS, BinaryOperatorKind Opcode,
+                              APSInt RHS, APSInt &Result) {
   bool HandleOverflowResult = true;
   switch (Opcode) {
   default:
@@ -2786,7 +2828,8 @@ static bool handleIntIntBinOp(EvalInfo &Info, const Expr *E, const APSInt &LHS,
   case BO_Div:
   case BO_Rem:
     if (RHS == 0) {
-      Info.FFDiag(E, diag::note_expr_divide_by_zero);
+      Info.FFDiag(E, diag::note_expr_divide_by_zero)
+          << E->getRHS()->getSourceRange();
       return false;
     }
     // Check for overflow case: INT_MIN / -1 or INT_MIN % -1. APSInt supports
@@ -3580,6 +3623,14 @@ static bool lifetimeStartedInEvaluation(EvalInfo &Info,
   llvm_unreachable("unknown evaluating decl kind");
 }
 
+static bool CheckArraySize(EvalInfo &Info, const ConstantArrayType *CAT,
+                           SourceLocation CallLoc = {}) {
+  return Info.CheckArraySize(
+      CAT->getSizeExpr() ? CAT->getSizeExpr()->getBeginLoc() : CallLoc,
+      CAT->getNumAddressingBits(Info.Ctx), CAT->getSize().getZExtValue(),
+      /*Diag=*/true);
+}
+
 namespace {
 /// A handle to a complete object (an object that is not a subobject of
 /// another object).
@@ -3754,6 +3805,9 @@ findSubobject(EvalInfo &Info, const Expr *E, const CompleteObject &Obj,
       if (O->getArrayInitializedElts() > Index)
         O = &O->getArrayInitializedElt(Index);
       else if (!isRead(handler.AccessKind)) {
+        if (!CheckArraySize(Info, CAT, E->getExprLoc()))
+          return handler.failed();
+
         expandArray(*O, Index);
         O = &O->getArrayInitializedElt(Index);
       } else
@@ -5224,7 +5278,7 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
       return ESR_Succeeded;
     }
 
-    Info.FFDiag(S->getBeginLoc());
+    Info.FFDiag(S->getBeginLoc()) << S->getSourceRange();
     return ESR_Failed;
 
   case Stmt::NullStmtClass:
@@ -6191,7 +6245,7 @@ static bool HandleFunctionCall(SourceLocation CallLoc,
   if (!Info.CheckCallLimit(CallLoc))
     return false;
 
-  CallStackFrame Frame(Info, CallLoc, Callee, This, E, Call);
+  CallStackFrame Frame(Info, E->getSourceRange(), Callee, This, E, Call);
 
   // For a trivial copy or move assignment, perform an APValue copy. This is
   // essential for unions, where the operations performed by the assignment
@@ -6256,7 +6310,7 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
       Info,
       ObjectUnderConstruction{This.getLValueBase(), This.Designator.Entries},
       RD->getNumBases());
-  CallStackFrame Frame(Info, CallLoc, Definition, &This, E, Call);
+  CallStackFrame Frame(Info, E->getSourceRange(), Definition, &This, E, Call);
 
   // FIXME: Creating an APValue just to hold a nonexistent return value is
   // wasteful.
@@ -6464,7 +6518,7 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
          CallScope.destroy();
 }
 
-static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
+static bool HandleDestructionImpl(EvalInfo &Info, SourceRange CallRange,
                                   const LValue &This, APValue &Value,
                                   QualType T) {
   // Objects can only be destroyed while they're within their lifetimes.
@@ -6474,19 +6528,23 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
   if (Value.isAbsent() && !T->isNullPtrType()) {
     APValue Printable;
     This.moveInto(Printable);
-    Info.FFDiag(CallLoc, diag::note_constexpr_destroy_out_of_lifetime)
-      << Printable.getAsString(Info.Ctx, Info.Ctx.getLValueReferenceType(T));
+    Info.FFDiag(CallRange.getBegin(),
+                diag::note_constexpr_destroy_out_of_lifetime)
+        << Printable.getAsString(Info.Ctx, Info.Ctx.getLValueReferenceType(T));
     return false;
   }
 
   // Invent an expression for location purposes.
   // FIXME: We shouldn't need to do this.
-  OpaqueValueExpr LocE(CallLoc, Info.Ctx.IntTy, VK_PRValue);
+  OpaqueValueExpr LocE(CallRange.getBegin(), Info.Ctx.IntTy, VK_PRValue);
 
   // For arrays, destroy elements right-to-left.
   if (const ConstantArrayType *CAT = Info.Ctx.getAsConstantArrayType(T)) {
     uint64_t Size = CAT->getSize().getZExtValue();
     QualType ElemT = CAT->getElementType();
+
+    if (!CheckArraySize(Info, CAT, CallRange.getBegin()))
+      return false;
 
     LValue ElemLV = This;
     ElemLV.addArray(Info, &LocE, CAT);
@@ -6502,7 +6560,7 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
     for (; Size != 0; --Size) {
       APValue &Elem = Value.getArrayInitializedElt(Size - 1);
       if (!HandleLValueArrayAdjustment(Info, &LocE, ElemLV, ElemT, -1) ||
-          !HandleDestructionImpl(Info, CallLoc, ElemLV, Elem, ElemT))
+          !HandleDestructionImpl(Info, CallRange, ElemLV, Elem, ElemT))
         return false;
     }
 
@@ -6514,7 +6572,9 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
   const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
   if (!RD) {
     if (T.isDestructedType()) {
-      Info.FFDiag(CallLoc, diag::note_constexpr_unsupported_destruction) << T;
+      Info.FFDiag(CallRange.getBegin(),
+                  diag::note_constexpr_unsupported_destruction)
+          << T;
       return false;
     }
 
@@ -6523,13 +6583,13 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
   }
 
   if (RD->getNumVBases()) {
-    Info.FFDiag(CallLoc, diag::note_constexpr_virtual_base) << RD;
+    Info.FFDiag(CallRange.getBegin(), diag::note_constexpr_virtual_base) << RD;
     return false;
   }
 
   const CXXDestructorDecl *DD = RD->getDestructor();
   if (!DD && !RD->hasTrivialDestructor()) {
-    Info.FFDiag(CallLoc);
+    Info.FFDiag(CallRange.getBegin());
     return false;
   }
 
@@ -6548,16 +6608,16 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
     return true;
   }
 
-  if (!Info.CheckCallLimit(CallLoc))
+  if (!Info.CheckCallLimit(CallRange.getBegin()))
     return false;
 
   const FunctionDecl *Definition = nullptr;
   const Stmt *Body = DD->getBody(Definition);
 
-  if (!CheckConstexprFunction(Info, CallLoc, DD, Definition, Body))
+  if (!CheckConstexprFunction(Info, CallRange.getBegin(), DD, Definition, Body))
     return false;
 
-  CallStackFrame Frame(Info, CallLoc, Definition, &This, /*CallExpr=*/nullptr,
+  CallStackFrame Frame(Info, CallRange, Definition, &This, /*CallExpr=*/nullptr,
                        CallRef());
 
   // We're now in the period of destruction of this object.
@@ -6572,7 +6632,7 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
     // (Note that formally the lifetime ends when the period of destruction
     // begins, even though certain uses of the object remain valid until the
     // period of destruction ends.)
-    Info.FFDiag(CallLoc, diag::note_constexpr_double_destroy);
+    Info.FFDiag(CallRange.getBegin(), diag::note_constexpr_double_destroy);
     return false;
   }
 
@@ -6601,7 +6661,7 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
       return false;
 
     APValue *SubobjectValue = &Value.getStructField(FD->getFieldIndex());
-    if (!HandleDestructionImpl(Info, CallLoc, Subobject, *SubobjectValue,
+    if (!HandleDestructionImpl(Info, CallRange, Subobject, *SubobjectValue,
                                FD->getType()))
       return false;
   }
@@ -6620,7 +6680,7 @@ static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
       return false;
 
     APValue *SubobjectValue = &Value.getStructBase(BasesLeft);
-    if (!HandleDestructionImpl(Info, CallLoc, Subobject, *SubobjectValue,
+    if (!HandleDestructionImpl(Info, CallRange, Subobject, *SubobjectValue,
                                BaseType))
       return false;
   }
@@ -6641,7 +6701,7 @@ struct DestroyObjectHandler {
   typedef bool result_type;
   bool failed() { return false; }
   bool found(APValue &Subobj, QualType SubobjType) {
-    return HandleDestructionImpl(Info, E->getExprLoc(), This, Subobj,
+    return HandleDestructionImpl(Info, E->getSourceRange(), This, Subobj,
                                  SubobjType);
   }
   bool found(APSInt &Value, QualType SubobjType) {
@@ -6678,7 +6738,7 @@ static bool HandleDestruction(EvalInfo &Info, SourceLocation Loc,
   return HandleDestructionImpl(Info, Loc, LV, Value, T);
 }
 
-/// Perform a call to 'perator new' or to `__builtin_operator_new'.
+/// Perform a call to 'operator new' or to `__builtin_operator_new'.
 static bool HandleOperatorNewCall(EvalInfo &Info, const CallExpr *E,
                                   LValue &Result) {
   if (Info.checkingPotentialConstantExpression() ||
@@ -6724,13 +6784,12 @@ static bool HandleOperatorNewCall(EvalInfo &Info, const CallExpr *E,
     return false;
   }
 
-  if (ByteSize.getActiveBits() > ConstantArrayType::getMaxSizeBits(Info.Ctx)) {
+  if (!Info.CheckArraySize(E->getBeginLoc(), ByteSize.getActiveBits(),
+                           Size.getZExtValue(), /*Diag=*/!IsNothrow)) {
     if (IsNothrow) {
       Result.setNull(Info.Ctx, E->getType());
       return true;
     }
-
-    Info.FFDiag(E, diag::note_constexpr_new_too_large) << APSInt(Size, true);
     return false;
   }
 
@@ -7451,7 +7510,7 @@ public:
   /// Report an evaluation error. This should only be called when an error is
   /// first discovered. When propagating an error, just return false.
   bool Error(const Expr *E, diag::kind D) {
-    Info.FFDiag(E, D);
+    Info.FFDiag(E, D) << E->getSourceRange();
     return false;
   }
   bool Error(const Expr *E) {
@@ -8388,8 +8447,8 @@ bool LValueExprEvaluator::VisitMaterializeTemporaryExpr(
       E->getSubExpr()->skipRValueSubobjectAdjustments(CommaLHSs, Adjustments);
 
   // If we passed any comma operators, evaluate their LHSs.
-  for (unsigned I = 0, N = CommaLHSs.size(); I != N; ++I)
-    if (!EvaluateIgnoredValue(Info, CommaLHSs[I]))
+  for (const Expr *E : CommaLHSs)
+    if (!EvaluateIgnoredValue(Info, E))
       return false;
 
   // A materialized temporary with static storage duration can appear within the
@@ -8397,6 +8456,8 @@ bool LValueExprEvaluator::VisitMaterializeTemporaryExpr(
   // value for use outside this evaluation.
   APValue *Value;
   if (E->getStorageDuration() == SD_Static) {
+    if (Info.EvalMode == EvalInfo::EM_ConstantFold)
+      return false;
     // FIXME: What about SD_Thread?
     Value = E->getOrCreateValue(true);
     *Value = APValue();
@@ -8511,7 +8572,7 @@ bool LValueExprEvaluator::VisitMemberExpr(const MemberExpr *E) {
 bool LValueExprEvaluator::VisitArraySubscriptExpr(const ArraySubscriptExpr *E) {
   // FIXME: Deal with vectors as array subscript bases.
   if (E->getBase()->getType()->isVectorType() ||
-      E->getBase()->getType()->isVLSTBuiltinType())
+      E->getBase()->getType()->isSveVLSBuiltinType())
     return Error(E);
 
   APSInt Index;
@@ -9612,14 +9673,12 @@ bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
 
     //   -- its value is such that the size of the allocated object would
     //      exceed the implementation-defined limit
-    if (ConstantArrayType::getNumAddressingBits(Info.Ctx, AllocType,
-                                                ArrayBound) >
-        ConstantArrayType::getMaxSizeBits(Info.Ctx)) {
+    if (!Info.CheckArraySize(ArraySize.value()->getExprLoc(),
+                             ConstantArrayType::getNumAddressingBits(
+                                 Info.Ctx, AllocType, ArrayBound),
+                             ArrayBound.getZExtValue(), /*Diag=*/!IsNothrow)) {
       if (IsNothrow)
         return ZeroInitialization(E);
-
-      Info.FFDiag(*ArraySize, diag::note_constexpr_new_too_large)
-        << ArrayBound << (*ArraySize)->getSourceRange();
       return false;
     }
 
@@ -12068,11 +12127,21 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
   case Builtin::BI__builtin_clz:
   case Builtin::BI__builtin_clzl:
   case Builtin::BI__builtin_clzll:
-  case Builtin::BI__builtin_clzs: {
+  case Builtin::BI__builtin_clzs:
+  case Builtin::BI__lzcnt16: // Microsoft variants of count leading-zeroes
+  case Builtin::BI__lzcnt:
+  case Builtin::BI__lzcnt64: {
     APSInt Val;
     if (!EvaluateInteger(E->getArg(0), Val, Info))
       return false;
-    if (!Val)
+
+    // When the argument is 0, the result of GCC builtins is undefined, whereas
+    // for Microsoft intrinsics, the result is the bit-width of the argument.
+    bool ZeroIsUndefined = BuiltinOp != Builtin::BI__lzcnt16 &&
+                           BuiltinOp != Builtin::BI__lzcnt &&
+                           BuiltinOp != Builtin::BI__lzcnt64;
+
+    if (ZeroIsUndefined && !Val)
       return Error(E);
 
     return Success(Val.countl_zero(), E);
@@ -12101,8 +12170,9 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
           Callee->getIdentifier()->isStr("is_constant_evaluated")))) {
       // FIXME: Find a better way to avoid duplicated diagnostics.
       if (Info.EvalStatus.Diag)
-        Info.report((Info.CallStackDepth == 1) ? E->getExprLoc()
-                                               : Info.CurrentCall->CallLoc,
+        Info.report((Info.CallStackDepth == 1)
+                        ? E->getExprLoc()
+                        : Info.CurrentCall->getCallRange().getBegin(),
                     diag::warn_is_constant_evaluated_always_true_constexpr)
             << (Info.CallStackDepth == 1 ? "__builtin_is_constant_evaluated"
                                          : "std::is_constant_evaluated");
@@ -12211,7 +12281,10 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
 
   case Builtin::BI__builtin_popcount:
   case Builtin::BI__builtin_popcountl:
-  case Builtin::BI__builtin_popcountll: {
+  case Builtin::BI__builtin_popcountll:
+  case Builtin::BI__popcnt16: // Microsoft variants of popcount
+  case Builtin::BI__popcnt:
+  case Builtin::BI__popcnt64: {
     APSInt Val;
     if (!EvaluateInteger(E->getArg(0), Val, Info))
       return false;
@@ -13570,7 +13643,7 @@ bool IntExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {
       if (Info.checkingForUndefinedBehavior())
         Info.Ctx.getDiagnostics().Report(E->getExprLoc(),
                                          diag::warn_integer_constant_overflow)
-            << toString(Value, 10) << E->getType();
+            << toString(Value, 10) << E->getType() << E->getSourceRange();
 
       if (!HandleOverflow(Info, E, -Value.extend(Value.getBitWidth() + 1),
                           E->getType()))
@@ -13768,7 +13841,7 @@ bool IntExprEvaluator::VisitCastExpr(const CastExpr *E) {
 
   case CK_PointerToIntegral: {
     CCEDiag(E, diag::note_constexpr_invalid_cast)
-        << 2 << Info.Ctx.getLangOpts().CPlusPlus;
+        << 2 << Info.Ctx.getLangOpts().CPlusPlus << E->getSourceRange();
 
     LValue LV;
     if (!EvaluatePointer(SubExpr, LV, Info))
@@ -15213,14 +15286,6 @@ static bool FastEvaluateAsRValue(const Expr *Exp, Expr::EvalResult &Result,
     return true;
   }
 
-  // FIXME: Evaluating values of large array and record types can cause
-  // performance problems. Only do so in C++11 for now.
-  if (Exp->isPRValue() &&
-      (Exp->getType()->isArrayType() || Exp->getType()->isRecordType()) &&
-      !Ctx.getLangOpts().CPlusPlus11) {
-    IsConst = false;
-    return true;
-  }
   return false;
 }
 
@@ -15462,17 +15527,11 @@ bool Expr::EvaluateAsInitializer(APValue &Value, const ASTContext &Ctx,
     return Name;
   });
 
-  // FIXME: Evaluating initializers for large array and record types can cause
-  // performance problems. Only do so in C++11 for now.
-  if (isPRValue() && (getType()->isArrayType() || getType()->isRecordType()) &&
-      !Ctx.getLangOpts().CPlusPlus11)
-    return false;
-
   Expr::EvalStatus EStatus;
   EStatus.Diag = &Notes;
 
   EvalInfo Info(Ctx, EStatus,
-                (IsConstantInitialization && Ctx.getLangOpts().CPlusPlus11)
+                (IsConstantInitialization && Ctx.getLangOpts().CPlusPlus)
                     ? EvalInfo::EM_ConstantExpression
                     : EvalInfo::EM_ConstantFold);
   Info.setEvaluatingDecl(VD, Value);
@@ -16377,6 +16436,45 @@ static bool EvaluateBuiltinStrLen(const Expr *E, uint64_t &Result,
     if (!HandleLValueArrayAdjustment(Info, E, String, CharTy, 1))
       return false;
   }
+}
+
+bool Expr::EvaluateCharRangeAsString(std::string &Result,
+                                     const Expr *SizeExpression,
+                                     const Expr *PtrExpression, ASTContext &Ctx,
+                                     EvalResult &Status) const {
+  LValue String;
+  EvalInfo Info(Ctx, Status, EvalInfo::EM_ConstantExpression);
+  Info.InConstantContext = true;
+
+  FullExpressionRAII Scope(Info);
+  APSInt SizeValue;
+  if (!::EvaluateInteger(SizeExpression, SizeValue, Info))
+    return false;
+
+  int64_t Size = SizeValue.getExtValue();
+
+  if (!::EvaluatePointer(PtrExpression, String, Info))
+    return false;
+
+  QualType CharTy = PtrExpression->getType()->getPointeeType();
+  for (int64_t I = 0; I < Size; ++I) {
+    APValue Char;
+    if (!handleLValueToRValueConversion(Info, PtrExpression, CharTy, String,
+                                        Char))
+      return false;
+
+    APSInt C = Char.getInt();
+    Result.push_back(static_cast<char>(C.getExtValue()));
+    if (!HandleLValueArrayAdjustment(Info, PtrExpression, String, CharTy, 1))
+      return false;
+  }
+  if (!Scope.destroy())
+    return false;
+
+  if (!CheckMemoryLeaks(Info))
+    return false;
+
+  return true;
 }
 
 bool Expr::tryEvaluateStrLen(uint64_t &Result, ASTContext &Ctx) const {

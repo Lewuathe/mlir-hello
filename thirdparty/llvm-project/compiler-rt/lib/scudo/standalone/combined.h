@@ -299,7 +299,7 @@ public:
 #endif
   }
 
-  uptr computeOddEvenMaskForPointerMaybe(Options Options, uptr Ptr,
+  uptr computeOddEvenMaskForPointerMaybe(const Options &Options, uptr Ptr,
                                          uptr ClassId) {
     if (!Options.get(OptionBit::UseOddEvenTags))
       return 0;
@@ -754,6 +754,13 @@ public:
     Str.output();
   }
 
+  void printFragmentationInfo() {
+    ScopedString Str;
+    Primary.getFragmentationInfo(&Str);
+    // Secondary allocator dumps the fragmentation data in getStats().
+    Str.output();
+  }
+
   void releaseToOS(ReleaseToOS ReleaseType) {
     initThreadMaybe();
     if (ReleaseType == ReleaseToOS::ForceAll)
@@ -1134,7 +1141,7 @@ private:
            reinterpret_cast<uptr>(Ptr) - SizeOrUnusedBytes;
   }
 
-  void quarantineOrDeallocateChunk(Options Options, void *TaggedPtr,
+  void quarantineOrDeallocateChunk(const Options &Options, void *TaggedPtr,
                                    Chunk::UnpackedHeader *Header,
                                    uptr Size) NO_THREAD_SAFETY_ANALYSIS {
     void *Ptr = getHeaderTaggedPointer(TaggedPtr);
@@ -1273,7 +1280,7 @@ private:
     storeEndMarker(RoundNewPtr, NewSize, BlockEnd);
   }
 
-  void storePrimaryAllocationStackMaybe(Options Options, void *Ptr) {
+  void storePrimaryAllocationStackMaybe(const Options &Options, void *Ptr) {
     if (!UNLIKELY(Options.get(OptionBit::TrackAllocationStacks)))
       return;
     auto *Ptr32 = reinterpret_cast<u32 *>(Ptr);
@@ -1305,7 +1312,7 @@ private:
     atomic_store_relaxed(&Entry->Ptr, reinterpret_cast<uptr>(Ptr));
   }
 
-  void storeSecondaryAllocationStackMaybe(Options Options, void *Ptr,
+  void storeSecondaryAllocationStackMaybe(const Options &Options, void *Ptr,
                                           uptr Size) {
     if (!UNLIKELY(Options.get(OptionBit::TrackAllocationStacks)))
       return;
@@ -1320,8 +1327,8 @@ private:
     storeRingBufferEntry(untagPointer(Ptr), Trace, Tid, Size, 0, 0);
   }
 
-  void storeDeallocationStackMaybe(Options Options, void *Ptr, u8 PrevTag,
-                                   uptr Size) {
+  void storeDeallocationStackMaybe(const Options &Options, void *Ptr,
+                                   u8 PrevTag, uptr Size) {
     if (!UNLIKELY(Options.get(OptionBit::TrackAllocationStacks)))
       return;
 

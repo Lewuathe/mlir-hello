@@ -424,10 +424,10 @@ define i1 @allzeros_v16i16_sign(<16 x i16> %arg) {
 define i1 @allones_v32i16_sign(<32 x i16> %arg) {
 ; SSE-LABEL: allones_v32i16_sign:
 ; SSE:       # %bb.0:
-; SSE-NEXT:    pand %xmm3, %xmm1
-; SSE-NEXT:    pand %xmm2, %xmm0
 ; SSE-NEXT:    packsswb %xmm1, %xmm0
-; SSE-NEXT:    pmovmskb %xmm0, %eax
+; SSE-NEXT:    packsswb %xmm3, %xmm2
+; SSE-NEXT:    pand %xmm0, %xmm2
+; SSE-NEXT:    pmovmskb %xmm2, %eax
 ; SSE-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
 ; SSE-NEXT:    sete %al
 ; SSE-NEXT:    retq
@@ -488,9 +488,9 @@ define i1 @allones_v32i16_sign(<32 x i16> %arg) {
 define i1 @allzeros_v32i16_sign(<32 x i16> %arg) {
 ; SSE-LABEL: allzeros_v32i16_sign:
 ; SSE:       # %bb.0:
-; SSE-NEXT:    por %xmm3, %xmm1
-; SSE-NEXT:    por %xmm2, %xmm0
+; SSE-NEXT:    packsswb %xmm3, %xmm2
 ; SSE-NEXT:    packsswb %xmm1, %xmm0
+; SSE-NEXT:    por %xmm2, %xmm0
 ; SSE-NEXT:    pmovmskb %xmm0, %eax
 ; SSE-NEXT:    testl %eax, %eax
 ; SSE-NEXT:    sete %al
@@ -764,7 +764,7 @@ define i1 @allzeros_v16i32_sign(<16 x i32> %arg) {
 define i1 @allones_v4i64_sign(<4 x i64> %arg) {
 ; SSE-LABEL: allones_v4i64_sign:
 ; SSE:       # %bb.0:
-; SSE-NEXT:    packssdw %xmm1, %xmm0
+; SSE-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,3],xmm1[1,3]
 ; SSE-NEXT:    movmskps %xmm0, %eax
 ; SSE-NEXT:    cmpl $15, %eax
 ; SSE-NEXT:    sete %al
@@ -803,7 +803,7 @@ define i1 @allones_v4i64_sign(<4 x i64> %arg) {
 define i1 @allzeros_v4i64_sign(<4 x i64> %arg) {
 ; SSE-LABEL: allzeros_v4i64_sign:
 ; SSE:       # %bb.0:
-; SSE-NEXT:    packssdw %xmm1, %xmm0
+; SSE-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,3],xmm1[1,3]
 ; SSE-NEXT:    movmskps %xmm0, %eax
 ; SSE-NEXT:    testl %eax, %eax
 ; SSE-NEXT:    sete %al
@@ -2051,7 +2051,7 @@ define i1 @allones_v4i64_and1(<4 x i64> %arg) {
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    psllq $63, %xmm1
 ; SSE-NEXT:    psllq $63, %xmm0
-; SSE-NEXT:    packssdw %xmm1, %xmm0
+; SSE-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,3],xmm1[1,3]
 ; SSE-NEXT:    movmskps %xmm0, %eax
 ; SSE-NEXT:    cmpl $15, %eax
 ; SSE-NEXT:    sete %al
@@ -3252,7 +3252,7 @@ define i1 @allones_v4i64_and4(<4 x i64> %arg) {
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    psllq $61, %xmm1
 ; SSE-NEXT:    psllq $61, %xmm0
-; SSE-NEXT:    packssdw %xmm1, %xmm0
+; SSE-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,3],xmm1[1,3]
 ; SSE-NEXT:    movmskps %xmm0, %eax
 ; SSE-NEXT:    cmpl $15, %eax
 ; SSE-NEXT:    sete %al
@@ -3556,7 +3556,7 @@ define i32 @movmskps(<4 x float> %x) {
 define i32 @movmskpd256(<4 x double> %x) {
 ; SSE-LABEL: movmskpd256:
 ; SSE:       # %bb.0:
-; SSE-NEXT:    packssdw %xmm1, %xmm0
+; SSE-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,3],xmm1[1,3]
 ; SSE-NEXT:    movmskps %xmm0, %eax
 ; SSE-NEXT:    retq
 ;

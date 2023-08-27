@@ -425,9 +425,9 @@ def warn_drv_no_floating_point_registers: Warning<
   InGroup<UnsupportedABI>;
 def warn_ignoring_ftabstop_value : Warning<
   "ignoring invalid -ftabstop value '%0', using default value %1">;
-def warn_drv_overriding_flag_option : Warning<
+def warn_drv_overriding_option : Warning<
   "overriding '%0' option with '%1'">,
-  InGroup<DiagGroup<"overriding-t-option">>;
+  InGroup<DiagGroup<"overriding-option">>;
 def warn_drv_treating_input_as_cxx : Warning<
   "treating '%0' input as '%1' when in C++ mode, this behavior is deprecated">,
   InGroup<Deprecated>;
@@ -575,16 +575,12 @@ def err_drv_unsupported_fpatchable_function_entry_argument : Error<
   "the second argument of '-fpatchable-function-entry' must be smaller than the first argument">;
 
 def warn_drv_unable_to_find_directory_expected : Warning<
-  "unable to find %0 directory, expected to be in '%1'">,
+  "unable to find %0 directory, expected to be in '%1' found via %2">,
   InGroup<InvalidOrNonExistentDirectory>, DefaultIgnore;
 
 def warn_drv_ps_force_pic : Warning<
   "option '%0' was ignored by the %1 toolchain, using '-fPIC'">,
   InGroup<OptionIgnored>;
-
-def warn_drv_ps_sdk_dir : Warning<
-  "environment variable '%0' is set, but points to invalid or nonexistent directory '%1'">,
-  InGroup<InvalidOrNonExistentDirectory>;
 
 def err_drv_defsym_invalid_format : Error<"defsym must be of the form: sym=value: %0">;
 def err_drv_defsym_invalid_symval : Error<"value is not an integer: %0">;

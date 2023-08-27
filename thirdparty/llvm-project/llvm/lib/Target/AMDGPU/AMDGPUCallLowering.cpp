@@ -82,9 +82,10 @@ struct AMDGPUOutgoingValueHandler : public CallLowering::OutgoingValueHandler {
           ExtReg = MIRBuilder.buildBitcast(S32, ExtReg).getReg(0);
       }
 
-      auto ToSGPR = MIRBuilder.buildIntrinsic(Intrinsic::amdgcn_readfirstlane,
-                                              {MRI.getType(ExtReg)}, false)
-        .addReg(ExtReg);
+      auto ToSGPR = MIRBuilder
+                        .buildIntrinsic(Intrinsic::amdgcn_readfirstlane,
+                                        {MRI.getType(ExtReg)})
+                        .addReg(ExtReg);
       ExtReg = ToSGPR.getReg(0);
     }
 
@@ -1354,6 +1355,9 @@ bool AMDGPUCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
 
   auto MIB = MIRBuilder.buildInstrNoInsert(Opc);
   MIB.addDef(TRI->getReturnAddressReg(MF));
+
+  if (!Info.IsConvergent)
+    MIB.setMIFlag(MachineInstr::NoConvergent);
 
   if (!addCallTargetOperands(MIB, MIRBuilder, Info))
     return false;

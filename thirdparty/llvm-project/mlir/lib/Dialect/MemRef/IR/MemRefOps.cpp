@@ -461,8 +461,7 @@ ParseResult AllocaScopeOp::parse(OpAsmParser &parser, OperationState &result) {
 }
 
 void AllocaScopeOp::getSuccessorRegions(
-    std::optional<unsigned> index, ArrayRef<Attribute> operands,
-    SmallVectorImpl<RegionSuccessor> &regions) {
+    std::optional<unsigned> index, SmallVectorImpl<RegionSuccessor> &regions) {
   if (index) {
     regions.push_back(RegionSuccessor(getResults()));
     return;
@@ -1354,7 +1353,7 @@ void ExtractAlignedPointerAsIndexOp::getAsmResultNames(
 
 /// The number and type of the results are inferred from the
 /// shape of the source.
-LogicalResult ExtractStridedMetadataOp::inferReturnTypesAdaptor(
+LogicalResult ExtractStridedMetadataOp::inferReturnTypes(
     MLIRContext *context, std::optional<Location> location,
     ExtractStridedMetadataOp::Adaptor adaptor,
     SmallVectorImpl<Type> &inferredReturnTypes) {

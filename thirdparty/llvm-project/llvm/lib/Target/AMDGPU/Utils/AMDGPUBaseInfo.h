@@ -31,7 +31,6 @@ class MCRegisterClass;
 class MCRegisterInfo;
 class MCSubtargetInfo;
 class StringRef;
-class TargetRegisterClass;
 class Triple;
 class raw_ostream;
 
@@ -548,6 +547,9 @@ bool isMAC(unsigned Opc);
 LLVM_READNONE
 bool isPermlane16(unsigned Opc);
 
+LLVM_READNONE
+bool isGenericAtomic(unsigned Opc);
+
 namespace VOPD {
 
 enum Component : unsigned {
@@ -573,7 +575,7 @@ constexpr unsigned COMPONENTS_NUM = 2;
 class ComponentProps {
 private:
   unsigned SrcOperandsNum = 0;
-  std::optional<unsigned> MandatoryLiteralIdx;
+  unsigned MandatoryLiteralIdx = ~0u;
   bool HasSrc2Acc = false;
 
 public:
@@ -589,13 +591,13 @@ public:
   }
 
   // Return true iif this component has a mandatory literal.
-  bool hasMandatoryLiteral() const { return MandatoryLiteralIdx.has_value(); }
+  bool hasMandatoryLiteral() const { return MandatoryLiteralIdx != ~0u; }
 
   // If this component has a mandatory literal, return component operand
   // index of this literal (i.e. either Component::SRC1 or Component::SRC2).
   unsigned getMandatoryLiteralCompOperandIndex() const {
     assert(hasMandatoryLiteral());
-    return *MandatoryLiteralIdx;
+    return MandatoryLiteralIdx;
   }
 
   // Return true iif this component has operand
@@ -611,8 +613,7 @@ public:
 private:
   bool hasMandatoryLiteralAt(unsigned CompSrcIdx) const {
     assert(CompSrcIdx < Component::MAX_SRC_NUM);
-    return hasMandatoryLiteral() &&
-           *MandatoryLiteralIdx == Component::DST_NUM + CompSrcIdx;
+    return MandatoryLiteralIdx == Component::DST_NUM + CompSrcIdx;
   }
 };
 
@@ -1122,6 +1123,9 @@ bool isEntryFunctionCC(CallingConv::ID CC);
 LLVM_READNONE
 bool isModuleEntryFunctionCC(CallingConv::ID CC);
 
+LLVM_READNONE
+bool isChainCC(CallingConv::ID CC);
+
 bool isKernelCC(const Function *Func);
 
 // FIXME: Remove this when calling conventions cleaned up
@@ -1142,6 +1146,7 @@ bool hasMIMG_R128(const MCSubtargetInfo &STI);
 bool hasA16(const MCSubtargetInfo &STI);
 bool hasG16(const MCSubtargetInfo &STI);
 bool hasPackedD16(const MCSubtargetInfo &STI);
+bool hasGDS(const MCSubtargetInfo &STI);
 unsigned getNSAMaxSize(const MCSubtargetInfo &STI);
 
 bool isSI(const MCSubtargetInfo &STI);
@@ -1202,9 +1207,6 @@ unsigned getRegBitWidth(unsigned RCID);
 
 /// Get the size in bits of a register from the register class \p RC.
 unsigned getRegBitWidth(const MCRegisterClass &RC);
-
-/// Get the size in bits of a register from the register class \p RC.
-unsigned getRegBitWidth(const TargetRegisterClass &RC);
 
 /// Get size of register operand
 unsigned getRegOperandSize(const MCRegisterInfo *MRI, const MCInstrDesc &Desc,
@@ -1329,9 +1331,15 @@ unsigned getNumFlatOffsetBits(const MCSubtargetInfo &ST);
 bool isLegalSMRDImmOffset(const MCSubtargetInfo &ST, int64_t ByteOffset);
 
 LLVM_READNONE
-inline bool isLegal64BitDPPControl(unsigned DC) {
+inline bool isLegalDPALU_DPPControl(unsigned DC) {
   return DC >= DPP::ROW_NEWBCAST_FIRST && DC <= DPP::ROW_NEWBCAST_LAST;
 }
+
+/// \returns true if an instruction may have a 64-bit VGPR operand.
+bool hasAny64BitVGPROperands(const MCInstrDesc &OpDesc);
+
+/// \returns true if an instruction is a DP ALU DPP.
+bool isDPALU_DPP(const MCInstrDesc &OpDesc);
 
 /// \returns true if the intrinsic is divergent
 bool isIntrinsicSourceOfDivergence(unsigned IntrID);

@@ -26,6 +26,7 @@ ByteCodeEmitter::compileFunc(const FunctionDecl *FuncDecl) {
   // Set up argument indices.
   unsigned ParamOffset = 0;
   SmallVector<PrimType, 8> ParamTypes;
+  SmallVector<unsigned, 8> ParamOffsets;
   llvm::DenseMap<unsigned, Function::ParamDescriptor> ParamDescriptors;
 
   // If the return is not a primitive, a pointer to the storage where the
@@ -36,6 +37,7 @@ ByteCodeEmitter::compileFunc(const FunctionDecl *FuncDecl) {
   if (!Ty->isVoidType() && !Ctx.classify(Ty)) {
     HasRVO = true;
     ParamTypes.push_back(PT_Ptr);
+    ParamOffsets.push_back(ParamOffset);
     ParamOffset += align(primSize(PT_Ptr));
   }
 
@@ -47,6 +49,7 @@ ByteCodeEmitter::compileFunc(const FunctionDecl *FuncDecl) {
     if (MD->isInstance()) {
       HasThisPointer = true;
       ParamTypes.push_back(PT_Ptr);
+      ParamOffsets.push_back(ParamOffset);
       ParamOffset += align(primSize(PT_Ptr));
     }
 
@@ -71,20 +74,22 @@ ByteCodeEmitter::compileFunc(const FunctionDecl *FuncDecl) {
   // Assign descriptors to all parameters.
   // Composite objects are lowered to pointers.
   for (const ParmVarDecl *PD : FuncDecl->parameters()) {
-    PrimType Ty = Ctx.classify(PD->getType()).value_or(PT_Ptr);
-    Descriptor *Desc = P.createDescriptor(PD, Ty);
-    ParamDescriptors.insert({ParamOffset, {Ty, Desc}});
-    Params.insert({PD, ParamOffset});
-    ParamOffset += align(primSize(Ty));
-    ParamTypes.push_back(Ty);
+    std::optional<PrimType> T = Ctx.classify(PD->getType());
+    PrimType PT = T.value_or(PT_Ptr);
+    Descriptor *Desc = P.createDescriptor(PD, PT);
+    ParamDescriptors.insert({ParamOffset, {PT, Desc}});
+    Params.insert({PD, {ParamOffset, T != std::nullopt}});
+    ParamOffsets.push_back(ParamOffset);
+    ParamOffset += align(primSize(PT));
+    ParamTypes.push_back(PT);
   }
 
   // Create a handle over the emitted code.
   Function *Func = P.getFunction(FuncDecl);
   if (!Func)
-    Func =
-        P.createFunction(FuncDecl, ParamOffset, std::move(ParamTypes),
-                         std::move(ParamDescriptors), HasThisPointer, HasRVO);
+    Func = P.createFunction(FuncDecl, ParamOffset, std::move(ParamTypes),
+                            std::move(ParamDescriptors),
+                            std::move(ParamOffsets), HasThisPointer, HasRVO);
 
   assert(Func);
   // For not-yet-defined functions, we only create a Function instance and
@@ -92,8 +97,15 @@ ByteCodeEmitter::compileFunc(const FunctionDecl *FuncDecl) {
   if (!FuncDecl->isDefined())
     return Func;
 
+  // Lambda static invokers are a special case that we emit custom code for.
+  bool IsEligibleForCompilation = false;
+  if (const auto *MD = dyn_cast<CXXMethodDecl>(FuncDecl))
+    IsEligibleForCompilation = MD->isLambdaStaticInvoker();
+  if (!IsEligibleForCompilation)
+    IsEligibleForCompilation = FuncDecl->isConstexpr();
+
   // Compile the function body.
-  if (!FuncDecl->isConstexpr() || !visitFunc(FuncDecl)) {
+  if (!IsEligibleForCompilation || !visitFunc(FuncDecl)) {
     // Return a dummy function if compilation failed.
     if (BailLocation)
       return llvm::make_error<ByteCodeGenError>(*BailLocation);
@@ -193,6 +205,25 @@ static void emit(Program &P, std::vector<std::byte> &Code, const T &Val,
     uint32_t ID = P.getOrCreateNativePointer(Val);
     new (Code.data() + ValPos) uint32_t(ID);
   }
+}
+
+template <>
+void emit(Program &P, std::vector<std::byte> &Code, const Floating &Val,
+          bool &Success) {
+  size_t Size = Val.bytesToSerialize();
+
+  if (Code.size() + Size > std::numeric_limits<unsigned>::max()) {
+    Success = false;
+    return;
+  }
+
+  // Access must be aligned!
+  size_t ValPos = align(Code.size());
+  Size = align(Size);
+  assert(aligned(ValPos + Size));
+  Code.resize(ValPos + Size);
+
+  Val.serialize(Code.data() + ValPos);
 }
 
 template <typename... Tys>

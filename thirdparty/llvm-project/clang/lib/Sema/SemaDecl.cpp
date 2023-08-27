@@ -1976,7 +1976,8 @@ void Sema::MarkUnusedFileScopedDecl(const DeclaratorDecl *D) {
     UnusedFileScopedDecls.push_back(D);
 }
 
-static bool ShouldDiagnoseUnusedDecl(const NamedDecl *D) {
+static bool ShouldDiagnoseUnusedDecl(const LangOptions &LangOpts,
+                                     const NamedDecl *D) {
   if (D->isInvalidDecl())
     return false;
 
@@ -1984,14 +1985,22 @@ static bool ShouldDiagnoseUnusedDecl(const NamedDecl *D) {
     // For a decomposition declaration, warn if none of the bindings are
     // referenced, instead of if the variable itself is referenced (which
     // it is, by the bindings' expressions).
-    for (auto *BD : DD->bindings())
+    bool IsAllPlaceholders = true;
+    for (auto *BD : DD->bindings()) {
       if (BD->isReferenced())
         return false;
+      IsAllPlaceholders = IsAllPlaceholders && BD->isPlaceholderVar(LangOpts);
+    }
+    if (IsAllPlaceholders)
+      return false;
   } else if (!D->getDeclName()) {
     return false;
   } else if (D->isReferenced() || D->isUsed()) {
     return false;
   }
+
+  if (D->isPlaceholderVar(LangOpts))
+    return false;
 
   if (D->hasAttr<UnusedAttr>() || D->hasAttr<ObjCPreciseLifetimeAttr>() ||
       D->hasAttr<CleanupAttr>())
@@ -2131,7 +2140,7 @@ void Sema::DiagnoseUnusedDecl(const NamedDecl *D) {
 /// DiagnoseUnusedDecl - Emit warnings about declarations that are not used
 /// unless they are marked attr(unused).
 void Sema::DiagnoseUnusedDecl(const NamedDecl *D, DiagReceiverTy DiagReceiver) {
-  if (!ShouldDiagnoseUnusedDecl(D))
+  if (!ShouldDiagnoseUnusedDecl(getLangOpts(), D))
     return;
 
   if (auto *TD = dyn_cast<TypedefNameDecl>(D)) {
@@ -2160,8 +2169,11 @@ void Sema::DiagnoseUnusedButSetDecl(const VarDecl *VD,
                                     DiagReceiverTy DiagReceiver) {
   // If it's not referenced, it can't be set. If it has the Cleanup attribute,
   // it's not really unused.
-  if (!VD->isReferenced() || !VD->getDeclName() || VD->hasAttr<UnusedAttr>() ||
-      VD->hasAttr<CleanupAttr>())
+  if (!VD->isReferenced() || !VD->getDeclName() || VD->hasAttr<CleanupAttr>())
+    return;
+
+  //  In C++, `_` variables behave as if they were maybe_unused
+  if (VD->hasAttr<UnusedAttr>() || VD->isPlaceholderVar(getLangOpts()))
     return;
 
   const auto *Ty = VD->getType().getTypePtr()->getBaseElementTypeUnsafe();
@@ -3696,10 +3708,10 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
       !canRedefineFunction(Old, getLangOpts())) {
     if (getLangOpts().MicrosoftExt) {
       Diag(New->getLocation(), diag::ext_static_non_static) << New;
-      Diag(OldLocation, PrevDiag);
+      Diag(OldLocation, PrevDiag) << Old << Old->getType();
     } else {
       Diag(New->getLocation(), diag::err_static_non_static) << New;
-      Diag(OldLocation, PrevDiag);
+      Diag(OldLocation, PrevDiag) << Old << Old->getType();
       return true;
     }
   }
@@ -3756,6 +3768,16 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
       else
         New->dropAttr<OverloadableAttr>();
     }
+  }
+
+  // It is not permitted to redeclare an SME function with different SME
+  // attributes.
+  if (IsInvalidSMECallConversion(Old->getType(), New->getType(),
+                                 AArch64SMECallConversionKind::MatchExactly)) {
+    Diag(New->getLocation(), diag::err_sme_attr_mismatch)
+        << New->getType() << Old->getType();
+    Diag(OldLocation, diag::note_previous_declaration);
+    return true;
   }
 
   // If a function is first declared with a calling convention, but is later
@@ -4133,7 +4155,7 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
 
     // If we are merging two functions where only one of them has a prototype,
     // we may have enough information to decide to issue a diagnostic that the
-    // function without a protoype will change behavior in C2x. This handles
+    // function without a protoype will change behavior in C23. This handles
     // cases like:
     //   void i(); void i(int j);
     //   void i(int j); void i();
@@ -4154,7 +4176,7 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
 
       if (WithProto->getNumParams() != 0) {
         if (WithoutProto->getBuiltinID() == 0 && !WithoutProto->isImplicit()) {
-          // The one without the prototype will be changing behavior in C2x, so
+          // The one without the prototype will be changing behavior in C23, so
           // warn about that one so long as it's a user-visible declaration.
           bool IsWithoutProtoADef = false, IsWithProtoADef = false;
           if (WithoutProto == New)
@@ -4172,7 +4194,7 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
           // when the new declaration is a definition without a prototype, the
           // old declaration with a prototype is not the cause of the issue,
           // and that does not need to be noted because the one with a
-          // prototype will not change behavior in C2x.
+          // prototype will not change behavior in C23.
           if (WithProto->getBuiltinID() == 0 && !WithProto->isImplicit() &&
               !IsWithoutProtoADef)
             Diag(WithProto->getLocation(), diag::note_conflicting_prototype);
@@ -4386,7 +4408,7 @@ static void diagnoseVarDeclTypeMismatch(Sema &S, VarDecl *New, VarDecl* Old) {
   SourceLocation OldLocation;
   std::tie(PrevDiag, OldLocation)
     = getNoteDiagForInvalidRedeclaration(Old, New);
-  S.Diag(OldLocation, PrevDiag);
+  S.Diag(OldLocation, PrevDiag) << Old << Old->getType();
   New->setInvalidDecl();
 }
 
@@ -5337,13 +5359,14 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
 /// check if there's an existing declaration that can't be overloaded.
 ///
 /// \return true if this is a forbidden redeclaration
-static bool CheckAnonMemberRedeclaration(Sema &SemaRef,
-                                         Scope *S,
+static bool CheckAnonMemberRedeclaration(Sema &SemaRef, Scope *S,
                                          DeclContext *Owner,
                                          DeclarationName Name,
-                                         SourceLocation NameLoc,
-                                         bool IsUnion) {
-  LookupResult R(SemaRef, Name, NameLoc, Sema::LookupMemberName,
+                                         SourceLocation NameLoc, bool IsUnion,
+                                         StorageClass SC) {
+  LookupResult R(SemaRef, Name, NameLoc,
+                 Owner->isRecord() ? Sema::LookupMemberName
+                                   : Sema::LookupOrdinaryName,
                  Sema::ForVisibleRedeclaration);
   if (!SemaRef.LookupName(R, S)) return false;
 
@@ -5354,11 +5377,49 @@ static bool CheckAnonMemberRedeclaration(Sema &SemaRef,
   if (!SemaRef.isDeclInScope(PrevDecl, Owner, S))
     return false;
 
+  if (SC == StorageClass::SC_None &&
+      PrevDecl->isPlaceholderVar(SemaRef.getLangOpts()) &&
+      (Owner->isFunctionOrMethod() || Owner->isRecord())) {
+    if (!Owner->isRecord())
+      SemaRef.DiagPlaceholderVariableDefinition(NameLoc);
+    return false;
+  }
+
   SemaRef.Diag(NameLoc, diag::err_anonymous_record_member_redecl)
     << IsUnion << Name;
   SemaRef.Diag(PrevDecl->getLocation(), diag::note_previous_declaration);
 
   return true;
+}
+
+void Sema::ActOnDefinedDeclarationSpecifier(Decl *D) {
+  if (auto *RD = dyn_cast_if_present<RecordDecl>(D))
+    DiagPlaceholderFieldDeclDefinitions(RD);
+}
+
+/// Emit diagnostic warnings for placeholder members.
+/// We can only do that after the class is fully constructed,
+/// as anonymous union/structs can insert placeholders
+/// in their parent scope (which might be a Record).
+void Sema::DiagPlaceholderFieldDeclDefinitions(RecordDecl *Record) {
+  if (!getLangOpts().CPlusPlus)
+    return;
+
+  // This function can be parsed before we have validated the
+  // structure as an anonymous struct
+  if (Record->isAnonymousStructOrUnion())
+    return;
+
+  const NamedDecl *First = 0;
+  for (const Decl *D : Record->decls()) {
+    const NamedDecl *ND = dyn_cast<NamedDecl>(D);
+    if (!ND || !ND->isPlaceholderVar(getLangOpts()))
+      continue;
+    if (!First)
+      First = ND;
+    else
+      DiagPlaceholderVariableDefinition(ND->getLocation());
+  }
 }
 
 /// InjectAnonymousStructOrUnionMembers - Inject the members of the
@@ -5380,6 +5441,7 @@ static bool CheckAnonMemberRedeclaration(Sema &SemaRef,
 static bool
 InjectAnonymousStructOrUnionMembers(Sema &SemaRef, Scope *S, DeclContext *Owner,
                                     RecordDecl *AnonRecord, AccessSpecifier AS,
+                                    StorageClass SC,
                                     SmallVectorImpl<NamedDecl *> &Chaining) {
   bool Invalid = false;
 
@@ -5389,8 +5451,8 @@ InjectAnonymousStructOrUnionMembers(Sema &SemaRef, Scope *S, DeclContext *Owner,
         cast<NamedDecl>(D)->getDeclName()) {
       ValueDecl *VD = cast<ValueDecl>(D);
       if (CheckAnonMemberRedeclaration(SemaRef, S, Owner, VD->getDeclName(),
-                                       VD->getLocation(),
-                                       AnonRecord->isUnion())) {
+                                       VD->getLocation(), AnonRecord->isUnion(),
+                                       SC)) {
         // C++ [class.union]p2:
         //   The names of the members of an anonymous union shall be
         //   distinct from the names of any other entity in the
@@ -5690,6 +5752,7 @@ Decl *Sema::BuildAnonymousStructOrUnion(Scope *S, DeclSpec &DS,
 
   // Mock up a declarator.
   Declarator Dc(DS, ParsedAttributesView::none(), DeclaratorContext::Member);
+  StorageClass SC = StorageClassSpecToVarDeclStorageClass(DS);
   TypeSourceInfo *TInfo = GetTypeForDeclarator(Dc, S);
   assert(TInfo && "couldn't build declarator info for anonymous struct/union");
 
@@ -5708,7 +5771,6 @@ Decl *Sema::BuildAnonymousStructOrUnion(Scope *S, DeclSpec &DS,
       FieldCollector->Add(cast<FieldDecl>(Anon));
   } else {
     DeclSpec::SCS SCSpec = DS.getStorageClassSpec();
-    StorageClass SC = StorageClassSpecToVarDeclStorageClass(DS);
     if (SCSpec == DeclSpec::SCS_mutable) {
       // mutable can only appear on non-static class members, so it's always
       // an error here
@@ -5744,7 +5806,8 @@ Decl *Sema::BuildAnonymousStructOrUnion(Scope *S, DeclSpec &DS,
   SmallVector<NamedDecl*, 2> Chain;
   Chain.push_back(Anon);
 
-  if (InjectAnonymousStructOrUnionMembers(*this, S, Owner, Record, AS, Chain))
+  if (InjectAnonymousStructOrUnionMembers(*this, S, Owner, Record, AS, SC,
+                                          Chain))
     Invalid = true;
 
   if (VarDecl *NewVD = dyn_cast<VarDecl>(Anon)) {
@@ -5813,8 +5876,9 @@ Decl *Sema::BuildMicrosoftCAnonymousStruct(Scope *S, DeclSpec &DS,
   RecordDecl *RecordDef = Record->getDefinition();
   if (RequireCompleteSizedType(Anon->getLocation(), RecTy,
                                diag::err_field_incomplete_or_sizeless) ||
-      InjectAnonymousStructOrUnionMembers(*this, S, CurContext, RecordDef,
-                                          AS_none, Chain)) {
+      InjectAnonymousStructOrUnionMembers(
+          *this, S, CurContext, RecordDef, AS_none,
+          StorageClassSpecToVarDeclStorageClass(DS), Chain)) {
     Anon->setInvalidDecl();
     ParentDecl->setInvalidDecl();
   }
@@ -7448,6 +7512,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
   DeclarationName Name = GetNameForDeclarator(D).getName();
 
   IdentifierInfo *II = Name.getAsIdentifierInfo();
+  bool IsPlaceholderVariable = false;
 
   if (D.isDecompositionDeclarator()) {
     // Take the name of the first declarator as our name for diagnostic
@@ -7465,6 +7530,18 @@ NamedDecl *Sema::ActOnVariableDeclarator(
 
   DeclSpec::SCS SCSpec = D.getDeclSpec().getStorageClassSpec();
   StorageClass SC = StorageClassSpecToVarDeclStorageClass(D.getDeclSpec());
+
+  if (LangOpts.CPlusPlus && (DC->isClosure() || DC->isFunctionOrMethod()) &&
+      SC != SC_Static && SC != SC_Extern && II && II->isPlaceholder()) {
+    IsPlaceholderVariable = true;
+    if (!Previous.empty()) {
+      NamedDecl *PrevDecl = *Previous.begin();
+      bool SameDC = PrevDecl->getDeclContext()->getRedeclContext()->Equals(
+          DC->getRedeclContext());
+      if (SameDC && isDeclInScope(PrevDecl, CurContext, S, false))
+        DiagPlaceholderVariableDefinition(D.getIdentifierLoc());
+    }
+  }
 
   // dllimport globals without explicit storage class are treated as extern. We
   // have to change the storage class this early to get the right DeclContext.
@@ -8035,7 +8112,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
       NewVD->setInvalidDecl();
     }
 
-    if (!IsVariableTemplateSpecialization)
+    if (!IsVariableTemplateSpecialization && !IsPlaceholderVariable)
       D.setRedeclaration(CheckVariableDeclaration(NewVD, Previous));
 
     // CheckVariableDeclaration will set NewVD as invalid if something is in
@@ -8073,7 +8150,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
   }
 
   // Diagnose shadowed variables iff this isn't a redeclaration.
-  if (ShadowedDecl && !D.isRedeclaration())
+  if (!IsPlaceholderVariable && ShadowedDecl && !D.isRedeclaration())
     CheckShadow(NewVD, ShadowedDecl, Previous);
 
   ProcessPragmaWeak(S, NewVD);
@@ -8306,6 +8383,10 @@ void Sema::CheckShadow(NamedDecl *D, NamedDecl *ShadowedDecl,
       }
     }
   }
+
+  // Never warn about shadowing a placeholder variable.
+  if (ShadowedDecl->isPlaceholderVar(getLangOpts()))
+    return;
 
   // Only warn about certain kinds of shadowing for class members.
   if (NewDC && NewDC->isRecord()) {
@@ -9154,7 +9235,8 @@ static FunctionDecl *CreateNewFunctionDecl(Sema &SemaRef, Declarator &D,
     bool HasPrototype =
         (D.isFunctionDeclarator() && D.getFunctionTypeInfo().hasPrototype) ||
         (D.getDeclSpec().isTypeRep() &&
-         D.getDeclSpec().getRepAsType().get()->isFunctionProtoType()) ||
+         SemaRef.GetTypeFromParser(D.getDeclSpec().getRepAsType(), nullptr)
+             ->isFunctionProtoType()) ||
         (!R->getAsAdjusted<FunctionType>() && R->isFunctionProtoType());
     assert(
         (HasPrototype || !SemaRef.getLangOpts().requiresStrictPrototypes()) &&
@@ -12059,6 +12141,33 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
     if (!Redeclaration && LangOpts.CUDA)
       checkCUDATargetOverload(NewFD, Previous);
   }
+
+  // Check if the function definition uses any AArch64 SME features without
+  // having the '+sme' feature enabled.
+  if (DeclIsDefn) {
+    bool UsesSM = NewFD->hasAttr<ArmLocallyStreamingAttr>();
+    bool UsesZA = NewFD->hasAttr<ArmNewZAAttr>();
+    if (const auto *FPT = NewFD->getType()->getAs<FunctionProtoType>()) {
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      UsesSM |=
+          EPI.AArch64SMEAttributes & FunctionType::SME_PStateSMEnabledMask;
+      UsesZA |= EPI.AArch64SMEAttributes & FunctionType::SME_PStateZASharedMask;
+    }
+
+    if (UsesSM || UsesZA) {
+      llvm::StringMap<bool> FeatureMap;
+      Context.getFunctionFeatureMap(FeatureMap, NewFD);
+      if (!FeatureMap.contains("sme")) {
+        if (UsesSM)
+          Diag(NewFD->getLocation(),
+               diag::err_sme_definition_using_sm_in_non_sme_target);
+        else
+          Diag(NewFD->getLocation(),
+               diag::err_sme_definition_using_za_in_non_sme_target);
+      }
+    }
+  }
+
   return Redeclaration;
 }
 
@@ -14063,6 +14172,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       var->getDeclContext()->getRedeclContext()->isFileContext() &&
       var->isExternallyVisible() && var->hasLinkage() &&
       !var->isInline() && !var->getDescribedVarTemplate() &&
+      var->getStorageClass() != SC_Register &&
       !isa<VarTemplatePartialSpecializationDecl>(var) &&
       !isTemplateInstantiation(var->getTemplateSpecializationKind()) &&
       !getDiagnostics().isIgnored(diag::warn_missing_variable_declarations,
@@ -14251,25 +14361,32 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       !inTemplateInstantiation()) {
     PragmaStack<StringLiteral *> *Stack = nullptr;
     int SectionFlags = ASTContext::PSF_Read;
-    if (var->getType().isConstQualified()) {
-      if (HasConstInit)
-        Stack = &ConstSegStack;
-      else {
-        Stack = &BSSSegStack;
-        SectionFlags |= ASTContext::PSF_Write;
-      }
-    } else if (var->hasInit() && HasConstInit) {
-      Stack = &DataSegStack;
-      SectionFlags |= ASTContext::PSF_Write;
+    bool MSVCEnv =
+        Context.getTargetInfo().getTriple().isWindowsMSVCEnvironment();
+    std::optional<QualType::NonConstantStorageReason> Reason;
+    if (HasConstInit &&
+        !(Reason = var->getType().isNonConstantStorage(Context, true, false))) {
+      Stack = &ConstSegStack;
     } else {
-      Stack = &BSSSegStack;
       SectionFlags |= ASTContext::PSF_Write;
+      Stack = var->hasInit() && HasConstInit ? &DataSegStack : &BSSSegStack;
     }
     if (const SectionAttr *SA = var->getAttr<SectionAttr>()) {
       if (SA->getSyntax() == AttributeCommonInfo::AS_Declspec)
         SectionFlags |= ASTContext::PSF_Implicit;
       UnifySection(SA->getName(), SectionFlags, var);
     } else if (Stack->CurrentValue) {
+      if (Stack != &ConstSegStack && MSVCEnv &&
+          ConstSegStack.CurrentValue != ConstSegStack.DefaultValue &&
+          var->getType().isConstQualified()) {
+        assert((!Reason || Reason != QualType::NonConstantStorageReason::
+                                         NonConstNonReferenceType) &&
+               "This case should've already been handled elsewhere");
+        Diag(var->getLocation(), diag::warn_section_msvc_compat)
+                << var << ConstSegStack.CurrentValue << (int)(!HasConstInit
+            ? QualType::NonConstantStorageReason::NonTrivialCtor
+            : *Reason);
+      }
       SectionFlags |= ASTContext::PSF_Implicit;
       auto SectionName = Stack->CurrentValue->getString();
       var->addAttr(SectionAttr::CreateImplicit(Context, SectionName,
@@ -14769,17 +14886,17 @@ Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D) {
     LookupResult R(*this, II, D.getIdentifierLoc(), LookupOrdinaryName,
                    ForVisibleRedeclaration);
     LookupName(R, S);
-    if (R.isSingleResult()) {
-      NamedDecl *PrevDecl = R.getFoundDecl();
-      if (PrevDecl->isTemplateParameter()) {
+    if (!R.empty()) {
+      NamedDecl *PrevDecl = *R.begin();
+      if (R.isSingleResult() && PrevDecl->isTemplateParameter()) {
         // Maybe we will complain about the shadowed template parameter.
         DiagnoseTemplateParameterShadow(D.getIdentifierLoc(), PrevDecl);
         // Just pretend that we didn't see the previous declaration.
         PrevDecl = nullptr;
-      } else if (S->isDeclScope(PrevDecl)) {
+      }
+      if (PrevDecl && S->isDeclScope(PrevDecl)) {
         Diag(D.getIdentifierLoc(), diag::err_param_redefinition) << II;
         Diag(PrevDecl->getLocation(), diag::note_previous_declaration);
-
         // Recover by removing the name
         II = nullptr;
         D.SetIdentifier(nullptr, D.getIdentifierLoc());
@@ -14848,7 +14965,8 @@ void Sema::DiagnoseUnusedParameters(ArrayRef<ParmVarDecl *> Parameters) {
 
   for (const ParmVarDecl *Parameter : Parameters) {
     if (!Parameter->isReferenced() && Parameter->getDeclName() &&
-        !Parameter->hasAttr<UnusedAttr>()) {
+        !Parameter->hasAttr<UnusedAttr>() &&
+        !Parameter->getIdentifier()->isPlaceholder()) {
       Diag(Parameter->getLocation(), diag::warn_unused_parameter)
         << Parameter->getDeclName();
     }
@@ -15575,8 +15693,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
     if (FD) {
       FD->setBody(Body);
       FD->setWillHaveBody(false);
-      CheckImmediateEscalatingFunctionDefinition(
-          FD, FSI->FoundImmediateEscalatingExpression);
+      CheckImmediateEscalatingFunctionDefinition(FD, FSI);
 
       if (getLangOpts().CPlusPlus14) {
         if (!FD->isInvalidDecl() && Body && !FD->isDependentContext() &&
@@ -15728,7 +15845,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
         (void)FindPossiblePrototype(FD, PossiblePrototype);
 
       // If the function being defined does not have a prototype, then we may
-      // need to diagnose it as changing behavior in C2x because we now know
+      // need to diagnose it as changing behavior in C23 because we now know
       // whether the function accepts arguments or not. This only handles the
       // case where the definition has no prototype but does have parameters
       // and either there is no previous potential prototype, or the previous
@@ -15743,7 +15860,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
           (!PossiblePrototype || (!PossiblePrototype->hasWrittenPrototype() &&
                                   !PossiblePrototype->isImplicit()))) {
         // The function definition has parameters, so this will change behavior
-        // in C2x. If there is a possible prototype, it comes before the
+        // in C23. If there is a possible prototype, it comes before the
         // function definition.
         // FIXME: The declaration may have already been diagnosed as being
         // deprecated in GetFullTypeForDeclarator() if it had no arguments, but
@@ -15760,14 +15877,14 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
         // warn about it being deprecated (because the diagnostic is not
         // enabled), warn now that it is deprecated and changes behavior.
 
-        // This K&R C function definition definitely changes behavior in C2x,
+        // This K&R C function definition definitely changes behavior in C23,
         // so diagnose it.
         Diag(FD->getLocation(), diag::warn_non_prototype_changes_behavior)
-            << /*definition*/ 1 << /* not supported in C2x */ 0;
+            << /*definition*/ 1 << /* not supported in C23 */ 0;
 
         // If we have a possible prototype for the function which is a user-
         // visible declaration, we already tested that it has no prototype.
-        // This will change behavior in C2x. This gets a warning rather than a
+        // This will change behavior in C23. This gets a warning rather than a
         // note because it's the same behavior-changing problem as with the
         // definition.
         if (PossiblePrototype)
@@ -15995,7 +16112,7 @@ void Sema::ActOnFinishDelayedAttribute(Scope *S, Decl *D,
 /// call, forming a call to an implicitly defined function (per C99 6.5.1p2).
 NamedDecl *Sema::ImplicitlyDefineFunction(SourceLocation Loc,
                                           IdentifierInfo &II, Scope *S) {
-  // It is not valid to implicitly define a function in C2x.
+  // It is not valid to implicitly define a function in C23.
   assert(LangOpts.implicitFunctionsAllowed() &&
          "Implicit function declarations aren't allowed in this language mode");
 
@@ -18210,7 +18327,8 @@ FieldDecl *Sema::CheckFieldDecl(DeclarationName Name, QualType T,
   if (InvalidDecl)
     NewFD->setInvalidDecl();
 
-  if (PrevDecl && !isa<TagDecl>(PrevDecl)) {
+  if (PrevDecl && !isa<TagDecl>(PrevDecl) &&
+      !PrevDecl->isPlaceholderVar(getLangOpts())) {
     Diag(Loc, diag::err_duplicate_member) << II;
     Diag(PrevDecl->getLocation(), diag::note_previous_declaration);
     NewFD->setInvalidDecl();

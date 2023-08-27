@@ -36,12 +36,9 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MatrixBuilder.h"
 #include "llvm/IR/PatternMatch.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/MatrixUtils.h"
@@ -272,7 +269,7 @@ class LowerMatrixIntrinsics {
 
       unsigned D = isColumnMajor() ? NumColumns : NumRows;
       for (unsigned J = 0; J < D; ++J)
-        addVector(UndefValue::get(FixedVectorType::get(
+        addVector(PoisonValue::get(FixedVectorType::get(
             EltTy, isColumnMajor() ? NumRows : NumColumns)));
     }
 

@@ -153,6 +153,38 @@ static bool parseDebugArgs(Fortran::frontend::CodeGenOptions &opts,
   return true;
 }
 
+// Generate an OptRemark object containing info on if the -Rgroup
+// specified is enabled or not.
+static CodeGenOptions::OptRemark
+parseOptimizationRemark(llvm::opt::ArgList &args,
+                        llvm::StringRef remarkOptName) {
+  assert((remarkOptName == "pass" || remarkOptName == "pass-missed" ||
+          remarkOptName == "pass-analysis") &&
+         "Unknown group name provided.");
+  CodeGenOptions::OptRemark result;
+
+  for (llvm::opt::Arg *a : args) {
+    if (a->getOption().matches(clang::driver::options::OPT_R_Joined)) {
+      llvm::StringRef value = a->getValue();
+
+      if (value == remarkOptName) {
+        result.Kind = CodeGenOptions::RemarkKind::RK_Enabled;
+        // Enable everything
+        result.Pattern = ".*";
+        result.Regex = std::make_shared<llvm::Regex>(result.Pattern);
+
+      } else if (value.split('-') ==
+                 std::make_pair(llvm::StringRef("no"), remarkOptName)) {
+        result.Kind = CodeGenOptions::RemarkKind::RK_Disabled;
+        // Disable everything
+        result.Pattern = "";
+        result.Regex = nullptr;
+      }
+    }
+  }
+  return result;
+}
+
 static void parseCodeGenArgs(Fortran::frontend::CodeGenOptions &opts,
                              llvm::opt::ArgList &args,
                              clang::DiagnosticsEngine &diags) {
@@ -163,13 +195,12 @@ static void parseCodeGenArgs(Fortran::frontend::CodeGenOptions &opts,
     opts.DebugPassManager = 1;
 
   if (args.hasFlag(clang::driver::options::OPT_fstack_arrays,
-                   clang::driver::options::OPT_fno_stack_arrays, false)) {
+                   clang::driver::options::OPT_fno_stack_arrays, false))
     opts.StackArrays = 1;
-  }
+
   if (args.hasFlag(clang::driver::options::OPT_floop_versioning,
-                   clang::driver::options::OPT_fno_loop_versioning, false)) {
+                   clang::driver::options::OPT_fno_loop_versioning, false))
     opts.LoopVersioning = 1;
-  }
 
   for (auto *a : args.filtered(clang::driver::options::OPT_fpass_plugin_EQ))
     opts.LLVMPassPlugins.push_back(a->getValue());
@@ -189,6 +220,35 @@ static void parseCodeGenArgs(Fortran::frontend::CodeGenOptions &opts,
     else
       opts.PrepareForThinLTO = true;
   }
+
+  // -f[no-]save-optimization-record[=<format>]
+  if (const llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_opt_record_file))
+    opts.OptRecordFile = a->getValue();
+
+  // Optimization file format. Defaults to yaml
+  if (const llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_opt_record_format))
+    opts.OptRecordFormat = a->getValue();
+
+  // Specifies, using a regex, which successful optimization passes(middle and
+  // backend), to include in the final optimization record file generated. If
+  // not provided -fsave-optimization-record will include all passes.
+  if (const llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_opt_record_passes))
+    opts.OptRecordPasses = a->getValue();
+
+  // Create OptRemark that allows printing of all successful optimization
+  // passes applied.
+  opts.OptimizationRemark = parseOptimizationRemark(args, "pass");
+
+  // Create OptRemark that allows all missed optimization passes to be printed.
+  opts.OptimizationRemarkMissed = parseOptimizationRemark(args, "pass-missed");
+
+  // Create OptRemark that allows all optimization decisions made by LLVM
+  // to be printed.
+  opts.OptimizationRemarkAnalysis =
+      parseOptimizationRemark(args, "pass-analysis");
 
   if (auto *a = args.getLastArg(clang::driver::options::OPT_save_temps_EQ))
     opts.SaveTempsDir = a->getValue();
@@ -704,6 +764,7 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
     res.getDefaultKinds().set_defaultIntegerKind(8);
     res.getDefaultKinds().set_subscriptIntegerKind(8);
     res.getDefaultKinds().set_sizeIntegerKind(8);
+    res.getDefaultKinds().set_defaultLogicalKind(8);
   }
   if (args.hasArg(clang::driver::options::OPT_fdefault_double_8)) {
     if (!args.hasArg(clang::driver::options::OPT_fdefault_real_8)) {
@@ -780,6 +841,23 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
             args.hasArg(clang::driver::options::OPT_fopenmp_target_debug))
           res.getLangOpts().OpenMPTargetDebug = 1;
       }
+    }
+
+    switch (llvm::Triple(res.getTargetOpts().triple).getArch()) {
+    case llvm::Triple::nvptx:
+    case llvm::Triple::nvptx64:
+    case llvm::Triple::amdgcn:
+      if (!res.getLangOpts().OpenMPIsTargetDevice) {
+        const unsigned diagID = diags.getCustomDiagID(
+            clang::DiagnosticsEngine::Error,
+            "OpenMP AMDGPU/NVPTX is only prepared to deal with device code.");
+        diags.Report(diagID);
+      }
+      res.getLangOpts().OpenMPIsGPU = 1;
+      break;
+    default:
+      res.getLangOpts().OpenMPIsGPU = 0;
+      break;
     }
   }
 
@@ -890,10 +968,10 @@ bool CompilerInvocation::createFromArgs(
 
   // Parse the arguments
   const llvm::opt::OptTable &opts = clang::driver::getDriverOptTable();
-  const unsigned includedFlagsBitmask = clang::driver::options::FC1Option;
+  llvm::opt::Visibility visibilityMask(clang::driver::options::FC1Option);
   unsigned missingArgIndex, missingArgCount;
   llvm::opt::InputArgList args = opts.ParseArgs(
-      commandLineArgs, missingArgIndex, missingArgCount, includedFlagsBitmask);
+      commandLineArgs, missingArgIndex, missingArgCount, visibilityMask);
 
   // Check for missing argument error.
   if (missingArgCount) {
@@ -906,7 +984,7 @@ bool CompilerInvocation::createFromArgs(
   for (const auto *a : args.filtered(clang::driver::options::OPT_UNKNOWN)) {
     auto argString = a->getAsString(args);
     std::string nearest;
-    if (opts.findNearest(argString, nearest, includedFlagsBitmask) > 1)
+    if (opts.findNearest(argString, nearest, visibilityMask) > 1)
       diags.Report(clang::diag::err_drv_unknown_argument) << argString;
     else
       diags.Report(clang::diag::err_drv_unknown_argument_with_suggestion)
@@ -924,6 +1002,17 @@ bool CompilerInvocation::createFromArgs(
     res.loweringOpts.setPolymorphicTypeImpl(true);
   }
 
+  // -fno-ppc-native-vector-element-order
+  if (args.hasArg(clang::driver::options::OPT_fno_ppc_native_vec_elem_order)) {
+    res.loweringOpts.setNoPPCNativeVecElemOrder(true);
+  }
+
+  // Preserve all the remark options requested, i.e. -Rpass, -Rpass-missed or
+  // -Rpass-analysis. This will be used later when processing and outputting the
+  // remarks generated by LLVM in ExecuteCompilerInvocation.cpp.
+  for (auto *a : args.filtered(clang::driver::options::OPT_R_Group))
+    res.getDiagnosticOpts().Remarks.push_back(a->getValue());
+
   success &= parseFrontendArgs(res.getFrontendOpts(), args, diags);
   parseTargetArgs(res.getTargetOpts(), args);
   parsePreprocessorArgs(res.getPreprocessorOpts(), args);
@@ -932,9 +1021,14 @@ bool CompilerInvocation::createFromArgs(
   success &= parseSemaArgs(res, args, diags);
   success &= parseDialectArgs(res, args, diags);
   success &= parseDiagArgs(res, args, diags);
+
+  // Collect LLVM (-mllvm) and MLIR (-mmlir) options.
+  // NOTE: Try to avoid adding any options directly to `llvmArgs` or
+  // `mlirArgs`. Instead, you can use
+  //    * `-mllvm <your-llvm-option>`, or
+  //    * `-mmlir <your-mlir-option>`.
   res.frontendOpts.llvmArgs =
       args.getAllArgValues(clang::driver::options::OPT_mllvm);
-
   res.frontendOpts.mlirArgs =
       args.getAllArgValues(clang::driver::options::OPT_mmlir);
 

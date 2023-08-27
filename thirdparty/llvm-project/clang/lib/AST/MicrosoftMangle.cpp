@@ -485,7 +485,7 @@ MicrosoftMangleContextImpl::MicrosoftMangleContextImpl(ASTContext &Context,
   SourceManager &SM = Context.getSourceManager();
   if (const FileEntry *FE = SM.getFileEntryForID(SM.getMainFileID())) {
     // Truncate the hash so we get 8 characters of hexadecimal.
-    uint32_t TruncatedHash = uint32_t(xxHash64(FE->getName()));
+    uint32_t TruncatedHash = uint32_t(xxh3_64bits(FE->getName()));
     AnonymousNamespaceHash = llvm::utohexstr(TruncatedHash);
   } else {
     // If we don't have a path to the main file, we'll just use 0.
@@ -2853,6 +2853,7 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(CallingConv CC) {
   //                      ::= T # __attribute__((__swiftasynccall__))
   //                            // Clang-only
   //                      ::= w # __regcall
+  //                      ::= x # __regcall4
   // The 'export' calling conventions are from a bygone era
   // (*cough*Win16*cough*) when functions were declared for export with
   // that keyword. (It didn't actually export them, it just made them so
@@ -2873,7 +2874,12 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(CallingConv CC) {
     case CC_Swift: Out << 'S'; break;
     case CC_SwiftAsync: Out << 'W'; break;
     case CC_PreserveMost: Out << 'U'; break;
-    case CC_X86RegCall: Out << 'w'; break;
+    case CC_X86RegCall:
+      if (getASTContext().getLangOpts().RegCall4)
+        Out << "x";
+      else
+        Out << "w";
+      break;
   }
 }
 void MicrosoftCXXNameMangler::mangleCallingConvention(const FunctionType *T) {

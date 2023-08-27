@@ -334,6 +334,7 @@ public:
   struct CGCoroInfo {
     std::unique_ptr<CGCoroData> Data;
     bool InSuspendBlock = false;
+    bool MayCoroHandleEscape = false;
     CGCoroInfo();
     ~CGCoroInfo();
   };
@@ -345,6 +346,10 @@ public:
 
   bool inSuspendBlock() const {
     return isCoroutine() && CurCoro.InSuspendBlock;
+  }
+
+  bool mayCoroHandleEscape() const {
+    return isCoroutine() && CurCoro.MayCoroHandleEscape;
   }
 
   /// CurGD - The GlobalDecl for the current function being compiled.
@@ -1963,6 +1968,9 @@ private:
   /// Check if the return value of this function requires sanitization.
   bool requiresReturnValueCheck() const;
 
+  bool isInAllocaArgument(CGCXXABI &ABI, QualType Ty);
+  bool hasInAllocaArg(const CXXMethodDecl *MD);
+
   llvm::BasicBlock *TerminateLandingPad = nullptr;
   llvm::BasicBlock *TerminateHandler = nullptr;
   llvm::SmallVector<llvm::BasicBlock *, 2> TrapBBs;
@@ -2227,10 +2235,17 @@ public:
   void EmitBlockWithFallThrough(llvm::BasicBlock *BB, const Stmt *S);
 
   void EmitForwardingCallToLambda(const CXXMethodDecl *LambdaCallOperator,
-                                  CallArgList &CallArgs);
+                                  CallArgList &CallArgs,
+                                  const CGFunctionInfo *CallOpFnInfo = nullptr,
+                                  llvm::Constant *CallOpFn = nullptr);
   void EmitLambdaBlockInvokeBody();
-  void EmitLambdaDelegatingInvokeBody(const CXXMethodDecl *MD);
   void EmitLambdaStaticInvokeBody(const CXXMethodDecl *MD);
+  void EmitLambdaDelegatingInvokeBody(const CXXMethodDecl *MD,
+                                      CallArgList &CallArgs);
+  void EmitLambdaInAllocaImplFn(const CXXMethodDecl *CallOp,
+                                const CGFunctionInfo **ImplFnInfo,
+                                llvm::Function **ImplFn);
+  void EmitLambdaInAllocaCallOpBody(const CXXMethodDecl *MD);
   void EmitLambdaVLACapture(const VariableArrayType *VAT, LValue LV) {
     EmitStoreThroughLValue(RValue::get(VLASizeMap[VAT->getSizeExpr()]), LV);
   }
@@ -4277,7 +4292,16 @@ public:
                                   unsigned IntID);
   llvm::Value *EmitAArch64SVEBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
 
-  llvm::Value *EmitSMELd1St1(SVETypeFlags TypeFlags,
+  llvm::Value *EmitSMELd1St1(const SVETypeFlags &TypeFlags,
+                             llvm::SmallVectorImpl<llvm::Value *> &Ops,
+                             unsigned IntID);
+  llvm::Value *EmitSMEReadWrite(const SVETypeFlags &TypeFlags,
+                                llvm::SmallVectorImpl<llvm::Value *> &Ops,
+                                unsigned IntID);
+  llvm::Value *EmitSMEZero(const SVETypeFlags &TypeFlags,
+                           llvm::SmallVectorImpl<llvm::Value *> &Ops,
+                           unsigned IntID);
+  llvm::Value *EmitSMELdrStr(const SVETypeFlags &TypeFlags,
                              llvm::SmallVectorImpl<llvm::Value *> &Ops,
                              unsigned IntID);
   llvm::Value *EmitAArch64SMEBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
@@ -4297,7 +4321,6 @@ public:
   llvm::Value *EmitHexagonBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
   llvm::Value *EmitRISCVBuiltinExpr(unsigned BuiltinID, const CallExpr *E,
                                     ReturnValueSlot ReturnValue);
-  llvm::Value *EmitLoongArchBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
   void ProcessOrderScopeAMDGCN(llvm::Value *Order, llvm::Value *Scope,
                                llvm::AtomicOrdering &AO,
                                llvm::SyncScope::ID &SSID);

@@ -98,7 +98,7 @@ class DXILPrepareModule : public ModulePass {
     PointerType *PtrTy = cast<PointerType>(Operand->getType());
     return Builder.Insert(
         CastInst::Create(Instruction::BitCast, Operand,
-                         Builder.getInt8PtrTy(PtrTy->getAddressSpace())));
+                         Builder.getPtrTy(PtrTy->getAddressSpace())));
   }
 
 public:
@@ -127,9 +127,6 @@ public:
             I.eraseFromParent();
             continue;
           }
-          // Only insert bitcasts if the IR is using opaque pointers.
-          if (M.getContext().supportsTypedPointers())
-            continue;
 
           // Emtting NoOp bitcast instructions allows the ValueEnumerator to be
           // unmodified as it reserves instruction IDs during contruction.

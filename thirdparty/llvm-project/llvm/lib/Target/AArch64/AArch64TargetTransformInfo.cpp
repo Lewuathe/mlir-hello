@@ -216,7 +216,7 @@ bool AArch64TTIImpl::shouldMaximizeVectorBandwidth(
     TargetTransformInfo::RegisterKind K) const {
   assert(K != TargetTransformInfo::RGK_Scalar);
   return (K == TargetTransformInfo::RGK_FixedWidthVector &&
-          !ST->forceStreamingCompatibleSVE());
+          ST->isNeonAvailable());
 }
 
 /// Calculate the cost of materializing a 64-bit value. This helper
@@ -434,6 +434,15 @@ AArch64TTIImpl::getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
                                      MVT::v2i64};
     auto LT = getTypeLegalizationCost(RetTy);
     if (any_of(ValidAbsTys, [&LT](MVT M) { return M == LT.second; }))
+      return LT.first;
+    break;
+  }
+  case Intrinsic::bswap: {
+    static const auto ValidAbsTys = {MVT::v4i16, MVT::v8i16, MVT::v2i32,
+                                     MVT::v4i32, MVT::v2i64};
+    auto LT = getTypeLegalizationCost(RetTy);
+    if (any_of(ValidAbsTys, [&LT](MVT M) { return M == LT.second; }) &&
+        LT.second.getScalarSizeInBits() == RetTy->getScalarSizeInBits())
       return LT.first;
     break;
   }
@@ -1925,8 +1934,7 @@ AArch64TTIImpl::getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const {
   case TargetTransformInfo::RGK_Scalar:
     return TypeSize::getFixed(64);
   case TargetTransformInfo::RGK_FixedWidthVector:
-    if (!ST->isStreamingSVEModeDisabled() &&
-        !EnableFixedwidthAutovecInStreamingMode)
+    if (!ST->isNeonAvailable() && !EnableFixedwidthAutovecInStreamingMode)
       return TypeSize::getFixed(0);
 
     if (ST->hasSVE())
@@ -1935,7 +1943,8 @@ AArch64TTIImpl::getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const {
 
     return TypeSize::getFixed(ST->hasNEON() ? 128 : 0);
   case TargetTransformInfo::RGK_ScalableVector:
-    if (!ST->isStreamingSVEModeDisabled() && !EnableScalableAutovecInStreamingMode)
+    if ((ST->isStreaming() || ST->isStreamingCompatible()) &&
+        !EnableScalableAutovecInStreamingMode)
       return TypeSize::getScalable(0);
 
     return TypeSize::getScalable(ST->hasSVE() ? 128 : 0);
@@ -2549,6 +2558,18 @@ InstructionCost AArch64TTIImpl::getVectorInstrCost(const Instruction &I,
                                                    TTI::TargetCostKind CostKind,
                                                    unsigned Index) {
   return getVectorInstrCostHelper(&I, Val, Index, true /* HasRealUse */);
+}
+
+InstructionCost AArch64TTIImpl::getScalarizationOverhead(
+    VectorType *Ty, const APInt &DemandedElts, bool Insert, bool Extract,
+    TTI::TargetCostKind CostKind) {
+  if (isa<ScalableVectorType>(Ty))
+    return InstructionCost::getInvalid();
+  if (Ty->getElementType()->isFloatingPointTy())
+    return BaseT::getScalarizationOverhead(Ty, DemandedElts, Insert, Extract,
+                                           CostKind);
+  return DemandedElts.popcount() * (Insert + Extract) *
+         ST->getVectorInsertExtractBaseCost();
 }
 
 InstructionCost AArch64TTIImpl::getArithmeticInstrCost(
@@ -3263,9 +3284,9 @@ bool AArch64TTIImpl::isLegalToVectorizeReduction(
   case RecurKind::UMax:
   case RecurKind::FMin:
   case RecurKind::FMax:
-  case RecurKind::SelectICmp:
-  case RecurKind::SelectFCmp:
   case RecurKind::FMulAdd:
+  case RecurKind::IAnyOf:
+  case RecurKind::FAnyOf:
     return true;
   default:
     return false;
@@ -3547,7 +3568,7 @@ InstructionCost AArch64TTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
     return Cost;
   }
 
-  Kind = improveShuffleKindFromMask(Kind, Mask);
+  Kind = improveShuffleKindFromMask(Kind, Mask, Tp, Index, SubTp);
 
   // Check for broadcast loads, which are supported by the LD1R instruction.
   // In terms of code-size, the shuffle vector is free when a load + dup get

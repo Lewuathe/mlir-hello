@@ -9,6 +9,7 @@
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Interfaces/ValueBoundsOpInterface.h"
@@ -125,8 +126,17 @@ static FailureOr<Value> padOperandToSmallestStaticBoundingBox(
     return rewriter.notifyMatchFailure(opToPad, "--no padding value specified");
   }
   Attribute paddingAttr = options.paddingValues[opOperand->getOperandNumber()];
-  Value paddingValue = rewriter.create<arith::ConstantOp>(
-      opToPad.getLoc(), cast<TypedAttr>(paddingAttr));
+
+  Value paddingValue;
+  if (auto complexTy = dyn_cast<ComplexType>(
+          getElementTypeOrSelf(opOperand->get().getType()))) {
+    auto complexAttr = cast<ArrayAttr>(paddingAttr);
+    paddingValue = rewriter.create<complex::ConstantOp>(opToPad.getLoc(),
+                                                        complexTy, complexAttr);
+  } else {
+    paddingValue = rewriter.create<arith::ConstantOp>(
+        opToPad.getLoc(), cast<TypedAttr>(paddingAttr));
+  }
 
   // Pad the operand to the bounding box defined by `paddedShape`.
   auto paddedTensorType = RankedTensorType::get(
@@ -141,7 +151,7 @@ LogicalResult
 linalg::rewriteAsPaddedOp(RewriterBase &rewriter, LinalgOp opToPad,
                           const LinalgPaddingOptions &constOptions,
                           LinalgOp &paddedOp, SmallVector<Value> &replacements,
-                          SmallVector<tensor::PadOp> &padOps, bool copyBack) {
+                          SmallVector<tensor::PadOp> &padOps) {
   LLVM_DEBUG(DBGS() << "Start rewriteAsPaddedOp : " << opToPad << "\n");
   Location loc = opToPad->getLoc();
 
@@ -215,7 +225,7 @@ linalg::rewriteAsPaddedOp(RewriterBase &rewriter, LinalgOp opToPad,
         strides));
   }
 
-  if (!copyBack) {
+  if (options.copyBackOp == LinalgPaddingOptions::CopyBackOp::None) {
     replacements = std::move(paddedSubtensorResults);
     return success();
   }
@@ -229,8 +239,18 @@ linalg::rewriteAsPaddedOp(RewriterBase &rewriter, LinalgOp opToPad,
          "expected matching number of results");
   for (auto it :
        llvm::zip(paddedSubtensorResults, opToPad.getDpsInitOperands())) {
-    replacements.push_back(rewriter.create<bufferization::CopyTensorOp>(
-        loc, std::get<0>(it), std::get<1>(it)->get()));
+    if (options.copyBackOp == LinalgPaddingOptions::CopyBackOp::LinalgCopy) {
+      replacements.push_back(rewriter
+                                 .create<linalg::CopyOp>(loc, std::get<0>(it),
+                                                         std::get<1>(it)->get())
+                                 .getResult(0));
+    } else if (options.copyBackOp ==
+               LinalgPaddingOptions::CopyBackOp::BufferizationCopyTensor) {
+      replacements.push_back(rewriter.create<bufferization::CopyTensorOp>(
+          loc, std::get<0>(it), std::get<1>(it)->get()));
+    } else {
+      llvm_unreachable("unsupported copy back op");
+    }
   }
   return success();
 }
@@ -238,6 +258,9 @@ linalg::rewriteAsPaddedOp(RewriterBase &rewriter, LinalgOp opToPad,
 FailureOr<LinalgOp>
 mlir::linalg::padAndHoistLinalgOp(RewriterBase &rewriter, LinalgOp linalgOp,
                                   const LinalgPaddingOptions &options) {
+  assert(options.copyBackOp == LinalgPaddingOptions::CopyBackOp::None &&
+         "invalid options");
+
   if (!linalgOp.hasTensorSemantics())
     return rewriter.notifyMatchFailure(
         linalgOp, "only applies to Linalg ops with tensor semantics");
@@ -247,7 +270,7 @@ mlir::linalg::padAndHoistLinalgOp(RewriterBase &rewriter, LinalgOp linalgOp,
   SmallVector<Value> newResults;
   SmallVector<tensor::PadOp> padOps;
   if (failed(rewriteAsPaddedOp(rewriter, linalgOp, options, paddedOp,
-                               newResults, padOps, /*copyBack=*/false)))
+                               newResults, padOps)))
     return rewriter.notifyMatchFailure(linalgOp,
                                        "failed to rewrite as a padded op");
 

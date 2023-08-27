@@ -523,6 +523,32 @@ class Foo final {})cpp";
          HI.Kind = index::SymbolKind::TypeAlias;
          HI.Definition = "Foo<int>";
        }},
+      // constrained template parameter
+      {R"cpp(
+        template<class T> concept Fooable = true;
+        template<[[Foo^able]] T>
+        void bar(T t) {}
+        )cpp",
+       [](HoverInfo &HI) {
+         HI.NamespaceScope = "";
+         HI.Name = "Fooable";
+         HI.Kind = index::SymbolKind::Concept;
+         HI.Definition = "template <class T>\nconcept Fooable = true";
+       }},
+       {R"cpp(
+        template<class T> concept Fooable = true;
+        template<Fooable [[T^T]]>
+        void bar(TT t) {}
+        )cpp",
+       [](HoverInfo &HI) {
+         HI.Name = "TT";
+         HI.Type = "class";
+         HI.AccessSpecifier = "public";
+         HI.NamespaceScope = "";
+         HI.LocalScope = "bar::";
+         HI.Kind = index::SymbolKind::TemplateTypeParm;
+         HI.Definition = "Fooable TT";
+       }},
 
       // empty macro
       {R"cpp(
@@ -2518,6 +2544,19 @@ TEST(Hover, All) {
             HI.Definition = "Test &&test = {}";
           }},
       {
+          R"cpp(// Shouldn't crash when evaluating the initializer.
+            struct Bar {}; // error-ok
+            struct Foo { void foo(Bar x = y); }
+            void Foo::foo(Bar [[^x]]) {})cpp",
+          [](HoverInfo &HI) {
+            HI.Name = "x";
+            HI.Kind = index::SymbolKind::Parameter;
+            HI.NamespaceScope = "";
+            HI.LocalScope = "Foo::foo::";
+            HI.Type = "Bar";
+            HI.Definition = "Bar x = <recovery - expr>()";
+          }},
+      {
           R"cpp(// auto on alias
           typedef int int_type;
           ^[[auto]] x = int_type();
@@ -3025,17 +3064,17 @@ TEST(Hover, Providers) {
     const char *Code;
     const std::function<void(HoverInfo &)> ExpectedBuilder;
   } Cases[] = {{R"cpp(
-                  struct Foo {};                     
+                  struct Foo {};
                   Foo F = Fo^o{};
                 )cpp",
                 [](HoverInfo &HI) { HI.Provider = ""; }},
                {R"cpp(
-                  #include "foo.h"                   
+                  #include "foo.h"
                   Foo F = Fo^o{};
                 )cpp",
                 [](HoverInfo &HI) { HI.Provider = "\"foo.h\""; }},
                {R"cpp(
-                  #include "all.h"  
+                  #include "all.h"
                   Foo F = Fo^o{};
                 )cpp",
                 [](HoverInfo &HI) { HI.Provider = "\"foo.h\""; }},
@@ -3055,7 +3094,7 @@ TEST(Hover, Providers) {
                 )cpp",
                 [](HoverInfo &HI) { HI.Provider = "\"foo.h\""; }},
                {R"cpp(
-                  #include "foo.h"    
+                  #include "foo.h"
                   Foo A;
                   Foo B;
                   Foo C = A ^+ B;

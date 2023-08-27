@@ -13,7 +13,6 @@
 #include "flang/Optimizer/CodeGen/CodeGen.h"
 
 #include "CGOps.h"
-#include "flang/ISO_Fortran_binding.h"
 #include "flang/Optimizer/Dialect/FIRAttr.h"
 #include "flang/Optimizer/Dialect/FIROps.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
@@ -117,7 +116,7 @@ namespace {
 template <typename FromOp>
 class FIROpConversion : public mlir::ConvertOpToLLVMPattern<FromOp> {
 public:
-  explicit FIROpConversion(fir::LLVMTypeConverter &lowering,
+  explicit FIROpConversion(const fir::LLVMTypeConverter &lowering,
                            const fir::FIRToLLVMPassOptions &options)
       : mlir::ConvertOpToLLVMPattern<FromOp>(lowering), options(options) {}
 
@@ -359,8 +358,9 @@ protected:
     return al;
   }
 
-  fir::LLVMTypeConverter &lowerTy() const {
-    return *static_cast<fir::LLVMTypeConverter *>(this->getTypeConverter());
+  const fir::LLVMTypeConverter &lowerTy() const {
+    return *static_cast<const fir::LLVMTypeConverter *>(
+        this->getTypeConverter());
   }
 
   void attachTBAATag(mlir::LLVM::AliasAnalysisOpInterface op,
@@ -1754,8 +1754,11 @@ struct XEmboxOpConversion : public EmboxCommonConversion<fir::cg::XEmboxOp> {
     // Adjust the element scaling factor if the element is a dependent type.
     if (fir::hasDynamicSize(seqEleTy)) {
       if (auto charTy = seqEleTy.dyn_cast<fir::CharacterType>()) {
-        prevPtrOff =
-            getCharacterByteSize(loc, rewriter, charTy, adaptor.getLenParams());
+        // The GEP pointer type decays to llvm.ptr<i[width]>.
+        // The scaling factor is the runtime value of the length.
+        assert(!adaptor.getLenParams().empty());
+        prevPtrOff = FIROpConversion::integerCast(
+            loc, rewriter, i64Ty, adaptor.getLenParams().back());
       } else if (seqEleTy.isa<fir::RecordType>()) {
         // prevPtrOff = ;
         TODO(loc, "generate call to calculate size of PDT");
@@ -1783,7 +1786,8 @@ struct XEmboxOpConversion : public EmboxCommonConversion<fir::cg::XEmboxOp> {
       // per CHARACTER element.
       auto charTy = seqEleTy.cast<fir::CharacterType>();
       if (fir::hasDynamicSize(charTy)) {
-        prevDimByteStride = prevPtrOff;
+        prevDimByteStride =
+            getCharacterByteSize(loc, rewriter, charTy, adaptor.getLenParams());
       } else {
         prevDimByteStride = genConstantIndex(
             loc, i64Ty, rewriter,
@@ -3187,8 +3191,8 @@ struct SelectCaseOpConversion : public FIROpConversion<fir::SelectCaseOp> {
 };
 
 template <typename OP>
-static void selectMatchAndRewrite(fir::LLVMTypeConverter &lowering, OP select,
-                                  typename OP::Adaptor adaptor,
+static void selectMatchAndRewrite(const fir::LLVMTypeConverter &lowering,
+                                  OP select, typename OP::Adaptor adaptor,
                                   mlir::ConversionPatternRewriter &rewriter) {
   unsigned conds = select.getNumConditions();
   auto cases = select.getCases().getValue();
@@ -3457,7 +3461,7 @@ template <typename LLVMOP, typename OPTY>
 static mlir::LLVM::InsertValueOp
 complexSum(OPTY sumop, mlir::ValueRange opnds,
            mlir::ConversionPatternRewriter &rewriter,
-           fir::LLVMTypeConverter &lowering) {
+           const fir::LLVMTypeConverter &lowering) {
   mlir::Value a = opnds[0];
   mlir::Value b = opnds[1];
   auto loc = sumop.getLoc();
@@ -3606,7 +3610,7 @@ struct NegcOpConversion : public FIROpConversion<fir::NegcOp> {
 /// These operations are normally dead after the pre-codegen pass.
 template <typename FromOp>
 struct MustBeDeadConversion : public FIROpConversion<FromOp> {
-  explicit MustBeDeadConversion(fir::LLVMTypeConverter &lowering,
+  explicit MustBeDeadConversion(const fir::LLVMTypeConverter &lowering,
                                 const fir::FIRToLLVMPassOptions &options)
       : FIROpConversion<FromOp>(lowering, options) {}
   using OpAdaptor = typename FromOp::Adaptor;
