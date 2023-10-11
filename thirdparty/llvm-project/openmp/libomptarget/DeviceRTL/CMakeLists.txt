@@ -55,9 +55,10 @@ set(include_directory ${devicertl_base_directory}/include)
 set(source_directory ${devicertl_base_directory}/src)
 
 set(all_amdgpu_architectures "gfx700;gfx701;gfx801;gfx803;gfx900;gfx902;gfx906"
-                             "gfx908;gfx90a;gfx90c;gfx940;gfx1010;gfx1030"
-                             "gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
-                             "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151")
+                             "gfx908;gfx90a;gfx90c;gfx940;gfx941;gfx942;gfx1010"
+                             "gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035"
+                             "gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150"
+                             "gfx1151")
 set(all_nvptx_architectures "sm_35;sm_37;sm_50;sm_52;sm_53;sm_60;sm_61;sm_62"
                             "sm_70;sm_72;sm_75;sm_80;sm_86;sm_87;sm_89;sm_90")
 set(all_gpu_architectures
@@ -288,7 +289,7 @@ add_custom_target(omptarget.devicertl.nvptx)
 add_custom_target(omptarget.devicertl.amdgpu)
 foreach(gpu_arch ${LIBOMPTARGET_DEVICE_ARCHITECTURES})
   if("${gpu_arch}" IN_LIST all_amdgpu_architectures)
-    compileDeviceRTLLibrary(${gpu_arch} amdgpu amdgcn-amd-amdhsa)
+    compileDeviceRTLLibrary(${gpu_arch} amdgpu amdgcn-amd-amdhsa -Xclang -mcode-object-version=none)
   elseif("${gpu_arch}" IN_LIST all_nvptx_architectures)
     compileDeviceRTLLibrary(${gpu_arch} nvptx nvptx64-nvidia-cuda --cuda-feature=+ptx61)
   else()

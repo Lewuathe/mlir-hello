@@ -1276,7 +1276,7 @@ public:
   /// eraseFromBundle() to erase individual bundled instructions.
   void eraseFromParent();
 
-  /// Unlink 'this' form its basic block and delete it.
+  /// Unlink 'this' from its basic block and delete it.
   ///
   /// If the instruction is part of a bundle, the other instructions in the
   /// bundle remain bundled.
@@ -1348,6 +1348,10 @@ public:
       if (Op.isReg() && !Op.getReg().isValid())
         return true;
     return false;
+  }
+
+  bool isJumpTableDebugInfo() const {
+    return getOpcode() == TargetOpcode::JUMP_TABLE_DEBUG_INFO;
   }
 
   bool isPHI() const {

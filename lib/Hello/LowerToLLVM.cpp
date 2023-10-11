@@ -81,7 +81,7 @@ public:
 
       // Insert a newline after each of the inner dimensions of the shape.
       if (i != e - 1) {
-        rewriter.create<mlir::func::CallOp>(loc, printfRef, rewriter.getIntegerType(32), newLineCst);
+        rewriter.create<mlir::LLVM::CallOp>(loc, rewriter.getIntegerType(32), printfRef, newLineCst);
       }
       rewriter.create<mlir::scf::YieldOp>(loc);
       rewriter.setInsertionPointToStart(loop.getBody());
@@ -90,7 +90,7 @@ public:
     // Generate a call to printf for the current element of the loop.
     auto printOp = mlir::cast<hello::PrintOp>(op);
     auto elementLoad = rewriter.create<mlir::memref::LoadOp>(loc, printOp.getInput(), loopIvs);
-    rewriter.create<mlir::func::CallOp>(loc, printfRef, rewriter.getIntegerType(32),
+    rewriter.create<mlir::LLVM::CallOp>(loc, rewriter.getIntegerType(32), printfRef,
                             mlir::ArrayRef<mlir::Value>({formatSpecifierCst, elementLoad}));
 
     // Notify the rewriter that this operation has been removed.
@@ -158,7 +158,7 @@ private:
             mlir::Value helloWorld = getOrCreateGlobalString(
                     loc, rewriter, "hello_word_string", mlir::StringRef("Hello, World! \n\0", 16), parentModule);
 
-            rewriter.create<mlir::func::CallOp>(loc, printfRef, rewriter.getIntegerType(32), helloWorld);
+            rewriter.create<mlir::LLVM::CallOp>(loc, rewriter.getIntegerType(32), printfRef, helloWorld);
             rewriter.eraseOp(op);
             return mlir::success();
         }

@@ -11,9 +11,33 @@
 #include "mlir/Conversion/LLVMCommon/MemRefBuilder.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/Threading.h"
+#include <memory>
+#include <mutex>
 #include <optional>
 
 using namespace mlir;
+
+SmallVector<Type> &LLVMTypeConverter::getCurrentThreadRecursiveStack() {
+  {
+    // Most of the time, the entry already exists in the map.
+    std::shared_lock<decltype(callStackMutex)> lock(callStackMutex,
+                                                    std::defer_lock);
+    if (getContext().isMultithreadingEnabled())
+      lock.lock();
+    auto recursiveStack = conversionCallStack.find(llvm::get_threadid());
+    if (recursiveStack != conversionCallStack.end())
+      return *recursiveStack->second;
+  }
+
+  // First time this thread gets here, we have to get an exclusive access to
+  // inset in the map
+  std::unique_lock<decltype(callStackMutex)> lock(callStackMutex);
+  auto recursiveStackInserted = conversionCallStack.insert(std::make_pair(
+      llvm::get_threadid(), std::make_unique<SmallVector<Type>>()));
+  return *recursiveStackInserted.first->second;
+}
 
 /// Create an LLVMTypeConverter using default LowerToLLVMOptions.
 LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
@@ -37,7 +61,12 @@ LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
   addConversion([&](MemRefType type) { return convertMemRefType(type); });
   addConversion(
       [&](UnrankedMemRefType type) { return convertUnrankedMemRefType(type); });
-  addConversion([&](VectorType type) { return convertVectorType(type); });
+  addConversion([&](VectorType type) -> std::optional<Type> {
+    FailureOr<Type> llvmType = convertVectorType(type);
+    if (failed(llvmType))
+      return std::nullopt;
+    return llvmType;
+  });
 
   // LLVM-compatible types are legal, so add a pass-through conversion. Do this
   // before the conversions below since conversions are attempted in reverse
@@ -56,8 +85,9 @@ LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
       return LLVM::LLVMPointerType::get(pointee, type.getAddressSpace());
     return std::nullopt;
   });
-  addConversion([&](LLVM::LLVMStructType type, SmallVectorImpl<Type> &results,
-                    ArrayRef<Type> callStack) -> std::optional<LogicalResult> {
+
+  addConversion([&](LLVM::LLVMStructType type, SmallVectorImpl<Type> &results)
+                    -> std::optional<LogicalResult> {
     // Fastpath for types that won't be converted by this callback anyway.
     if (LLVM::isCompatibleType(type)) {
       results.push_back(type);
@@ -75,10 +105,15 @@ LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
             type.getContext(),
             ("_Converted_" + std::to_string(counter) + type.getName()).str());
       }
-      if (llvm::count(callStack, type) > 1) {
+
+      SmallVectorImpl<Type> &recursiveStack = getCurrentThreadRecursiveStack();
+      if (llvm::count(recursiveStack, type)) {
         results.push_back(convertedType);
         return success();
       }
+      recursiveStack.push_back(type);
+      auto popConversionCallStack = llvm::make_scope_exit(
+          [&recursiveStack]() { recursiveStack.pop_back(); });
 
       SmallVector<Type> convertedElemTypes;
       convertedElemTypes.reserve(type.getBody().size());
@@ -460,10 +495,9 @@ Type LLVMTypeConverter::convertMemRefToBarePtr(BaseMemRefType type) const {
 ///  * 1-D `vector<axT>` remains as is while,
 ///  * n>1 `vector<ax...xkxT>` convert via an (n-1)-D array type to
 ///    `!llvm.array<ax...array<jxvector<kxT>>>`.
-/// As LLVM does not support arrays of scalable vectors, it is assumed that
-/// scalable vectors are always 1-D. This condition could be relaxed once the
-/// missing functionality is added in LLVM
-Type LLVMTypeConverter::convertVectorType(VectorType type) const {
+/// Returns failure for n-D scalable vector types as LLVM does not support
+/// arrays of scalable vectors.
+FailureOr<Type> LLVMTypeConverter::convertVectorType(VectorType type) const {
   auto elementType = convertType(type.getElementType());
   if (!elementType)
     return {};
@@ -473,9 +507,9 @@ Type LLVMTypeConverter::convertVectorType(VectorType type) const {
                                     type.getScalableDims().back());
   assert(LLVM::isCompatibleVectorType(vectorType) &&
          "expected vector type compatible with the LLVM dialect");
-  assert(
-      (!type.isScalable() || (type.getRank() == 1)) &&
-      "expected 1-D scalable vector (n-D scalable vectors are not supported)");
+  // Only the trailing dimension can be scalable.
+  if (llvm::is_contained(type.getScalableDims().drop_back(), true))
+    return failure();
   auto shape = type.getShape();
   for (int i = shape.size() - 2; i >= 0; --i)
     vectorType = LLVM::LLVMArrayType::get(vectorType, shape[i]);
@@ -583,7 +617,7 @@ LLVMTypeConverter::promoteOperands(Location loc, ValueRange opOperands,
     if (useBarePtrCallConv) {
       // For the bare-ptr calling convention, we only have to extract the
       // aligned pointer of a memref.
-      if (auto memrefType = dyn_cast<MemRefType>(operand.getType())) {
+      if (dyn_cast<MemRefType>(operand.getType())) {
         MemRefDescriptor desc(llvmOperand);
         llvmOperand = desc.alignedPtr(builder, loc);
       } else if (isa<UnrankedMemRefType>(operand.getType())) {

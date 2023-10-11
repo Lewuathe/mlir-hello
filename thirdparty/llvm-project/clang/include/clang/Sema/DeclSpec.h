@@ -2674,6 +2674,8 @@ public:
   /// redeclaration time if the decl is static.
   bool isStaticMember();
 
+  bool isExplicitObjectMemberFunction();
+
   /// Returns true if this declares a constructor or a destructor.
   bool isCtorOrDtor();
 
@@ -2769,11 +2771,10 @@ struct LambdaIntroducer {
 
   SourceRange Range;
   SourceLocation DefaultLoc;
-  LambdaCaptureDefault Default;
+  LambdaCaptureDefault Default = LCD_None;
   SmallVector<LambdaCapture, 4> Captures;
 
-  LambdaIntroducer()
-    : Default(LCD_None) {}
+  LambdaIntroducer() = default;
 
   bool hasLambdaCapture() const {
     return Captures.size() > 0 || Default != LCD_None;

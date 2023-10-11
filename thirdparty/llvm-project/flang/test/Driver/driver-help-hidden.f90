@@ -43,6 +43,7 @@
 ! CHECK-NEXT: -fhonor-nans            Specify that floating-point optimizations are not allowed that assume arguments and results are not NANs.
 ! CHECK-NEXT: -fimplicit-none         No implicit typing allowed unless overridden by IMPLICIT statements
 ! CHECK-NEXT: -finput-charset=<value> Specify the default character set for source files
+! CHECK-NEXT: -fintegrated-as         Enable the integrated assembler
 ! CHECK-NEXT: -fintrinsic-modules-path <dir>
 ! CHECK-NEXT:                         Specify where to find the compiled intrinsic modules
 ! CHECK-NEXT: -flang-experimental-hlfir
@@ -74,7 +75,7 @@
 ! CHECK-NEXT: -fopenmp-targets=<value>
 ! CHECK-NEXT:                         Specify comma-separated list of triples OpenMP offloading targets to be supported
 ! CHECK-NEXT: -fopenmp-version=<value>
-! CHECK-NEXT:                         Set OpenMP version (e.g. 45 for OpenMP 4.5, 50 for OpenMP 5.0). Default value is 50 for Clang and 11 for Flang
+! CHECK-NEXT:                         Set OpenMP version (e.g. 45 for OpenMP 4.5, 51 for OpenMP 5.1). Default value is 51 for Clang
 ! CHECK-NEXT: -fopenmp                Parse OpenMP pragmas and generate parallel code.
 ! CHECK-NEXT: -foptimization-record-file=<file>
 ! CHECK-NEXT:                         Specify the output name of the file containing the optimization remarks. Implies -fsave-optimization-record. On Darwin platforms, this cannot be used with multiple -arch <arch> options.
@@ -102,12 +103,15 @@
 ! CHECK-NEXT: --help-hidden           Display help for hidden options
 ! CHECK-NEXT: -help                   Display available options
 ! CHECK-NEXT: -I <dir>                Add directory to the end of the list of include search paths
+! CHECK-NEXT: -L <dir>                Add directory to library search path
 ! CHECK-NEXT: -march=<value>          For a list of available architectures for the target use '-mcpu=help'
 ! CHECK-NEXT: -mcpu=<value>           For a list of available CPUs for the target use '-mcpu=help'
 ! CHECK-NEXT: -mllvm=<arg>            Alias for -mllvm
 ! CHECK-NEXT: -mllvm <value>          Additional arguments to forward to LLVM's option processing
 ! CHECK-NEXT: -mmlir <value>          Additional arguments to forward to MLIR's option processing
 ! CHECK-NEXT: -module-dir <dir>       Put MODULE files in <dir>
+! CHECK-NEXT: -msve-vector-bits=<value>
+! CHECK-NEXT:                          Specify the size in bits of an SVE vector register. Defaults to the vector length agnostic value of "scalable". (AArch64 only)
 ! CHECK-NEXT: --no-offload-arch=<value>
 ! CHECK-NEXT:                         Remove CUDA/HIP offloading device architecture (e.g. sm_35, gfx906) from the list of devices to compile for. 'all' resets the list to its default value.
 ! CHECK-NEXT: -nocpp                  Disable predefined and command line preprocessor macros

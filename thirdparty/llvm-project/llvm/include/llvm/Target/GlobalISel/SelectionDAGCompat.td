@@ -106,6 +106,7 @@ def : GINodeEquiv<G_FDIV, fdiv>;
 def : GINodeEquiv<G_FREM, frem>;
 def : GINodeEquiv<G_FPOW, fpow>;
 def : GINodeEquiv<G_FEXP2, fexp2>;
+def : GINodeEquiv<G_FEXP10, fexp10>;
 def : GINodeEquiv<G_FLOG2, flog2>;
 def : GINodeEquiv<G_FLDEXP, fldexp>;
 def : GINodeEquiv<G_FCANONICALIZE, fcanonicalize>;
@@ -114,6 +115,10 @@ def : GINodeEquiv<G_IS_FPCLASS, is_fpclass>;
 def : GINodeEquiv<G_INTRINSIC, intrinsic_wo_chain> {
   let IfConvergent = G_INTRINSIC_CONVERGENT;
 }
+
+def : GINodeEquiv<G_GET_FPMODE, get_fpmode>;
+def : GINodeEquiv<G_SET_FPMODE, set_fpmode>;
+def : GINodeEquiv<G_RESET_FPMODE, reset_fpmode>;
 
 // ISD::INTRINSIC_VOID can also be handled with G_INTRINSIC_W_SIDE_EFFECTS.
 let IfConvergent = G_INTRINSIC_CONVERGENT_W_SIDE_EFFECTS in {
@@ -203,18 +208,16 @@ def : GINodeEquiv<G_ICMP, setcc> {
 // separate nodes for them. This GINodeEquiv maps the non-atomic stores to
 // G_STORE with a non-atomic MachineMemOperand.
 def : GINodeEquiv<G_STORE, st> { let CheckMMOIsNonAtomic = true; }
+def : GINodeEquiv<G_STORE, atomic_store> {
+  let CheckMMOIsNonAtomic = false;
+  let CheckMMOIsAtomic = true;
+}
 
 def : GINodeEquiv<G_LOAD, atomic_load> {
   let CheckMMOIsNonAtomic = false;
   let CheckMMOIsAtomic = true;
   let IfSignExtend = G_SEXTLOAD;
   let IfZeroExtend = G_ZEXTLOAD;
-}
-
-// Operands are swapped for atomic_store vs. regular store
-def : GINodeEquiv<G_STORE, atomic_store> {
-  let CheckMMOIsNonAtomic = false;
-  let CheckMMOIsAtomic = true;
 }
 
 def : GINodeEquiv<G_ATOMIC_CMPXCHG, atomic_cmp_swap>;

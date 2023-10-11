@@ -96,7 +96,6 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::FriendTemplate:
   case Decl::Block:
   case Decl::Captured:
-  case Decl::ClassScopeFunctionSpecialization:
   case Decl::UsingShadow:
   case Decl::ConstructorUsingShadow:
   case Decl::ObjCTypeParam:
@@ -1534,8 +1533,7 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
           // applied.
           llvm::Value *Zero = Builder.getFalse();
           Address NRVOFlag =
-              CreateTempAlloca(Zero->getType(), CharUnits::One(), "nrvo",
-                               /*ArraySize=*/nullptr, &AllocaAddr);
+              CreateTempAlloca(Zero->getType(), CharUnits::One(), "nrvo");
           EnsureInsertPoint();
           Builder.CreateStore(Zero, NRVOFlag);
 

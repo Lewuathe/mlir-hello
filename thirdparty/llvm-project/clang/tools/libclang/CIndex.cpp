@@ -2735,6 +2735,7 @@ void OMPClauseEnqueue::VisitOMPDoacrossClause(const OMPDoacrossClause *C) {
 }
 void OMPClauseEnqueue::VisitOMPXAttributeClause(const OMPXAttributeClause *C) {
 }
+void OMPClauseEnqueue::VisitOMPXBareClause(const OMPXBareClause *C) {}
 
 } // namespace
 
@@ -5951,6 +5952,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("OMPSectionsDirective");
   case CXCursor_OMPSectionDirective:
     return cxstring::createRef("OMPSectionDirective");
+  case CXCursor_OMPScopeDirective:
+    return cxstring::createRef("OMPScopeDirective");
   case CXCursor_OMPSingleDirective:
     return cxstring::createRef("OMPSingleDirective");
   case CXCursor_OMPMasterDirective:
@@ -6845,7 +6848,6 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::Captured:
   case Decl::OMPCapturedExpr:
   case Decl::Label: // FIXME: Is this right??
-  case Decl::ClassScopeFunctionSpecialization:
   case Decl::CXXDeductionGuide:
   case Decl::Import:
   case Decl::OMPThreadPrivate:

@@ -38,7 +38,7 @@ module acc_declare
   end subroutine
 
 ! CHECK-LABEL: func.func @_QMacc_declarePacc_declare_create() {
-    
+
 ! CHECK: %[[ALLOCA:.*]] = fir.alloca !fir.array<100xi32> {acc.declare = #acc.declare<dataClause =  acc_create>, bindc_name = "a", uniq_name = "_QMacc_declareFacc_declare_createEa"}
 ! CHECK: %[[BOUND:.*]] = acc.bounds   lowerbound(%{{.*}} : index) upperbound(%{{.*}} : index) extent(%{{.*}} : index) stride(%c1 : index) startIdx(%c1 : index)
 ! CHECK: %[[CREATE:.*]] = acc.create varPtr(%[[ALLOCA]] : !fir.ref<!fir.array<100xi32>>) bounds(%[[BOUND]]) -> !fir.ref<!fir.array<100xi32>> {name = "a"}
@@ -272,11 +272,29 @@ module acc_declare
 ! CHECK: %[[CREATE:.*]] = acc.create varPtr(%[[ARG1]] : !fir.ref<!fir.array<100xi32>>) bounds(%{{.*}}) -> !fir.ref<!fir.array<100xi32>> {dataClause = #acc<data_clause acc_copyout>, name = "b"}
 ! CHECK: acc.declare dataOperands(%[[COPYIN]], %[[CREATE]] : !fir.ref<!fir.array<100xi32>>, !fir.ref<!fir.array<100xi32>>) {
 ! CHECK: %{{.*}}:{{.*}} = fir.do_loop %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}) -> (index, i32) {
-        
+
 ! CHECK: acc.terminator
 ! CHECK: }
 ! CHECK: acc.copyout accPtr(%[[CREATE]] : !fir.ref<!fir.array<100xi32>>) bounds(%{{.*}}) to varPtr(%[[ARG1]] : !fir.ref<!fir.array<100xi32>>) {name = "b"}
 ! CHECK: acc.copyout accPtr(%[[COPYIN]] : !fir.ref<!fir.array<100xi32>>) bounds(%{{.*}}) to varPtr(%[[ARG0]] : !fir.ref<!fir.array<100xi32>>) {dataClause = #acc<data_clause acc_copy>, name = "a"}
+
+  subroutine acc_declare_array_section(a)
+    integer :: a(:)
+    !$acc declare copy(a(1:10))
+
+    do i = 1, 100
+      a(i) = i
+    end do
+  end subroutine
+
+! CHECK-LABEL: func.func @_QMacc_declarePacc_declare_array_section(
+! CHECK-SAME:    %[[ARG0:.*]]: !fir.box<!fir.array<?xi32>> {fir.bindc_name = "a"}) {
+! CHECK: %[[BOX_ADDR:.*]] = fir.box_addr %arg0 {acc.declare = #acc.declare<dataClause =  acc_copy>} : (!fir.box<!fir.array<?xi32>>) -> !fir.ref<!fir.array<?xi32>>
+! CHECK: %[[COPYIN:.*]] = acc.copyin varPtr(%[[BOX_ADDR]] : !fir.ref<!fir.array<?xi32>>) bounds(%{{.*}}) -> !fir.ref<!fir.array<?xi32>> {dataClause = #acc<data_clause acc_copy>, name = "a(1:10)"}
+! CHECK: acc.declare dataOperands(%4 : !fir.ref<!fir.array<?xi32>>) {
+! CHECK:   acc.terminator
+! CHECK: }
+! CHECK: acc.copyout accPtr(%[[COPYIN]] : !fir.ref<!fir.array<?xi32>>) bounds(%{{.*}}) to varPtr(%[[BOX_ADDR]] : !fir.ref<!fir.array<?xi32>>) {dataClause = #acc<data_clause acc_copy>, name = "a(1:10)"}
 
 end module
 
