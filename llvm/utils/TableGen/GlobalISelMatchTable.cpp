@@ -43,11 +43,13 @@ std::string getMatchOpcodeForImmPredicate(const TreePredicateFn &Predicate) {
 
 //===- Helpers ------------------------------------------------------------===//
 
-std::string
-getNameForFeatureBitset(const std::vector<Record *> &FeatureBitset) {
+std::string getNameForFeatureBitset(const std::vector<Record *> &FeatureBitset,
+                                    int HwModeIdx) {
   std::string Name = "GIFBS";
   for (const auto &Feature : FeatureBitset)
     Name += ("_" + Feature->getName()).str();
+  if (HwModeIdx >= 0)
+    Name += ("_HwMode" + std::to_string(HwModeIdx));
   return Name;
 }
 
@@ -851,9 +853,10 @@ void RuleMatcher::emit(MatchTable &Table) {
         << MatchTable::Comment(("Rule ID " + Twine(RuleID) + " //").str())
         << MatchTable::LineBreak;
 
-  if (!RequiredFeatures.empty()) {
+  if (!RequiredFeatures.empty() || HwModeIdx >= 0) {
     Table << MatchTable::Opcode("GIM_CheckFeatures")
-          << MatchTable::NamedValue(getNameForFeatureBitset(RequiredFeatures))
+          << MatchTable::NamedValue(
+                 getNameForFeatureBitset(RequiredFeatures, HwModeIdx))
           << MatchTable::LineBreak;
   }
 
@@ -865,6 +868,10 @@ void RuleMatcher::emit(MatchTable &Table) {
   }
 
   Matchers.front()->emitPredicateOpcodes(Table, *this);
+
+  // Check if it's safe to replace registers.
+  for (const auto &MA : Actions)
+    MA->emitAdditionalPredicates(Table, *this);
 
   // We must also check if it's safe to fold the matched instructions.
   if (InsnVariableIDs.size() >= 2) {
@@ -2004,9 +2011,58 @@ void BuildMIAction::emitActionOpcodes(MatchTable &Table,
   //        better for combines. Particularly when there are multiple match
   //        roots.
   if (InsnID == 0)
-    Table << MatchTable::Opcode("GIR_EraseFromParent")
-          << MatchTable::Comment("InsnID") << MatchTable::IntValue(InsnID)
+    EraseInstAction::emitActionOpcodes(Table, Rule, /*InsnID*/ 0);
+}
+
+//===- EraseInstAction ----------------------------------------------------===//
+
+void EraseInstAction::emitActionOpcodes(MatchTable &Table, RuleMatcher &Rule,
+                                        unsigned InsnID) {
+  // Avoid erasing the same inst twice.
+  if (!Rule.tryEraseInsnID(InsnID))
+    return;
+
+  Table << MatchTable::Opcode("GIR_EraseFromParent")
+        << MatchTable::Comment("InsnID") << MatchTable::IntValue(InsnID)
+        << MatchTable::LineBreak;
+}
+
+void EraseInstAction::emitActionOpcodes(MatchTable &Table,
+                                        RuleMatcher &Rule) const {
+  emitActionOpcodes(Table, Rule, InsnID);
+}
+
+//===- ReplaceRegAction ---------------------------------------------------===//
+
+void ReplaceRegAction::emitAdditionalPredicates(MatchTable &Table,
+                                                RuleMatcher &Rule) const {
+  if (TempRegID != (unsigned)-1)
+    return;
+
+  Table << MatchTable::Opcode("GIM_CheckCanReplaceReg")
+        << MatchTable::Comment("OldInsnID") << MatchTable::IntValue(OldInsnID)
+        << MatchTable::Comment("OldOpIdx") << MatchTable::IntValue(OldOpIdx)
+        << MatchTable::Comment("NewInsnId") << MatchTable::IntValue(NewInsnId)
+        << MatchTable::Comment("NewOpIdx") << MatchTable::IntValue(NewOpIdx)
+        << MatchTable::LineBreak;
+}
+
+void ReplaceRegAction::emitActionOpcodes(MatchTable &Table,
+                                         RuleMatcher &Rule) const {
+  if (TempRegID != (unsigned)-1) {
+    Table << MatchTable::Opcode("GIR_ReplaceRegWithTempReg")
+          << MatchTable::Comment("OldInsnID") << MatchTable::IntValue(OldInsnID)
+          << MatchTable::Comment("OldOpIdx") << MatchTable::IntValue(OldOpIdx)
+          << MatchTable::Comment("TempRegID") << MatchTable::IntValue(TempRegID)
           << MatchTable::LineBreak;
+  } else {
+    Table << MatchTable::Opcode("GIR_ReplaceReg")
+          << MatchTable::Comment("OldInsnID") << MatchTable::IntValue(OldInsnID)
+          << MatchTable::Comment("OldOpIdx") << MatchTable::IntValue(OldOpIdx)
+          << MatchTable::Comment("NewInsnId") << MatchTable::IntValue(NewInsnId)
+          << MatchTable::Comment("NewOpIdx") << MatchTable::IntValue(NewOpIdx)
+          << MatchTable::LineBreak;
+  }
 }
 
 //===- ConstrainOperandToRegClassAction -----------------------------------===//

@@ -83,6 +83,19 @@ func.func @loop_for_single_index_argument(%arg0: index) {
 
 // -----
 
+func.func @not_enough_loop_results(%arg0: index, %init: f32) {
+  // expected-error @below{{mismatch in number of loop-carried values and defined values}}
+  "scf.for"(%arg0, %arg0, %arg0, %init) (
+    {
+    ^bb0(%i0 : index, %iter: f32):
+      scf.yield %iter : f32
+    }
+  ) : (index, index, index, f32) -> ()
+  return
+}
+
+// -----
+
 func.func @loop_if_not_i1(%arg0: index) {
   // expected-error@+1 {{operand #0 must be 1-bit signless integer}}
   "scf.if"(%arg0) ({}, {}) : (index) -> ()
@@ -478,11 +491,25 @@ func.func @while_empty_region() {
 // -----
 
 func.func @while_empty_block() {
-  // expected-error@+1 {{expects the 'before' region to terminate with 'scf.condition'}}
+  // expected-error @below {{expects a non-empty block}}
   scf.while : () -> () {
-   ^bb0:
+  ^bb0:
   } do {
-   ^bb0:
+  ^bb0:
+  }
+}
+
+// -----
+
+func.func @while_invalid_terminator() {
+  // expected-error @below {{expects the 'before' region to terminate with 'scf.condition'}}
+  scf.while : () -> () {
+  ^bb0:
+    // expected-note @below{{terminator here}}
+    "test.foo"() : () -> ()
+  } do {
+  ^bb0:
+    "test.bar"() : () -> ()
   }
 }
 

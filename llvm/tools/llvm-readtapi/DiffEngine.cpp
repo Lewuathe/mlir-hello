@@ -224,7 +224,7 @@ std::vector<DiffOutput> getSingleIF(InterfaceFile *Interface,
                 Order);
   diffAttribute("Parent Umbrellas", Output, Interface->umbrellas(), Order);
   diffAttribute("Symbols", Output, Interface->symbols(), Order);
-  for (auto Doc : Interface->documents()) {
+  for (const auto &Doc : Interface->documents()) {
     DiffOutput Documents("Inlined Reexported Frameworks/Libraries");
     Documents.Kind = AD_Inline_Doc;
     Documents.Values.push_back(std::make_unique<InlineDoc>(
@@ -374,6 +374,10 @@ DiffEngine::findDifferences(const InterfaceFile *IFLHS,
     Output.push_back(recordDifferences(IFLHS->reexportedLibraries(),
                                        IFRHS->reexportedLibraries(),
                                        "Reexported Libraries"));
+
+  if (IFLHS->rpaths() != IFRHS->rpaths())
+    Output.push_back(recordDifferences(IFLHS->rpaths(), IFRHS->rpaths(),
+                                       "Run Path Search Paths"));
 
   if (IFLHS->allowableClients() != IFRHS->allowableClients())
     Output.push_back(recordDifferences(IFLHS->allowableClients(),
