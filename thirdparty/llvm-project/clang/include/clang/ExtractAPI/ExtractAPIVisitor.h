@@ -172,7 +172,7 @@ private:
   SmallVector<SymbolReference> getBases(const CXXRecordDecl *Decl) {
     // FIXME: store AccessSpecifier given by inheritance
     SmallVector<SymbolReference> Bases;
-    for (const auto BaseSpecifier : Decl->bases()) {
+    for (const auto &BaseSpecifier : Decl->bases()) {
       // skip classes not inherited as public
       if (BaseSpecifier.getAccessSpecifier() != AccessSpecifier::AS_public)
         continue;
@@ -266,7 +266,9 @@ bool ExtractAPIVisitorBase<Derived>::VisitVarDecl(const VarDecl *Decl) {
 
   if (Decl->isStaticDataMember()) {
     SymbolReference Context;
-    auto Record = dyn_cast<RecordDecl>(Decl->getDeclContext());
+    // getDeclContext() should return a RecordDecl since we
+    // are currently handling a static data member.
+    auto *Record = cast<RecordDecl>(Decl->getDeclContext());
     Context.Name = Record->getName();
     Context.USR = API.recordUSR(Record);
     auto Access = DeclarationFragmentsBuilder::getAccessControl(Decl);

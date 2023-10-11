@@ -192,16 +192,10 @@ define i8 @fshl_i8_const_fold_overshift_1() {
 }
 
 define i8 @fshl_i8_const_fold_overshift_2() {
-; CHECK-SD-LABEL: fshl_i8_const_fold_overshift_2:
-; CHECK-SD:       // %bb.0:
-; CHECK-SD-NEXT:    mov w0, #120 // =0x78
-; CHECK-SD-NEXT:    ret
-;
-; CHECK-GI-LABEL: fshl_i8_const_fold_overshift_2:
-; CHECK-GI:       // %bb.0:
-; CHECK-GI-NEXT:    mov w8, #15 // =0xf
-; CHECK-GI-NEXT:    lsl w0, w8, #3
-; CHECK-GI-NEXT:    ret
+; CHECK-LABEL: fshl_i8_const_fold_overshift_2:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    mov w0, #120 // =0x78
+; CHECK-NEXT:    ret
   %f = call i8 @llvm.fshl.i8(i8 15, i8 15, i8 11)
   ret i8 %f
 }
@@ -393,24 +387,17 @@ define i8 @fshr_i8_const_fold_overshift_2() {
 ;
 ; CHECK-GI-LABEL: fshr_i8_const_fold_overshift_2:
 ; CHECK-GI:       // %bb.0:
-; CHECK-GI-NEXT:    mov w8, #15 // =0xf
-; CHECK-GI-NEXT:    lsl w9, w8, #5
-; CHECK-GI-NEXT:    orr w0, w9, w8, lsr #3
+; CHECK-GI-NEXT:    mov w0, #481 // =0x1e1
 ; CHECK-GI-NEXT:    ret
   %f = call i8 @llvm.fshr.i8(i8 15, i8 15, i8 11)
   ret i8 %f
 }
 
 define i8 @fshr_i8_const_fold_overshift_3() {
-; CHECK-SD-LABEL: fshr_i8_const_fold_overshift_3:
-; CHECK-SD:       // %bb.0:
-; CHECK-SD-NEXT:    mov w0, #255 // =0xff
-; CHECK-SD-NEXT:    ret
-;
-; CHECK-GI-LABEL: fshr_i8_const_fold_overshift_3:
-; CHECK-GI:       // %bb.0:
-; CHECK-GI-NEXT:    mov w0, #-1 // =0xffffffff
-; CHECK-GI-NEXT:    ret
+; CHECK-LABEL: fshr_i8_const_fold_overshift_3:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    mov w0, #255 // =0xff
+; CHECK-NEXT:    ret
   %f = call i8 @llvm.fshr.i8(i8 0, i8 255, i8 8)
   ret i8 %f
 }
