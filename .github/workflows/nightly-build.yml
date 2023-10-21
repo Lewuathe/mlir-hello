@@ -27,16 +27,37 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y uuid-dev
-
-      - name: Cache LLVM artifact
-        id: cache-llvm
-        uses: actions/cache@v2
-        with:
-          path: |
-            ./thirdparty/llvm-project
-          key: ${{ runner.os }}-norm-${{ hashFiles('thirdparty/llvm-project/llvm/CMakeLists.txt') }}
-
-      - name: Build with the latest LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+      
+      - name: Clear LLVM
         run: |
-          ./update-llvm.sh
+          rm -rf ./thirdparty/llvm-project
+
+      - name: Checkout the latest LLVM
+        uses: actions/checkout@v2
+        with:
+          repository: llvm/llvm-project
+          ref: main
+          path: ./thirdparty/llvm-project
+
+      - name: Build LLVM and MLIR
+        run:
+          pushd ./thirdparty/llvm-project/build
+          cmake -G Ninja ../llvm \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_BUILD_EXAMPLES=ON \
+            -DLLVM_TARGETS_TO_BUILD="host" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON -Wno-dev
+          cmake --build . --target check-mlir
+          popd
+
+      - name: Build this project
+        run:
+          mkdir -p ./build
+          pushd ./build
+          cmake -G Ninja .. \
+            -DLLVM_DIR=$PWD/../thirdparty/llvm-project/build/lib/cmake/llvm \
+            -DMLIR_DIR=$PWD/../thirdparty/llvm-project/build/lib/cmake/mlir \
+            -Wno-dev
+           cmake --build . --target check-hello
+
