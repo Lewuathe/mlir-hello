@@ -40,7 +40,7 @@ jobs:
           path: ./thirdparty/llvm-project
 
       - name: Build LLVM and MLIR
-        run:
+        run: |
           pushd ./thirdparty/llvm-project/build
           cmake -G Ninja ../llvm \
             -DLLVM_ENABLE_PROJECTS=mlir \
@@ -52,7 +52,7 @@ jobs:
           popd
 
       - name: Build this project
-        run:
+        run: |
           mkdir -p ./build
           pushd ./build
           cmake -G Ninja .. \
