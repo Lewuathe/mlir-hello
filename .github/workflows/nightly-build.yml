@@ -41,6 +41,7 @@ jobs:
 
       - name: Build LLVM and MLIR
         run: |
+          mkdir -p ./thirdparty/llvm-project/build
           pushd ./thirdparty/llvm-project/build
           cmake -G Ninja ../llvm \
             -DLLVM_ENABLE_PROJECTS=mlir \
