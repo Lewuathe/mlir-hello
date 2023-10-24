@@ -23,9 +23,9 @@
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
-#include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Export.h"
 
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
@@ -68,8 +68,9 @@ int dumpLLVMIR(mlir::ModuleOp module) {
     return -1;
   }
   mlir::ExecutionEngine::setupTargetTripleAndDataLayout(llvmModule.get(),
-                                                        tmOrError.get().get());;
-//  mlir::ExecutionEngine::setupTargetTriple(llvmModule.get());
+                                                        tmOrError.get().get());
+  ;
+  //  mlir::ExecutionEngine::setupTargetTriple(llvmModule.get());
 
   // Optionally run an optimization pipeline over the llvm module.
   auto optPipeline = mlir::makeOptimizingTransformer(0, 0, nullptr);
@@ -81,32 +82,34 @@ int dumpLLVMIR(mlir::ModuleOp module) {
   return 0;
 }
 
-int loadMLIR(mlir::MLIRContext &context, mlir::OwningOpRef<mlir::ModuleOp> &module) {
-    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
-            llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
-    if (std::error_code ec = fileOrErr.getError()) {
-        llvm::errs() << "Could not open input file: " << ec.message() << "\n";
-        return -1;
-    }
+int loadMLIR(mlir::MLIRContext &context,
+             mlir::OwningOpRef<mlir::ModuleOp> &module) {
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
+      llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
+  if (std::error_code ec = fileOrErr.getError()) {
+    llvm::errs() << "Could not open input file: " << ec.message() << "\n";
+    return -1;
+  }
 
-    llvm::SourceMgr sourceMgr;
-    sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
-    module = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
-    if (!module) {
-        llvm::errs() << "Error can't load file " << inputFilename << "\n";
-        return 3;
-    }
-    return 0;
+  llvm::SourceMgr sourceMgr;
+  sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
+  module = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
+  if (!module) {
+    llvm::errs() << "Error can't load file " << inputFilename << "\n";
+    return 3;
+  }
+  return 0;
 }
 
-int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningOpRef<mlir::ModuleOp> &module) {
+int loadAndProcessMLIR(mlir::MLIRContext &context,
+                       mlir::OwningOpRef<mlir::ModuleOp> &module) {
   if (int error = loadMLIR(context, module)) {
     return error;
   }
 
   // Register passes to be applied in this compile process
   mlir::PassManager passManager(&context);
-  if(mlir::failed(mlir::applyPassManagerCLOptions(passManager)))
+  if (mlir::failed(mlir::applyPassManagerCLOptions(passManager)))
     return 4;
 
   passManager.addPass(hello::createLowerToAffinePass());
@@ -120,33 +123,34 @@ int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningOpRef<mlir::Modul
 }
 
 int runJit(mlir::ModuleOp module) {
-    // Initialize LLVM targets.
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
+  // Initialize LLVM targets.
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmPrinter();
 
-    // Register the translation from MLIR to LLVM IR, which must happen before we
-    // can JIT-compile.
-    mlir::registerLLVMDialectTranslation(*module->getContext());
+  // Register the translation from MLIR to LLVM IR, which must happen before we
+  // can JIT-compile.
+  mlir::registerLLVMDialectTranslation(*module->getContext());
 
-    // An optimization pipeline to use within the execution engine.
-    auto optPipeline = mlir::makeOptimizingTransformer(0, /*sizeLevel=*/0, /*targetMachine=*/nullptr);
+  // An optimization pipeline to use within the execution engine.
+  auto optPipeline = mlir::makeOptimizingTransformer(0, /*sizeLevel=*/0,
+                                                     /*targetMachine=*/nullptr);
 
-    // Create an MLIR execution engine. The execution engine eagerly JIT-compiles
-    // the module.
-    mlir::ExecutionEngineOptions engineOptions;
-    engineOptions.transformer = optPipeline;
-    auto maybeEngine = mlir::ExecutionEngine::create(module, engineOptions);
-    assert(maybeEngine && "failed to construct an execution engine");
-    auto &engine = maybeEngine.get();
+  // Create an MLIR execution engine. The execution engine eagerly JIT-compiles
+  // the module.
+  mlir::ExecutionEngineOptions engineOptions;
+  engineOptions.transformer = optPipeline;
+  auto maybeEngine = mlir::ExecutionEngine::create(module, engineOptions);
+  assert(maybeEngine && "failed to construct an execution engine");
+  auto &engine = maybeEngine.get();
 
-    // Invoke the JIT-compiled function.
-    auto invocationResult = engine->invokePacked("main");
-    if (invocationResult) {
-        llvm::errs() << "JIT invocation failed\n";
-        return -1;
-    }
+  // Invoke the JIT-compiled function.
+  auto invocationResult = engine->invokePacked("main");
+  if (invocationResult) {
+    llvm::errs() << "JIT invocation failed\n";
+    return -1;
+  }
 
-    return 0;
+  return 0;
 }
 
 int main(int argc, char **argv) {
@@ -164,7 +168,7 @@ int main(int argc, char **argv) {
   }
 
   dumpLLVMIR(*module);
-//  runJit(*module);
+  //  runJit(*module);
 
   return 0;
 }
