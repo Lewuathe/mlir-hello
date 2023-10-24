@@ -99,11 +99,12 @@ public:
   }
 
 private:
-  static mlir::LLVM::LLVMFunctionType getPrintfType(mlir::MLIRContext *context) {
+  static mlir::LLVM::LLVMFunctionType
+  getPrintfType(mlir::MLIRContext *context) {
     auto llvmI32Ty = mlir::IntegerType::get(context, 32);
     auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(context);
     auto llvmFnType = mlir::LLVM::LLVMFunctionType::get(llvmI32Ty, llvmPtrTy,
-                                                  /*isVarArg=*/true);
+                                                        /*isVarArg=*/true);
     return llvmFnType;
   }
 
@@ -116,7 +117,8 @@ private:
 
     mlir::PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointToStart(module.getBody());
-    rewriter.create<mlir::LLVM::LLVMFuncOp>(module.getLoc(), "printf", getPrintfType(context));
+    rewriter.create<mlir::LLVM::LLVMFuncOp>(module.getLoc(), "printf",
+                                            getPrintfType(context));
     return mlir::SymbolRefAttr::get(context, "printf");
   }
 
@@ -141,11 +143,8 @@ private:
             builder.getIntegerAttr(builder.getIndexType(), 0));
 
     return builder.create<mlir::LLVM::GEPOp>(
-      loc,
-      mlir::LLVM::LLVMPointerType::get(builder.getContext()),
-      global.getType(),
-      globalPtr, mlir::ArrayRef<mlir::Value>({cst0, cst0}));
-
+        loc, mlir::LLVM::LLVMPointerType::get(builder.getContext()),
+        global.getType(), globalPtr, mlir::ArrayRef<mlir::Value>({cst0, cst0}));
   }
 };
 
@@ -169,13 +168,15 @@ private:
         }
 
     private:
-      static mlir::LLVM::LLVMFunctionType getPrintfType(mlir::MLIRContext *context) {
-    auto llvmI32Ty = mlir::IntegerType::get(context, 32);
-    auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(context);
-    auto llvmFnType = mlir::LLVM::LLVMFunctionType::get(llvmI32Ty, llvmPtrTy,
-                                                  /*isVarArg=*/true);
-    return llvmFnType;
-  }
+      static mlir::LLVM::LLVMFunctionType
+      getPrintfType(mlir::MLIRContext *context) {
+        auto llvmI32Ty = mlir::IntegerType::get(context, 32);
+        auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(context);
+        auto llvmFnType =
+            mlir::LLVM::LLVMFunctionType::get(llvmI32Ty, llvmPtrTy,
+                                              /*isVarArg=*/true);
+        return llvmFnType;
+      }
 
         static mlir::FlatSymbolRefAttr getOrInsertPrintf(mlir::PatternRewriter &rewriter,
                                                          mlir::ModuleOp module) {
@@ -186,7 +187,8 @@ private:
 
             mlir::PatternRewriter::InsertionGuard insertGuard(rewriter);
             rewriter.setInsertionPointToStart(module.getBody());
-            rewriter.create<mlir::LLVM::LLVMFuncOp>(module.getLoc(), "printf", getPrintfType(context));
+            rewriter.create<mlir::LLVM::LLVMFuncOp>(module.getLoc(), "printf",
+                                                    getPrintfType(context));
             return mlir::SymbolRefAttr::get(context, "printf");
         }
 
@@ -211,10 +213,9 @@ private:
                     builder.getIntegerAttr(builder.getIndexType(), 0));
 
             return builder.create<mlir::LLVM::GEPOp>(
-              loc,
-              mlir::LLVM::LLVMPointerType::get(builder.getContext()),
-              global.getType(),
-              globalPtr, mlir::ArrayRef<mlir::Value>({cst0, cst0}));
+                loc, mlir::LLVM::LLVMPointerType::get(builder.getContext()),
+                global.getType(), globalPtr,
+                mlir::ArrayRef<mlir::Value>({cst0, cst0}));
         }
     };
 }
