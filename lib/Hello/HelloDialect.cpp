@@ -37,16 +37,17 @@ void HelloDialect::initialize() {
       >();
 }
 
-void hello::ConstantOp::build(mlir::OpBuilder &builder, mlir::OperationState &state, double value) {
+void hello::ConstantOp::build(mlir::OpBuilder &builder,
+                              mlir::OperationState &state, double value) {
   auto dataType = RankedTensorType::get({}, builder.getF64Type());
   auto dataAttribute = DenseElementsAttr::get(dataType, value);
   hello::ConstantOp::build(builder, state, dataType, dataAttribute);
 }
 
 mlir::Operation *HelloDialect::materializeConstant(mlir::OpBuilder &builder,
-                                                 mlir::Attribute value,
-                                                 mlir::Type type,
-                                                 mlir::Location loc) {
-    return builder.create<hello::ConstantOp>(loc, type,
-                                      value.cast<mlir::DenseElementsAttr>());
+                                                   mlir::Attribute value,
+                                                   mlir::Type type,
+                                                   mlir::Location loc) {
+  return builder.create<hello::ConstantOp>(
+      loc, type, value.cast<mlir::DenseElementsAttr>());
 }
