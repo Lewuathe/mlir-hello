@@ -4,7 +4,9 @@
 // RUN:   FileCheck %s --check-prefix=CHECK-SPARSE
 // RUN: mlir-opt %s --linalg-generalize-named-ops \
 // RUN:             --linalg-fuse-elementwise-ops \
-// RUN:             --sparsification --sparse-tensor-conversion --cse | \
+// RUN:             --sparsification --lower-sparse-ops-to-foreach \
+// RUN:             --lower-sparse-foreach-to-scf \
+// RUN:             --sparse-tensor-conversion --cse | \
 // RUN:   FileCheck %s --check-prefix=CHECK-CONVERT
 
 #CSR = #sparse_tensor.encoding<{
@@ -45,8 +47,9 @@
 //
 // CHECK-CONVERT-LABEL: func @kernel(
 // CHECK-CONVERT-SAME: %[[A:.*]]: !llvm.ptr<i8>) -> !llvm.ptr<i8>
-// CHECK-CONVERT: %[[C0:.*]] = arith.constant 0 : index
-// CHECK-CONVERT: %[[N:.*]] = call @sparseDimSize(%[[A]], %[[C0]])
+// CHECK-CONVERT-DAG: %[[C1:.*]] = arith.constant 1 : index
+// CHECK-CONVERT-DAG: %[[C0:.*]] = arith.constant 0 : index
+// CHECK-CONVERT: %[[N:.*]] = call @sparseLvlSize(%[[A]], %[[C1]])
 // CHECK-CONVERT: %[[V:.*]] = call @newSparseTensor
 // CHECK-CONVERT: %[[S:.*]] = call @sparseLvlSize(%[[V]], %[[C0]])
 // CHECK-CONVERT: %[[A:.*]] = memref.alloc(%[[S]]) : memref<?xf64>
