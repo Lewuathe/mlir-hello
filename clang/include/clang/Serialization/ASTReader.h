@@ -312,9 +312,6 @@ public:
                                StringRef SpecificModuleCachePath,
                                bool Complain) override;
   void ReadCounter(const serialization::ModuleFile &M, unsigned Value) override;
-
-private:
-  void Error(const char *Msg);
 };
 
 /// ASTReaderListenter implementation to set SuggestedPredefines of
@@ -816,6 +813,9 @@ private:
   /// instantiation where the first value is the ID of the decl and the second
   /// is the instantiation location.
   SmallVector<serialization::DeclID, 64> PendingInstantiations;
+
+  llvm::DenseMap<serialization::DeclID, std::set<serialization::DeclID>>
+      PendingInstantiationsOfConstexprEntities;
 
   //@}
 
@@ -2104,6 +2104,9 @@ public:
                   SmallVectorImpl<std::pair<ValueDecl *,
                                             SourceLocation>> &Pending) override;
 
+  virtual void ReadPendingInstantiationsOfConstexprEntity(
+      const NamedDecl *D, llvm::SmallSetVector<NamedDecl *, 4> &Decls) override;
+
   void ReadLateParsedTemplates(
       llvm::MapVector<const FunctionDecl *, std::unique_ptr<LateParsedTemplate>>
           &LPTMap) override;
@@ -2405,6 +2408,53 @@ public:
                                llvm::function_ref<void(FileEntryRef)> Visitor);
 
   bool isProcessingUpdateRecords() { return ProcessingUpdateRecords; }
+};
+
+/// A simple helper class to unpack an integer to bits and consuming
+/// the bits in order.
+class BitsUnpacker {
+  constexpr static uint32_t BitsIndexUpbound = 32;
+
+public:
+  BitsUnpacker(uint32_t V) { updateValue(V); }
+  BitsUnpacker(const BitsUnpacker &) = delete;
+  BitsUnpacker(BitsUnpacker &&) = delete;
+  BitsUnpacker operator=(const BitsUnpacker &) = delete;
+  BitsUnpacker operator=(BitsUnpacker &&) = delete;
+  ~BitsUnpacker() {
+#ifndef NDEBUG
+    while (isValid())
+      assert(!getNextBit() && "There are unprocessed bits!");
+#endif
+  }
+
+  void updateValue(uint32_t V) {
+    Value = V;
+    CurrentBitsIndex = 0;
+  }
+
+  bool getNextBit() {
+    assert(isValid());
+    return Value & (1 << CurrentBitsIndex++);
+  }
+
+  uint32_t getNextBits(uint32_t Width) {
+    assert(isValid());
+    assert(Width < BitsIndexUpbound);
+    uint32_t Ret = (Value >> CurrentBitsIndex) & ((1 << Width) - 1);
+    CurrentBitsIndex += Width;
+    return Ret;
+  }
+
+  bool canGetNextNBits(uint32_t Width) const {
+    return CurrentBitsIndex + Width < BitsIndexUpbound;
+  }
+
+private:
+  bool isValid() const { return CurrentBitsIndex < BitsIndexUpbound; }
+
+  uint32_t Value;
+  uint32_t CurrentBitsIndex = ~0;
 };
 
 } // namespace clang
