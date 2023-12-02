@@ -142,42 +142,33 @@ readBinaryIdsInternal(const MemoryBuffer &DataBuffer,
   return Error::success();
 }
 
-static Error printBinaryIdsInternal(raw_ostream &OS,
-                                    const MemoryBuffer &DataBuffer,
-                                    uint64_t BinaryIdsSize,
-                                    const uint8_t *BinaryIdsStart,
-                                    llvm::endianness Endian) {
-  if (BinaryIdsSize == 0)
-    return Error::success();
-
-  std::vector<llvm::object::BuildID> BinaryIds;
-  if (Error E = readBinaryIdsInternal(DataBuffer, BinaryIdsSize, BinaryIdsStart,
-                                      BinaryIds, Endian))
-    return E;
-
+static void
+printBinaryIdsInternal(raw_ostream &OS,
+                       std::vector<llvm::object::BuildID> &BinaryIds) {
   OS << "Binary IDs: \n";
   for (auto BI : BinaryIds) {
     for (uint64_t I = 0; I < BI.size(); I++)
       OS << format("%02x", BI[I]);
     OS << "\n";
   }
-
-  return Error::success();
 }
 
 Expected<std::unique_ptr<InstrProfReader>>
 InstrProfReader::create(const Twine &Path, vfs::FileSystem &FS,
-                        const InstrProfCorrelator *Correlator) {
+                        const InstrProfCorrelator *Correlator,
+                        std::function<void(Error)> Warn) {
   // Set up the buffer to read.
   auto BufferOrError = setupMemoryBuffer(Path, FS);
   if (Error E = BufferOrError.takeError())
     return std::move(E);
-  return InstrProfReader::create(std::move(BufferOrError.get()), Correlator);
+  return InstrProfReader::create(std::move(BufferOrError.get()), Correlator,
+                                 Warn);
 }
 
 Expected<std::unique_ptr<InstrProfReader>>
 InstrProfReader::create(std::unique_ptr<MemoryBuffer> Buffer,
-                        const InstrProfCorrelator *Correlator) {
+                        const InstrProfCorrelator *Correlator,
+                        std::function<void(Error)> Warn) {
   if (Buffer->getBufferSize() == 0)
     return make_error<InstrProfError>(instrprof_error::empty_raw_profile);
 
@@ -186,9 +177,9 @@ InstrProfReader::create(std::unique_ptr<MemoryBuffer> Buffer,
   if (IndexedInstrProfReader::hasFormat(*Buffer))
     Result.reset(new IndexedInstrProfReader(std::move(Buffer)));
   else if (RawInstrProfReader64::hasFormat(*Buffer))
-    Result.reset(new RawInstrProfReader64(std::move(Buffer), Correlator));
+    Result.reset(new RawInstrProfReader64(std::move(Buffer), Correlator, Warn));
   else if (RawInstrProfReader32::hasFormat(*Buffer))
-    Result.reset(new RawInstrProfReader32(std::move(Buffer), Correlator));
+    Result.reset(new RawInstrProfReader32(std::move(Buffer), Correlator, Warn));
   else if (TextInstrProfReader::hasFormat(*Buffer))
     Result.reset(new TextInstrProfReader(std::move(Buffer)));
   else
@@ -268,6 +259,8 @@ Error TextInstrProfReader::readHeader() {
       ProfileKind |= InstrProfKind::FunctionEntryInstrumentation;
     else if (Str.equals_insensitive("not_entry_first"))
       ProfileKind &= ~InstrProfKind::FunctionEntryInstrumentation;
+    else if (Str.equals_insensitive("single_byte_coverage"))
+      ProfileKind |= InstrProfKind::SingleByteCoverage;
     else if (Str.equals_insensitive("temporal_prof_traces")) {
       ProfileKind |= InstrProfKind::TemporalProfile;
       if (auto Err = readTemporalProfTraceData())
@@ -563,14 +556,25 @@ Error RawInstrProfReader<IntPtrT>::readHeader(
                   "\nPLEASE update this tool to version in the raw profile, or "
                   "regenerate raw profile with expected version.")
                      .str());
-  if (useDebugInfoCorrelate() && !Correlator)
+  if (useCorrelate() && !Correlator)
     return error(instrprof_error::missing_debug_info_for_correlation);
-  if (!useDebugInfoCorrelate() && Correlator)
+  if (!useCorrelate() && Correlator)
     return error(instrprof_error::unexpected_debug_info_for_correlation);
 
-  BinaryIdsSize = swap(Header.BinaryIdsSize);
-  if (BinaryIdsSize % sizeof(uint64_t))
+  uint64_t BinaryIdSize = swap(Header.BinaryIdsSize);
+  // Binary id start just after the header if exists.
+  const uint8_t *BinaryIdStart =
+      reinterpret_cast<const uint8_t *>(&Header) + sizeof(RawInstrProf::Header);
+  const uint8_t *BinaryIdEnd = BinaryIdStart + BinaryIdSize;
+  const uint8_t *BufferEnd = (const uint8_t *)DataBuffer->getBufferEnd();
+  if (BinaryIdSize % sizeof(uint64_t) || BinaryIdEnd > BufferEnd)
     return error(instrprof_error::bad_header);
+  if (BinaryIdSize != 0) {
+    if (Error Err =
+            readBinaryIdsInternal(*DataBuffer, BinaryIdSize, BinaryIdStart,
+                                  BinaryIds, getDataEndianness()))
+      return Err;
+  }
 
   CountersDelta = swap(Header.CountersDelta);
   BitmapDelta = swap(Header.BitmapDelta);
@@ -588,7 +592,7 @@ Error RawInstrProfReader<IntPtrT>::readHeader(
   auto PaddingSize = getNumPaddingBytes(NamesSize);
 
   // Profile data starts after profile header and binary ids if exist.
-  ptrdiff_t DataOffset = sizeof(RawInstrProf::Header) + BinaryIdsSize;
+  ptrdiff_t DataOffset = sizeof(RawInstrProf::Header) + BinaryIdSize;
   ptrdiff_t CountersOffset = DataOffset + DataSize + PaddingBytesBeforeCounters;
   ptrdiff_t BitmapOffset =
       CountersOffset + CountersSize + PaddingBytesAfterCounters;
@@ -617,18 +621,11 @@ Error RawInstrProfReader<IntPtrT>::readHeader(
     NamesEnd = NamesStart + NamesSize;
   }
 
-  // Binary ids start just after the header.
-  BinaryIdsStart =
-      reinterpret_cast<const uint8_t *>(&Header) + sizeof(RawInstrProf::Header);
   CountersStart = Start + CountersOffset;
   CountersEnd = CountersStart + CountersSize;
   BitmapStart = Start + BitmapOffset;
   BitmapEnd = BitmapStart + NumBitmapBytes;
   ValueDataStart = reinterpret_cast<const uint8_t *>(Start + ValueDataOffset);
-
-  const uint8_t *BufferEnd = (const uint8_t *)DataBuffer->getBufferEnd();
-  if (BinaryIdsStart + BinaryIdsSize > BufferEnd)
-    return error(instrprof_error::bad_header);
 
   std::unique_ptr<InstrProfSymtab> NewSymtab = std::make_unique<InstrProfSymtab>();
   if (Error E = createSymtab(*NewSymtab))
@@ -706,8 +703,12 @@ Error RawInstrProfReader<IntPtrT>::readRawCounts(
       // A value of zero signifies the block is covered.
       Record.Counts.push_back(*Ptr == 0 ? 1 : 0);
     } else {
-      const auto *CounterValue = reinterpret_cast<const uint64_t *>(Ptr);
-      Record.Counts.push_back(swap(*CounterValue));
+      uint64_t CounterValue = swap(*reinterpret_cast<const uint64_t *>(Ptr));
+      if (CounterValue > MaxCounterValue && Warn)
+        Warn(make_error<InstrProfError>(
+            instrprof_error::counter_value_too_large, Twine(CounterValue)));
+
+      Record.Counts.push_back(CounterValue);
     }
   }
 
@@ -823,14 +824,16 @@ Error RawInstrProfReader<IntPtrT>::readNextRecord(NamedInstrProfRecord &Record) 
 template <class IntPtrT>
 Error RawInstrProfReader<IntPtrT>::readBinaryIds(
     std::vector<llvm::object::BuildID> &BinaryIds) {
-  return readBinaryIdsInternal(*DataBuffer, BinaryIdsSize, BinaryIdsStart,
-                               BinaryIds, getDataEndianness());
+  BinaryIds.insert(BinaryIds.begin(), this->BinaryIds.begin(),
+                   this->BinaryIds.end());
+  return Error::success();
 }
 
 template <class IntPtrT>
 Error RawInstrProfReader<IntPtrT>::printBinaryIds(raw_ostream &OS) {
-  return printBinaryIdsInternal(OS, *DataBuffer, BinaryIdsSize, BinaryIdsStart,
-                                getDataEndianness());
+  if (!BinaryIds.empty())
+    printBinaryIdsInternal(OS, BinaryIds);
+  return Error::success();
 }
 
 namespace llvm {
@@ -1466,8 +1469,11 @@ Error IndexedInstrProfReader::readBinaryIds(
 }
 
 Error IndexedInstrProfReader::printBinaryIds(raw_ostream &OS) {
-  return printBinaryIdsInternal(OS, *DataBuffer, BinaryIdsSize, BinaryIdsStart,
-                                llvm::endianness::little);
+  std::vector<llvm::object::BuildID> BinaryIds;
+  if (Error E = readBinaryIds(BinaryIds))
+    return E;
+  printBinaryIdsInternal(OS, BinaryIds);
+  return Error::success();
 }
 
 void InstrProfReader::accumulateCounts(CountSumOrPercent &Sum, bool IsCS) {
