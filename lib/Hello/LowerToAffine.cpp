@@ -135,7 +135,7 @@ class PrintOpLowering : public mlir::OpConversionPattern<hello::PrintOp> {
                   mlir::ConversionPatternRewriter &rewriter) const final {
     // We don't lower "hello.print" in this pass, but we need to update its
     // operands.
-    rewriter.updateRootInPlace(op,
+    rewriter.modifyOpInPlace(op,
                                [&] { op->setOperands(adaptor.getOperands()); });
     return mlir::success();
   }
