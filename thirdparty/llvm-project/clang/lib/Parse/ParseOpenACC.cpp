@@ -91,14 +91,18 @@ OpenACCClauseKind getOpenACCClauseKind(Token Tok) {
              Tok.getIdentifierInfo()->getName())
       .Case("attach", OpenACCClauseKind::Attach)
       .Case("auto", OpenACCClauseKind::Auto)
+      .Case("bind", OpenACCClauseKind::Bind)
       .Case("create", OpenACCClauseKind::Create)
+      .Case("collapse", OpenACCClauseKind::Collapse)
       .Case("copy", OpenACCClauseKind::Copy)
       .Case("copyin", OpenACCClauseKind::CopyIn)
       .Case("copyout", OpenACCClauseKind::CopyOut)
       .Case("default", OpenACCClauseKind::Default)
+      .Case("default_async", OpenACCClauseKind::DefaultAsync)
       .Case("delete", OpenACCClauseKind::Delete)
       .Case("detach", OpenACCClauseKind::Detach)
       .Case("device", OpenACCClauseKind::Device)
+      .Case("device_num", OpenACCClauseKind::DeviceNum)
       .Case("device_resident", OpenACCClauseKind::DeviceResident)
       .Case("deviceptr", OpenACCClauseKind::DevicePtr)
       .Case("finalize", OpenACCClauseKind::Finalize)
@@ -109,6 +113,8 @@ OpenACCClauseKind getOpenACCClauseKind(Token Tok) {
       .Case("independent", OpenACCClauseKind::Independent)
       .Case("link", OpenACCClauseKind::Link)
       .Case("no_create", OpenACCClauseKind::NoCreate)
+      .Case("num_gangs", OpenACCClauseKind::NumGangs)
+      .Case("num_workers", OpenACCClauseKind::NumWorkers)
       .Case("nohost", OpenACCClauseKind::NoHost)
       .Case("present", OpenACCClauseKind::Present)
       .Case("private", OpenACCClauseKind::Private)
@@ -117,6 +123,7 @@ OpenACCClauseKind getOpenACCClauseKind(Token Tok) {
       .Case("seq", OpenACCClauseKind::Seq)
       .Case("use_device", OpenACCClauseKind::UseDevice)
       .Case("vector", OpenACCClauseKind::Vector)
+      .Case("vector_length", OpenACCClauseKind::VectorLength)
       .Case("worker", OpenACCClauseKind::Worker)
       .Default(OpenACCClauseKind::Invalid);
 }
@@ -151,6 +158,9 @@ enum class OpenACCSpecialTokenKind {
   DevNum,
   Queues,
   Zero,
+  Force,
+  Num,
+  Length,
 };
 
 bool isOpenACCSpecialToken(OpenACCSpecialTokenKind Kind, Token Tok) {
@@ -166,6 +176,12 @@ bool isOpenACCSpecialToken(OpenACCSpecialTokenKind Kind, Token Tok) {
     return Tok.getIdentifierInfo()->isStr("queues");
   case OpenACCSpecialTokenKind::Zero:
     return Tok.getIdentifierInfo()->isStr("zero");
+  case OpenACCSpecialTokenKind::Force:
+    return Tok.getIdentifierInfo()->isStr("force");
+  case OpenACCSpecialTokenKind::Num:
+    return Tok.getIdentifierInfo()->isStr("num");
+  case OpenACCSpecialTokenKind::Length:
+    return Tok.getIdentifierInfo()->isStr("length");
   }
   llvm_unreachable("Unknown 'Kind' Passed");
 }
@@ -441,6 +457,9 @@ ClauseParensKind getClauseParensKind(OpenACCDirectiveKind DirKind,
   case OpenACCClauseKind::Self:
     return DirKind == OpenACCDirectiveKind::Update ? ClauseParensKind::Required
                                                    : ClauseParensKind::Optional;
+  case OpenACCClauseKind::Worker:
+  case OpenACCClauseKind::Vector:
+    return ClauseParensKind::Optional;
 
   case OpenACCClauseKind::Default:
   case OpenACCClauseKind::If:
@@ -462,6 +481,13 @@ ClauseParensKind getClauseParensKind(OpenACCDirectiveKind DirKind,
   case OpenACCClauseKind::Link:
   case OpenACCClauseKind::Host:
   case OpenACCClauseKind::Reduction:
+  case OpenACCClauseKind::Collapse:
+  case OpenACCClauseKind::Bind:
+  case OpenACCClauseKind::VectorLength:
+  case OpenACCClauseKind::NumGangs:
+  case OpenACCClauseKind::NumWorkers:
+  case OpenACCClauseKind::DeviceNum:
+  case OpenACCClauseKind::DefaultAsync:
     return ClauseParensKind::Required;
 
   case OpenACCClauseKind::Auto:
@@ -471,8 +497,6 @@ ClauseParensKind getClauseParensKind(OpenACCDirectiveKind DirKind,
   case OpenACCClauseKind::Invalid:
   case OpenACCClauseKind::NoHost:
   case OpenACCClauseKind::Seq:
-  case OpenACCClauseKind::Worker:
-  case OpenACCClauseKind::Vector:
     return ClauseParensKind::None;
   }
   llvm_unreachable("Unhandled clause kind");
@@ -527,6 +551,12 @@ void Parser::ParseOpenACCClauseList(OpenACCDirectiveKind DirKind) {
       return;
     }
   }
+}
+
+ExprResult Parser::ParseOpenACCIntExpr() {
+  // FIXME: this is required to be an integer expression (or dependent), so we
+  // should ensure that is the case by passing this to SEMA here.
+  return getActions().CorrectDelayedTyposInExpr(ParseAssignmentExpression());
 }
 
 bool Parser::ParseOpenACCClauseVarList(OpenACCClauseKind Kind) {
@@ -654,6 +684,31 @@ bool Parser::ParseOpenACCClauseParams(OpenACCDirectiveKind DirKind,
       if (ParseOpenACCClauseVarList(Kind))
         return true;
       break;
+    case OpenACCClauseKind::Collapse: {
+      tryParseAndConsumeSpecialTokenKind(*this, OpenACCSpecialTokenKind::Force,
+                                         Kind);
+      ExprResult NumLoops =
+          getActions().CorrectDelayedTyposInExpr(ParseConstantExpression());
+      if (NumLoops.isInvalid())
+        return true;
+      break;
+    }
+    case OpenACCClauseKind::Bind: {
+      ExprResult BindArg = ParseOpenACCBindClauseArgument();
+      if (BindArg.isInvalid())
+        return true;
+      break;
+    }
+    case OpenACCClauseKind::NumGangs:
+    case OpenACCClauseKind::NumWorkers:
+    case OpenACCClauseKind::DeviceNum:
+    case OpenACCClauseKind::DefaultAsync:
+    case OpenACCClauseKind::VectorLength: {
+      ExprResult IntExpr = ParseOpenACCIntExpr();
+      if (IntExpr.isInvalid())
+        return true;
+      break;
+    }
     default:
       llvm_unreachable("Not a required parens type?");
     }
@@ -668,6 +723,18 @@ bool Parser::ParseOpenACCClauseParams(OpenACCDirectiveKind DirKind,
         // An invalid expression can be just about anything, so just give up on
         // this clause list.
         if (CondExpr.isInvalid())
+          return true;
+        break;
+      }
+      case OpenACCClauseKind::Vector:
+      case OpenACCClauseKind::Worker: {
+        tryParseAndConsumeSpecialTokenKind(*this,
+                                           Kind == OpenACCClauseKind::Vector
+                                               ? OpenACCSpecialTokenKind::Length
+                                               : OpenACCSpecialTokenKind::Num,
+                                           Kind);
+        ExprResult IntExpr = ParseOpenACCIntExpr();
+        if (IntExpr.isInvalid())
           return true;
         break;
       }
@@ -744,7 +811,7 @@ bool Parser::ParseOpenACCWaitArgument() {
 ExprResult Parser::ParseOpenACCIDExpression() {
   ExprResult Res;
   if (getLangOpts().CPlusPlus) {
-    Res = ParseCXXIdExpression(/*isAddressOfOperand=*/false);
+    Res = ParseCXXIdExpression(/*isAddressOfOperand=*/true);
   } else {
     // There isn't anything quite the same as ParseCXXIdExpression for C, so we
     // need to get the identifier, then call into Sema ourselves.
@@ -769,6 +836,25 @@ ExprResult Parser::ParseOpenACCIDExpression() {
   }
 
   return getActions().CorrectDelayedTyposInExpr(Res);
+}
+
+ExprResult Parser::ParseOpenACCBindClauseArgument() {
+  // OpenACC 3.3 section 2.15:
+  // The bind clause specifies the name to use when calling the procedure on a
+  // device other than the host. If the name is specified as an identifier, it
+  // is called as if that name were specified in the language being compiled. If
+  // the name is specified as a string, the string is used for the procedure
+  // name unmodified.
+  if (getCurToken().is(tok::r_paren)) {
+    Diag(getCurToken(), diag::err_acc_incorrect_bind_arg);
+    return ExprError();
+  }
+
+  if (tok::isStringLiteral(getCurToken().getKind()))
+    return getActions().CorrectDelayedTyposInExpr(ParseStringLiteralExpression(
+        /*AllowUserDefinedLiteral=*/false, /*Unevaluated=*/true));
+
+  return ParseOpenACCIDExpression();
 }
 
 /// OpenACC 3.3, section 1.6:
