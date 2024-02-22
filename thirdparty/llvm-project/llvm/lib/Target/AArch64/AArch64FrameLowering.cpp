@@ -296,7 +296,7 @@ static int64_t getArgumentStackToRestore(MachineFunction &MF,
 static bool produceCompactUnwindFrame(MachineFunction &MF);
 static bool needsWinCFI(const MachineFunction &MF);
 static StackOffset getSVEStackSize(const MachineFunction &MF);
-static unsigned findScratchNonCalleeSaveRegister(MachineBasicBlock *MBB);
+static Register findScratchNonCalleeSaveRegister(MachineBasicBlock *MBB);
 
 /// Returns true if a homogeneous prolog or epilog code can be emitted
 /// for the size optimization. If possible, a frame helper call is injected.
@@ -403,13 +403,16 @@ static unsigned getFixedObjectSize(const MachineFunction &MF,
   if (!IsWin64 || IsFunclet) {
     return AFI->getTailCallReservedStack();
   } else {
-    if (AFI->getTailCallReservedStack() != 0)
+    if (AFI->getTailCallReservedStack() != 0 &&
+        !MF.getFunction().getAttributes().hasAttrSomewhere(
+            Attribute::SwiftAsync))
       report_fatal_error("cannot generate ABI-changing tail call for Win64");
     // Var args are stored here in the primary function.
     const unsigned VarArgsArea = AFI->getVarArgsGPRSize();
     // To support EH funclets we allocate an UnwindHelp object
     const unsigned UnwindHelpObject = (MF.hasEHFunclets() ? 8 : 0);
-    return alignTo(VarArgsArea + UnwindHelpObject, 16);
+    return AFI->getTailCallReservedStack() +
+           alignTo(VarArgsArea + UnwindHelpObject, 16);
   }
 }
 
@@ -1013,7 +1016,7 @@ static void getLiveRegsForEntryMBB(LivePhysRegs &LiveRegs,
 // but we would then have to make sure that we were in fact saving at least one
 // callee-save register in the prologue, which is additional complexity that
 // doesn't seem worth the benefit.
-static unsigned findScratchNonCalleeSaveRegister(MachineBasicBlock *MBB) {
+static Register findScratchNonCalleeSaveRegister(MachineBasicBlock *MBB) {
   MachineFunction *MF = MBB->getParent();
 
   // If MBB is an entry block, use X9 as the scratch register
@@ -1058,9 +1061,15 @@ bool AArch64FrameLowering::canUseAsPrologue(
       return false;
   }
 
+  // Certain stack probing sequences might clobber flags, then we can't use
+  // the block as a prologue if the flags register is a live-in.
+  if (MF->getInfo<AArch64FunctionInfo>()->hasStackProbing() &&
+      MBB.isLiveIn(AArch64::NZCV))
+    return false;
+
   // Don't need a scratch register if we're not going to re-align the stack or
   // emit stack probes.
-  if (!RegInfo->hasStackRealignment(*MF) && TLI->hasInlineStackProbe(*MF))
+  if (!RegInfo->hasStackRealignment(*MF) && !TLI->hasInlineStackProbe(*MF))
     return true;
   // Otherwise, we can use any block as long as it has a scratch register
   // available.
@@ -4339,8 +4348,10 @@ AArch64FrameLowering::inlineStackProbeLoopExactMultiple(
   ExitMBB->transferSuccessorsAndUpdatePHIs(&MBB);
   MBB.addSuccessor(LoopMBB);
   // Update liveins.
-  recomputeLiveIns(*LoopMBB);
-  recomputeLiveIns(*ExitMBB);
+  bool anyChange = false;
+  do {
+    anyChange = recomputeLiveIns(*ExitMBB) || recomputeLiveIns(*LoopMBB);
+  } while (anyChange);
 
   return ExitMBB->begin();
 }
