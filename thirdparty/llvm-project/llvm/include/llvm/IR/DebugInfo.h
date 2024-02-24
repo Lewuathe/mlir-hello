@@ -111,6 +111,8 @@ public:
   void processLocation(const Module &M, const DILocation *Loc);
   // Process a DPValue, much like a DbgVariableIntrinsic.
   void processDPValue(const Module &M, const DPValue &DPV);
+  /// Dispatch to DbgRecord subclasses handlers.
+  void processDbgRecord(const Module &M, const DbgRecord &DPE);
 
   /// Process subprogram.
   void processSubprogram(DISubprogram *SP);
@@ -230,6 +232,7 @@ inline AssignmentMarkerRange getAssignmentMarkers(const Instruction *Inst) {
   else
     return make_range(Value::user_iterator(), Value::user_iterator());
 }
+
 inline SmallVector<DPValue *> getDPVAssignmentMarkers(const Instruction *Inst) {
   if (auto *ID = Inst->getMetadata(LLVMContext::MD_DIAssignID))
     return cast<DIAssignID>(ID)->getAllDPValueUsers();
