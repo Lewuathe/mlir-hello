@@ -13,6 +13,7 @@
 #include "src/__support/CPP/algorithm.h" // max
 #include "src/__support/CPP/optional.h"
 #include "src/__support/CPP/type_traits.h"
+#include "src/__support/macros/config.h"
 #include "src/__support/str_to_integer.h"
 #include "src/stdio/printf_core/core_structs.h"
 #include "src/stdio/printf_core/printf_config.h"
@@ -23,7 +24,7 @@
 #include "src/__support/fixed_point/fx_rep.h"
 #endif // LIBC_INTERNAL_PRINTF_HAS_FIXED_POINT
 
-namespace LIBC_NAMESPACE {
+namespace LIBC_NAMESPACE_DECL {
 namespace printf_core {
 
 template <typename T> struct int_type_of {
@@ -128,7 +129,8 @@ public:
         cur_pos = cur_pos + result.parsed_len;
       }
       if (section.min_width < 0) {
-        section.min_width = -section.min_width;
+        section.min_width =
+            (section.min_width == INT_MIN) ? INT_MAX : -section.min_width;
         section.flags = static_cast<FormatFlags>(section.flags |
                                                  FormatFlags::LEFT_JUSTIFIED);
       }
@@ -496,7 +498,7 @@ private:
   // the type of index, and returns a TypeDesc describing that type. It does not
   // modify cur_pos.
   LIBC_INLINE TypeDesc get_type_desc(size_t index) {
-    // index mode is assumed, and the indicies start at 1, so an index
+    // index mode is assumed, and the indices start at 1, so an index
     // of 0 is invalid.
     size_t local_pos = 0;
 
@@ -668,6 +670,6 @@ private:
 };
 
 } // namespace printf_core
-} // namespace LIBC_NAMESPACE
+} // namespace LIBC_NAMESPACE_DECL
 
 #endif // LLVM_LIBC_SRC_STDIO_PRINTF_CORE_PARSER_H

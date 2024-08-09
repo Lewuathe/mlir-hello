@@ -14,9 +14,12 @@
 #include "Common/CodeGenSchedule.h"
 #include "Common/CodeGenTarget.h"
 #include "Common/PredicateExpander.h"
+#include "Common/Utils.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/MC/MCSchedule.h"
@@ -31,7 +34,6 @@
 #include <cassert>
 #include <cstdint>
 #include <iterator>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -238,6 +240,9 @@ void SubtargetEmitter::EmitSubtargetInfoMacroCalls(raw_ostream &OS) {
 
   OS << "\n#ifdef GET_SUBTARGETINFO_MC_DESC\n";
   OS << "#undef GET_SUBTARGETINFO_MC_DESC\n\n";
+
+  if (Target == "AArch64")
+    OS << "#include \"llvm/TargetParser/AArch64TargetParser.h\"\n\n";
 }
 
 //
@@ -246,30 +251,29 @@ void SubtargetEmitter::EmitSubtargetInfoMacroCalls(raw_ostream &OS) {
 //
 unsigned SubtargetEmitter::FeatureKeyValues(
     raw_ostream &OS, const DenseMap<Record *, unsigned> &FeatureMap) {
-  // Gather and sort all the features
   std::vector<Record *> FeatureList =
       Records.getAllDerivedDefinitions("SubtargetFeature");
 
+  // Remove features with empty name.
+  llvm::erase_if(FeatureList, [](const Record *Rec) {
+    return Rec->getValueAsString("Name").empty();
+  });
   if (FeatureList.empty())
     return 0;
 
-  llvm::sort(FeatureList, LessRecordFieldName());
+  // Sort and check duplicate Feature name.
+  sortAndReportDuplicates(FeatureList, "Feature");
 
-  // Begin feature table
+  // Begin feature table.
   OS << "// Sorted (by key) array of values for CPU features.\n"
      << "extern const llvm::SubtargetFeatureKV " << Target
      << "FeatureKV[] = {\n";
 
-  // For each feature
-  unsigned NumFeatures = 0;
   for (const Record *Feature : FeatureList) {
     // Next feature
     StringRef Name = Feature->getName();
     StringRef CommandLineName = Feature->getValueAsString("Name");
     StringRef Desc = Feature->getValueAsString("Desc");
-
-    if (CommandLineName.empty())
-      continue;
 
     // Emit as { "feature", "description", { featureEnum }, { i1 , i2 , ... , in
     // } }
@@ -282,13 +286,12 @@ unsigned SubtargetEmitter::FeatureKeyValues(
     printFeatureMask(OS, ImpliesList, FeatureMap);
 
     OS << " },\n";
-    ++NumFeatures;
   }
 
-  // End feature table
+  // End feature table.
   OS << "};\n";
 
-  return NumFeatures;
+  return FeatureList.size();
 }
 
 //
@@ -303,18 +306,22 @@ SubtargetEmitter::CPUKeyValues(raw_ostream &OS,
       Records.getAllDerivedDefinitions("Processor");
   llvm::sort(ProcessorList, LessRecordFieldName());
 
-  // Begin processor table
+  // Note that unlike `FeatureKeyValues`, here we do not need to check for
+  // duplicate processors, since that is already done when the SubtargetEmitter
+  // constructor calls `getSchedModels` to build a `CodeGenSchedModels` object,
+  // which does the duplicate processor check.
+
+  // Begin processor table.
   OS << "// Sorted (by key) array of values for CPU subtype.\n"
      << "extern const llvm::SubtargetSubTypeKV " << Target
      << "SubTypeKV[] = {\n";
 
-  // For each processor
   for (Record *Processor : ProcessorList) {
     StringRef Name = Processor->getValueAsString("Name");
     RecVec FeatureList = Processor->getValueAsListOfDefs("Features");
     RecVec TuneFeatureList = Processor->getValueAsListOfDefs("TuneFeatures");
 
-    // Emit as { "cpu", "description", 0, { f1 , f2 , ... fn } },
+    // Emit as "{ "cpu", "description", 0, { f1 , f2 , ... fn } },".
     OS << " { "
        << "\"" << Name << "\", ";
 
@@ -328,7 +335,7 @@ SubtargetEmitter::CPUKeyValues(raw_ostream &OS,
     OS << ", &" << ProcModelName << " },\n";
   }
 
-  // End processor table
+  // End processor table.
   OS << "};\n";
 
   return ProcessorList.size();
@@ -483,7 +490,7 @@ void SubtargetEmitter::EmitStageAndOperandCycleData(
   // operand cycles, and pipeline bypass tables. Then add the new Itinerary
   // object with computed offsets to the ProcItinLists result.
   unsigned StageCount = 1, OperandCycleCount = 1;
-  std::map<std::string, unsigned> ItinStageMap, ItinOperandMap;
+  StringMap<unsigned> ItinStageMap, ItinOperandMap;
   for (const CodeGenProcModel &ProcModel : SchedModels.procModels()) {
     // Add process itinerary to the list.
     std::vector<InstrItinerary> &ItinList = ProcItinLists.emplace_back();
@@ -902,14 +909,19 @@ SubtargetEmitter::FindWriteResources(const CodeGenSchedRW &SchedWrite,
   for (Record *WR : ProcModel.WriteResDefs) {
     if (!WR->isSubClassOf("WriteRes"))
       continue;
-    if (AliasDef == WR->getValueAsDef("WriteType") ||
-        SchedWrite.TheDef == WR->getValueAsDef("WriteType")) {
+    Record *WRDef = WR->getValueAsDef("WriteType");
+    if (AliasDef == WRDef || SchedWrite.TheDef == WRDef) {
       if (ResDef) {
         PrintFatalError(WR->getLoc(), "Resources are defined for both "
                                       "SchedWrite and its alias on processor " +
                                           ProcModel.ModelName);
       }
       ResDef = WR;
+      // If there is no AliasDef and we find a match, we can early exit since
+      // there is no need to verify whether there are resources defined for both
+      // SchedWrite and its alias.
+      if (!AliasDef)
+        break;
     }
   }
   // TODO: If ProcModel has a base model (previous generation processor),
@@ -956,14 +968,19 @@ Record *SubtargetEmitter::FindReadAdvance(const CodeGenSchedRW &SchedRead,
   for (Record *RA : ProcModel.ReadAdvanceDefs) {
     if (!RA->isSubClassOf("ReadAdvance"))
       continue;
-    if (AliasDef == RA->getValueAsDef("ReadType") ||
-        SchedRead.TheDef == RA->getValueAsDef("ReadType")) {
+    Record *RADef = RA->getValueAsDef("ReadType");
+    if (AliasDef == RADef || SchedRead.TheDef == RADef) {
       if (ResDef) {
         PrintFatalError(RA->getLoc(), "Resources are defined for both "
                                       "SchedRead and its alias on processor " +
                                           ProcModel.ModelName);
       }
       ResDef = RA;
+      // If there is no AliasDef and we find a match, we can early exit since
+      // there is no need to verify whether there are resources defined for both
+      // SchedRead and its alias.
+      if (!AliasDef)
+        break;
     }
   }
   // TODO: If ProcModel has a base model (previous generation processor),
@@ -1122,10 +1139,8 @@ void SubtargetEmitter::GenSchedClassTables(const CodeGenProcModel &ProcModel,
       WriterNames.push_back(SchedModels.getSchedWrite(WriteID).Name);
       // If this Write is not referenced by a ReadAdvance, don't distinguish it
       // from other WriteLatency entries.
-      if (!SchedModels.hasReadOfWrite(
-              SchedModels.getSchedWrite(WriteID).TheDef)) {
+      if (!ProcModel.hasReadOfWrite(SchedModels.getSchedWrite(WriteID).TheDef))
         WriteID = 0;
-      }
       WLEntry.WriteResourceID = WriteID;
 
       for (unsigned WS : WriteSeq) {
@@ -1879,6 +1894,10 @@ void SubtargetEmitter::ParseFeaturesFunction(raw_ostream &OS) {
     return;
   }
 
+  if (Target == "AArch64")
+    OS << "  CPU = AArch64::resolveCPUAlias(CPU);\n"
+       << "  TuneCPU = AArch64::resolveCPUAlias(TuneCPU);\n";
+
   OS << "  InitMCProcessorInfo(CPU, TuneCPU, FS);\n"
      << "  const FeatureBitset &Bits = getFeatureBits();\n";
 
@@ -1930,6 +1949,11 @@ void SubtargetEmitter::emitGenMCSubtargetInfo(raw_ostream &OS) {
     OS << "  unsigned getHwMode(enum HwModeType type = HwMode_Default) const "
           "override;\n";
   }
+  if (Target == "AArch64")
+    OS << "  bool isCPUStringValid(StringRef CPU) const override {\n"
+       << "    CPU = AArch64::resolveCPUAlias(CPU);\n"
+       << "    return MCSubtargetInfo::isCPUStringValid(CPU);\n"
+       << "  }\n";
   OS << "};\n";
   EmitHwModeCheck(Target + "GenMCSubtargetInfo", OS);
 }
@@ -1997,6 +2021,9 @@ void SubtargetEmitter::run(raw_ostream &OS) {
   OS << "\nstatic inline MCSubtargetInfo *create" << Target
      << "MCSubtargetInfoImpl("
      << "const Triple &TT, StringRef CPU, StringRef TuneCPU, StringRef FS) {\n";
+  if (Target == "AArch64")
+    OS << "  CPU = AArch64::resolveCPUAlias(CPU);\n"
+       << "  TuneCPU = AArch64::resolveCPUAlias(TuneCPU);\n";
   OS << "  return new " << Target
      << "GenMCSubtargetInfo(TT, CPU, TuneCPU, FS, ";
   if (NumFeatures)
@@ -2029,6 +2056,8 @@ void SubtargetEmitter::run(raw_ostream &OS) {
 
   OS << "#include \"llvm/Support/Debug.h\"\n";
   OS << "#include \"llvm/Support/raw_ostream.h\"\n\n";
+  if (Target == "AArch64")
+    OS << "#include \"llvm/TargetParser/AArch64TargetParser.h\"\n\n";
   ParseFeaturesFunction(OS);
 
   OS << "#endif // GET_SUBTARGETINFO_TARGET_DESC\n\n";
@@ -2096,8 +2125,13 @@ void SubtargetEmitter::run(raw_ostream &OS) {
   }
 
   OS << ClassName << "::" << ClassName << "(const Triple &TT, StringRef CPU, "
-     << "StringRef TuneCPU, StringRef FS)\n"
-     << "  : TargetSubtargetInfo(TT, CPU, TuneCPU, FS, ";
+     << "StringRef TuneCPU, StringRef FS)\n";
+
+  if (Target == "AArch64")
+    OS << "  : TargetSubtargetInfo(TT, AArch64::resolveCPUAlias(CPU),\n"
+       << "                        AArch64::resolveCPUAlias(TuneCPU), FS, ";
+  else
+    OS << "  : TargetSubtargetInfo(TT, CPU, TuneCPU, FS, ";
   if (NumFeatures)
     OS << "ArrayRef(" << Target << "FeatureKV, " << NumFeatures << "), ";
   else
