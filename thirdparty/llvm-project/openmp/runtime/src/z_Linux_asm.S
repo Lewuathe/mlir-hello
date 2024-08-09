@@ -1150,6 +1150,9 @@ KMP_LABEL(kmp_invoke_pass_parms):	// put 1st - 6th parms to pkfn in registers.
 	movq	%rdi, %rbx	// pkfn -> %rbx
 	leaq	__gtid(%rbp), %rdi // &gtid -> %rdi (store 1st parm to pkfn)
 	leaq	__tid(%rbp), %rsi  // &tid -> %rsi (store 2nd parm to pkfn)
+	// Check if argc is 0
+	cmpq $0, %rax
+	je KMP_LABEL(kmp_no_args) // Jump ahead
 
 	movq	%r8, %r11	// p_argv -> %r11
 
@@ -1195,6 +1198,7 @@ KMP_LABEL(kmp_1_exit):
 	cmovnsq	(%r11), %rdx	// p_argv[0] -> %rdx (store 3rd parm to pkfn)
 #endif // KMP_MIC
 
+KMP_LABEL(kmp_no_args):
 	call	*%rbx		// call (*pkfn)();
 	movq	$1, %rax	// move 1 into return register;
 
@@ -2447,24 +2451,4 @@ KMP_PREFIX_UNDERSCORE(__kmp_unnamed_critical_addr):
 # elif !KMP_ARCH_WASM
 .section .note.GNU-stack,"",@progbits
 # endif
-#endif
-
-#if KMP_ARCH_WASM
-.data
-.global .gomp_critical_user_
-.global .gomp_critical_user_.var
-.global .gomp_critical_user_.reduction.var
-.global __kmp_unnamed_critical_addr
-.gomp_critical_user_:
-.zero 4
-.size .gomp_critical_user_, 4
-.gomp_critical_user_.var:
-.zero 4
-.size .gomp_critical_user_.var, 4
-.gomp_critical_user_.reduction.var:
-.zero 4
-.size .gomp_critical_user_.reduction.var, 4
-__kmp_unnamed_critical_addr:
-    .4byte .gomp_critical_user_
-    .size __kmp_unnamed_critical_addr, 4
 #endif
