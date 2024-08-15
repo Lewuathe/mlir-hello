@@ -49,6 +49,31 @@ C++ Specific Potentially Breaking Changes
   few users and can be written as ``__is_same(__remove_cv(T), decltype(nullptr))``,
   which GCC supports as well.
 
+- Clang will now correctly diagnose as ill-formed a constant expression where an
+  enum without a fixed underlying type is set to a value outside the range of
+  the enumeration's values.
+
+  .. code-block:: c++
+
+    enum E { Zero, One, Two, Three, Four };
+    constexpr E Val1 = (E)3;  // Ok
+    constexpr E Val2 = (E)7;  // Ok
+    constexpr E Val3 = (E)8;  // Now ill-formed, out of the range [0, 7]
+    constexpr E Val4 = (E)-1; // Now ill-formed, out of the range [0, 7]
+
+  Since Clang 16, it has been possible to suppress the diagnostic via
+  `-Wno-enum-constexpr-conversion`, to allow for a transition period for users.
+  Now, in Clang 20, **it is no longer possible to suppress the diagnostic**.
+
+- Extraneous template headers are now ill-formed by default.
+  This error can be disable with ``-Wno-error=extraneous-template-head``.
+
+  .. code-block:: c++
+
+    template <> // error: extraneous template head
+    template <typename T>
+    void f();
+    
 ABI Changes in This Version
 ---------------------------
 
@@ -61,9 +86,9 @@ Clang Frontend Potentially Breaking Changes
 Clang Python Bindings Potentially Breaking Changes
 --------------------------------------------------
 - Parts of the interface returning string results will now return
-  the empty string `""` when no result is available, instead of `None`.
-- Calling a property on the `CompletionChunk` or `CompletionString` class
-  statically now leads to an error, instead of returning a `CachedProperty` object
+  the empty string ``""`` when no result is available, instead of ``None``.
+- Calling a property on the ``CompletionChunk`` or ``CompletionString`` class
+  statically now leads to an error, instead of returning a ``CachedProperty`` object
   that is used internally. Properties are only available on instances.
 
 What's New in Clang |release|?
@@ -75,8 +100,8 @@ sections with improvements to Clang's support for those languages.
 
 C++ Language Changes
 --------------------
-- Allow single element access of GCC vector/ext_vector_type object to be 
-  constant expression. Supports the `V.xyzw` syntax and other tidbits 
+- Allow single element access of GCC vector/ext_vector_type object to be
+  constant expression. Supports the `V.xyzw` syntax and other tidbits
   as seen in OpenCL. Selecting multiple elements is left as a future work.
 
 C++17 Feature Support
@@ -95,6 +120,9 @@ C++23 Feature Support
 C++2c Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
 
+- Add ``__builtin_is_implicit_lifetime`` intrinsic, which supports
+  `P2647R1 A trait for implicit lifetime types <https://wg21.link/p2674r1>`_
+
 - Add ``__builtin_is_virtual_base_of`` intrinsic, which supports
   `P2985R0 A type trait for detecting virtual base classes <https://wg21.link/p2985r0>`_
 
@@ -110,6 +138,11 @@ Resolutions to C++ Defect Reports
   ``T``, ``T{e}`` will try to resolve an initializer list constructor and will use it if successful.
   Otherwise, if there is no initializer list constructor, the copy will be elided as if it was ``T(e)``.
   (`CWG2311: Missed case for guaranteed copy elision <https://cplusplus.github.io/CWG/issues/2311.html>`)
+
+- Casts from a bit-field to an integral type is now not considered narrowing if the
+  width of the bit-field means that all potential values are in the range
+  of the target type, even if the type of the bit-field is larger.
+  (`CWG2627: Bit-fields and narrowing conversions <https://cplusplus.github.io/CWG/issues/2627.html>`_)
 
 C Language Changes
 ------------------
@@ -134,6 +167,11 @@ Modified Compiler Flags
 
 Removed Compiler Flags
 -------------------------
+
+- The compiler flag `-Wenum-constexpr-conversion` (and the `Wno-`, `Wno-error-`
+  derivatives) is now removed, since it's no longer possible to suppress the
+  diagnostic (see above). Users can expect an `unknown warning` diagnostic if
+  it's still in use.
 
 Attribute Changes in Clang
 --------------------------
@@ -166,7 +204,6 @@ Improvements to Clang's diagnostics
 - Clang now diagnoses undefined behavior in constant expressions more consistently. This includes invalid shifts, and signed overflow in arithmetic.
 
 - -Wdangling-assignment-gsl is enabled by default.
-- Clang now does a better job preserving the template arguments as written when specializing concepts.
 - Clang now always preserves the template arguments as written used
   to specialize template type aliases.
 
@@ -198,6 +235,7 @@ Bug Fixes to C++ Support
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 - Fixed a crash when an expression with a dependent ``__typeof__`` type is used as the operand of a unary operator. (#GH97646)
+- Fixed incorrect pack expansion of init-capture references in requires expresssions.
 - Fixed a failed assertion when checking invalid delete operator declaration. (#GH96191)
 - Fix a crash when checking destructor reference with an invalid initializer. (#GH97230)
 - Clang now correctly parses potentially declarative nested-name-specifiers in pointer-to-member declarators.
@@ -212,6 +250,10 @@ Bug Fixes to C++ Support
 - Clang now preserves the unexpanded flag in a lambda transform used for pack expansion. (#GH56852), (#GH85667),
   (#GH99877).
 - Fixed a bug when diagnosing ambiguous explicit specializations of constrained member functions.
+- Fixed an assertion failure when selecting a function from an overload set that includes a
+  specialization of a conversion function template.
+- Correctly diagnose attempts to use a concept name in its own definition;
+  A concept name is introduced to its scope sooner to match the C++ standard. (#GH55875)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -311,6 +353,8 @@ AST Matchers
 clang-format
 ------------
 
+- Adds ``BreakBinaryOperations`` option.
+
 libclang
 --------
 
@@ -338,10 +382,45 @@ Improvements
 Moved checkers
 ^^^^^^^^^^^^^^
 
+- The checker ``alpha.security.MallocOverflow`` was deleted because it was
+  badly implemented and its agressive logic produced too many false positives.
+  To detect too large arguments passed to malloc, consider using the checker
+  ``alpha.taint.TaintedAlloc``.
+
 .. _release-notes-sanitizers:
 
 Sanitizers
 ----------
+
+- Added the ``-fsanitize-overflow-pattern-exclusion=`` flag which can be used
+  to disable specific overflow-dependent code patterns. The supported patterns
+  are: ``add-overflow-test``, ``negated-unsigned-const``, and
+  ``post-decr-while``. The sanitizer instrumentation can be toggled off for all
+  available patterns by specifying ``all``. Conversely, you can disable all
+  exclusions with ``none``.
+
+  .. code-block:: c++
+
+     /// specified with ``-fsanitize-overflow-pattern-exclusion=add-overflow-test``
+     int common_overflow_check_pattern(unsigned base, unsigned offset) {
+       if (base + offset < base) { /* ... */ } // The pattern of `a + b < a`, and other re-orderings, won't be instrumented
+     }
+
+     /// specified with ``-fsanitize-overflow-pattern-exclusion=negated-unsigned-const``
+     void negation_overflow() {
+       unsigned long foo = -1UL; // No longer causes a negation overflow warning
+       unsigned long bar = -2UL; // and so on...
+     }
+
+     /// specified with ``-fsanitize-overflow-pattern-exclusion=post-decr-while``
+     void while_post_decrement() {
+       unsigned char count = 16;
+       while (count--) { /* ... */} // No longer causes unsigned-integer-overflow sanitizer to trip
+     }
+
+  Many existing projects have a large amount of these code patterns present.
+  This new flag should allow those projects to enable integer sanitizers with
+  less noise.
 
 Python Binding Changes
 ----------------------
@@ -355,8 +434,9 @@ Improvements
 ^^^^^^^^^^^^
 - Improve the handling of mapping array-section for struct containing nested structs with user defined mappers
 
-- `num_teams` now accepts multiple expressions when it is used along in ``target teams ompx_bare`` construct.
-  This allows the target region to be launched with multi-dim grid on GPUs.
+- `num_teams` and `thead_limit` now accept multiple expressions when it is used
+  along in ``target teams ompx_bare`` construct. This allows the target region
+  to be launched with multi-dim grid on GPUs.
 
 Additional Information
 ======================
