@@ -3318,7 +3318,7 @@ AbstractManglingParser<Derived, Alloc>::parseOperatorEncoding() {
     return nullptr;
 
   // We can't use lower_bound as that can link to symbols in the C++ library,
-  // and this must remain independant of that.
+  // and this must remain independent of that.
   size_t lower = 0u, upper = NumOps - 1; // Inclusive bounds.
   while (upper != lower) {
     size_t middle = (upper + lower) / 2;
@@ -5714,6 +5714,7 @@ Node *AbstractManglingParser<Derived, Alloc>::parseTemplateParam() {
 }
 
 // <template-param-decl> ::= Ty                          # type parameter
+//                       ::= Tk <concept name> [<template-args>] # constrained type parameter
 //                       ::= Tn <type>                   # non-type parameter
 //                       ::= Tt <template-param-decl>* E # template parameter
 //                       ::= Tp <template-param-decl>    # parameter pack
@@ -5845,7 +5846,7 @@ Node *AbstractManglingParser<Derived, Alloc>::parseTemplateArg() {
   }
 }
 
-// <template-args> ::= I <template-arg>* E
+// <template-args> ::= I <template-arg>* [Q <requires-clause expr>] E
 //     extension, the abi says <template-arg>+
 template <typename Derived, typename Alloc>
 Node *

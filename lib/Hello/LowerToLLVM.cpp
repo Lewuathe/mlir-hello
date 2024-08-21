@@ -51,6 +51,7 @@ public:
   mlir::LogicalResult
   matchAndRewrite(mlir::Operation *op, mlir::ArrayRef<mlir::Value> operands,
                   mlir::ConversionPatternRewriter &rewriter) const override {
+    auto *context = rewriter.getContext();                
     auto memRefType = (*op->operand_type_begin()).cast<mlir::MemRefType>();
     auto memRefShape = memRefType.getShape();
     auto loc = op->getLoc();
@@ -83,7 +84,7 @@ public:
 
       // Insert a newline after each of the inner dimensions of the shape.
       if (i != e - 1) {
-        rewriter.create<mlir::LLVM::CallOp>(loc, rewriter.getIntegerType(32),
+        rewriter.create<mlir::LLVM::CallOp>(loc, getPrintfType(context),
                                             printfRef, newLineCst);
       }
       rewriter.create<mlir::scf::YieldOp>(loc);
@@ -95,7 +96,7 @@ public:
     auto elementLoad =
         rewriter.create<mlir::memref::LoadOp>(loc, printOp.getInput(), loopIvs);
     rewriter.create<mlir::LLVM::CallOp>(
-        loc, rewriter.getIntegerType(32), printfRef,
+        loc, getPrintfType(context), printfRef,
         mlir::ArrayRef<mlir::Value>({formatSpecifierCst, elementLoad}));
 
     // Notify the rewriter that this operation has been removed.
@@ -166,6 +167,7 @@ public:
   mlir::LogicalResult
   matchAndRewrite(mlir::Operation *op, mlir::ArrayRef<mlir::Value> operands,
                   mlir::ConversionPatternRewriter &rewriter) const override {
+    auto *context = rewriter.getContext();
     mlir::ModuleOp parentModule = op->getParentOfType<mlir::ModuleOp>();
     auto printfRef = getOrInsertPrintf(rewriter, parentModule);
     auto loc = op->getLoc();
@@ -173,7 +175,7 @@ public:
         loc, rewriter, "hello_word_string",
         mlir::StringRef("Hello, World! \n\0", 16), parentModule);
 
-    rewriter.create<mlir::LLVM::CallOp>(loc, rewriter.getIntegerType(32),
+    rewriter.create<mlir::LLVM::CallOp>(loc, getPrintfType(context),
                                         printfRef, helloWorld);
     rewriter.eraseOp(op);
     return mlir::success();

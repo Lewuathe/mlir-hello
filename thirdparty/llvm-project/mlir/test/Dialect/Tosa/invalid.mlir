@@ -20,7 +20,7 @@ func.func @test_conv2d(%arg0: tensor<*xi8>, %arg1: tensor<16x3x3x4xi8>, %arg2: t
 // -----
 
 func.func @test_conv2d(%arg0: tensor<1x29x29x4xi8>, %arg1: tensor<*xi8>, %arg2: tensor<16xi8>) -> tensor<1x27x27x16xi8> {
-  // expected-error@+1 {{'tosa.conv2d' op operand #1 must be 4D tensor of 4-bit signless integer or 8-bit signless integer or Quint8 type or Qint4 type or Qint8 type or Qint16 type or Qint32 type or 32-bit float or 16-bit float or bfloat16 type values, but got 'tensor<*xi8>'}}
+  // expected-error@+1 {{'tosa.conv2d' op operand #1 must be 4D tensor of 4-bit signless integer or 8-bit signless integer or Quint8 type or Qint4 type or Qint8 type or Qint16 type or Qint32 type or floating-point values, but got 'tensor<*xi8>'}}
   %0 = tosa.conv2d %arg0, %arg1, %arg2 {dilation = array<i64: 1, 1>, pad = array<i64: 0, 0, 0, 0>, stride = array<i64: 1, 1>}
            : (tensor<1x29x29x4xi8>, tensor<*xi8>, tensor<16xi8>) -> tensor<1x27x27x16xi8>
   return %0 : tensor<1x27x27x16xi8>
@@ -411,5 +411,40 @@ func.func @test_tile_invalid_multiples() {
   %0 = tensor.empty() : tensor<4x31x31xf32>
   // expected-error@+1 {{'tosa.tile' op expect 'multiples' array to have length 3 but got 0.}}
   %1 = tosa.tile %0 {multiples = array<i64>} : (tensor<4x31x31xf32>) -> tensor<4x31x31xf32>
+  return
+}
+
+// -----
+
+// CHECK-LABEL: @test_invalid_constant_permutation
+func.func @test_invalid_constant_permutation() {
+  // expected-error@+3 {{permutation must be within input bounds}}
+  %0 = tensor.empty() : tensor<3x4x5xi32>
+  %1 = arith.constant dense<[3, 0, 1]> : tensor<3xi32>
+  %2 = tosa.transpose %0, %1 : (tensor<3x4x5xi32>, tensor<3xi32>) -> tensor<3x4x5xi32>
+  return
+}
+
+// -----
+
+// CHECK-LABEL: test_rank_size_constant_permutation
+func.func @test_rank_size_constant_permutation() {
+  // expected-error@+4 {{permutation must be within input bounds}}
+  %0 = arith.constant 6 : index
+  %1 = arith.constant dense<[0, 2]> : tensor<2xi32>
+  %2 = tensor.empty(%0) : tensor<?x27xi64>
+  %3 = tosa.transpose %2, %1 : (tensor<?x27xi64>, tensor<2xi32>) -> tensor<?x27xi64>
+  return
+}
+
+// -----
+
+// CHECK-LABEL: test_large_constant_permutation
+func.func @test_large_constant_permutation() {
+  // expected-error@+4 {{permutation must be within input bounds}}
+  %0 = arith.constant 6 : index
+  %1 = arith.constant dense<[1185677355, 332462212]> : tensor<2xi32>
+  %2 = tensor.empty(%0) : tensor<?x27xi64>
+  %3 = tosa.transpose %2, %1 : (tensor<?x27xi64>, tensor<2xi32>) -> tensor<?x27xi64>
   return
 }

@@ -4,10 +4,14 @@ add_flang_library(FIRTransforms
   AffinePromotion.cpp
   AffineDemotion.cpp
   AnnotateConstant.cpp
+  AssumedRankOpConversion.cpp
   CharacterConversion.cpp
+  ConstantArgumentGlobalisation.cpp
   ControlFlowConverter.cpp
+  CufOpConversion.cpp
   ArrayValueCopy.cpp
   ExternalNameConversion.cpp
+  MemoryUtils.cpp
   MemoryAllocation.cpp
   StackArrays.cpp
   MemRefDataFlowOpt.cpp
@@ -17,19 +21,24 @@ add_flang_library(FIRTransforms
   AddDebugInfo.cpp
   PolymorphicOpConversion.cpp
   LoopVersioning.cpp
-  OMPDescriptorMapInfoGen.cpp
   OMPFunctionFiltering.cpp
+  OMPMapInfoFinalization.cpp
   OMPMarkDeclareTarget.cpp
+  StackReclaim.cpp
   VScaleAttr.cpp
   FunctionAttr.cpp
   DebugTypeGenerator.cpp
 
   DEPENDS
+  CUFAttrs
+  CUFDialect
   FIRDialect
   FIROptTransformsPassIncGen
   HLFIROpsIncGen
 
   LINK_LIBS
+  CUFAttrs
+  CUFDialect
   FIRAnalysis
   FIRBuilder
   FIRCodeGen

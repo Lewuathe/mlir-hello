@@ -774,3 +774,130 @@ void overflowInSwitchCase(int n) {
     break;
   }
 }
+
+namespace APValues {
+  int g;
+  struct A { union { int n, m; }; int *p; int A::*q; char buffer[32]; };
+  template<A a> constexpr const A &get = a;
+  constexpr const A &v = get<A{}>;
+  constexpr const A &w = get<A{1, &g, &A::n, "hello"}>;
+}
+
+namespace self_referencing {
+  struct S {
+    S* ptr = nullptr;
+    constexpr S(int i) : ptr(this) {
+      if (this == ptr && i)
+        ptr = nullptr;
+    }
+    constexpr ~S() {}
+  };
+
+  void test() {
+    S s(1);
+  }
+}
+
+namespace GH64949 {
+  struct f {
+    int g; // both-note {{subobject declared here}}
+    constexpr ~f() {}
+  };
+
+  class h {
+  public:
+    consteval h(char *) {}
+    f i;
+  };
+
+  void test() { h{nullptr}; } // both-error {{call to consteval function 'GH64949::h::h' is not a constant expression}} \
+                              // both-note {{subobject 'g' is not initialized}} \
+                              // both-warning {{expression result unused}}
+}
+
+/// This used to cause an assertion failure inside EvaluationResult::checkFullyInitialized.
+namespace CheckingNullPtrForInitialization {
+  struct X {
+    consteval operator const char *() const {
+      return nullptr;
+    }
+  };
+  const char *f() {
+    constexpr X x;
+    return x;
+  }
+}
+
+namespace VariadicCallOperator {
+  class F {
+  public:
+    constexpr void operator()(int a, int b, ...) {}
+  };
+  constexpr int foo() {
+    F f;
+
+    f(1,2, 3);
+    return 1;
+  }
+  constexpr int A = foo();
+}
+
+namespace DefinitionLoc {
+
+  struct NonConstexprCopy {
+    constexpr NonConstexprCopy() = default;
+    NonConstexprCopy(const NonConstexprCopy &);
+    constexpr NonConstexprCopy(NonConstexprCopy &&) = default;
+
+    int n = 42;
+  };
+
+  NonConstexprCopy::NonConstexprCopy(const NonConstexprCopy &) = default; // both-note {{here}}
+
+  constexpr NonConstexprCopy ncc1 = NonConstexprCopy(NonConstexprCopy());
+  constexpr NonConstexprCopy ncc2 = ncc1; // both-error {{constant expression}} \
+                                          // both-note {{non-constexpr constructor}}
+}
+
+namespace VirtDtor {
+  class B {
+  public:
+    constexpr B(char *p) : p(p) {}
+    virtual constexpr ~B() {
+      *p = 'B';
+      ++p;
+    }
+
+    char *p;
+  };
+
+  class C : public B {
+  public:
+    constexpr C(char *p) : B(p) {}
+    virtual constexpr ~C() override {
+      *p = 'C';
+      ++p;
+    }
+  };
+
+  union U {
+    constexpr U(char *p) : c(p) {}
+    constexpr ~U() {}
+
+    C c;
+  };
+
+  constexpr int test(char a, char b) {
+    char buff[2] = {};
+    U u(buff);
+
+    /// U is a union, so it won't call the destructor of its fields.
+    /// We do this manually here. Explicitly calling ~C() here should
+    /// also call the destructor of the base classes however.
+    u.c.~C();
+
+    return buff[0] == a && buff[1] == b;
+  }
+
+  static_assert(test('C', 'B'));
+}

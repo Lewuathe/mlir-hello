@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_AST_INTERP_DESCRIPTOR_H
 #define LLVM_CLANG_AST_INTERP_DESCRIPTOR_H
 
+#include "PrimType.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/Expr.h"
 
@@ -31,7 +32,7 @@ using InitMapPtr = std::optional<std::pair<bool, std::shared_ptr<InitMap>>>;
 /// inline descriptors of all fields and array elements. It also initializes
 /// all the fields which contain non-trivial types.
 using BlockCtorFn = void (*)(Block *Storage, std::byte *FieldPtr, bool IsConst,
-                             bool IsMutable, bool IsActive,
+                             bool IsMutable, bool IsActive, bool InUnion,
                              const Descriptor *FieldDesc);
 
 /// Invoked when a block is destroyed. Invokes the destructors of all
@@ -46,6 +47,18 @@ using BlockDtorFn = void (*)(Block *Storage, std::byte *FieldPtr,
 using BlockMoveFn = void (*)(Block *Storage, const std::byte *SrcFieldPtr,
                              std::byte *DstFieldPtr,
                              const Descriptor *FieldDesc);
+
+enum class GlobalInitState {
+  Initialized,
+  NoInitializer,
+  InitializerFailed,
+};
+
+/// Descriptor used for global variables.
+struct alignas(void *) GlobalInlineDescriptor {
+  GlobalInitState InitState = GlobalInitState::InitializerFailed;
+};
+static_assert(sizeof(GlobalInlineDescriptor) == sizeof(void *), "");
 
 /// Inline descriptor embedded in structures and arrays.
 ///
@@ -70,9 +83,15 @@ struct InlineDescriptor {
   /// Flag indicating if the field is an embedded base class.
   LLVM_PREFERRED_TYPE(bool)
   unsigned IsBase : 1;
+  /// Flag inidcating if the field is a virtual base class.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned IsVirtualBase : 1;
   /// Flag indicating if the field is the active member of a union.
   LLVM_PREFERRED_TYPE(bool)
   unsigned IsActive : 1;
+  /// Flat indicating if this field is in a union (even if nested).
+  unsigned InUnion : 1;
+  LLVM_PREFERRED_TYPE(bool)
   /// Flag indicating if the field is mutable (if in a record).
   LLVM_PREFERRED_TYPE(bool)
   unsigned IsFieldMutable : 1;
@@ -86,6 +105,7 @@ struct InlineDescriptor {
   void dump() const { dump(llvm::errs()); }
   void dump(llvm::raw_ostream &OS) const;
 };
+static_assert(sizeof(GlobalInlineDescriptor) != sizeof(InlineDescriptor), "");
 
 /// Describes a memory block created by an allocation site.
 struct Descriptor final {
@@ -110,6 +130,12 @@ public:
 
   using MetadataSize = std::optional<unsigned>;
   static constexpr MetadataSize InlineDescMD = sizeof(InlineDescriptor);
+  static constexpr MetadataSize GlobalMD = sizeof(GlobalInlineDescriptor);
+
+  /// Maximum number of bytes to be used for array elements.
+  static constexpr unsigned MaxArrayElemBytes =
+      std::numeric_limits<decltype(AllocSize)>::max() - sizeof(InitMapPtr) -
+      align(std::max(*InlineDescMD, *GlobalMD));
 
   /// Pointer to the record, if block contains records.
   const Record *const ElemRecord = nullptr;
@@ -128,7 +154,7 @@ public:
   /// Flag indicating if the block is an array.
   const bool IsArray = false;
   /// Flag indicating if this is a dummy descriptor.
-  const bool IsDummy = false;
+  bool IsDummy = false;
 
   /// Storage management methods.
   const BlockCtorFn CtorFn = nullptr;
@@ -162,8 +188,8 @@ public:
   /// Allocates a dummy descriptor.
   Descriptor(const DeclTy &D);
 
-  /// Allocates a dummy array descriptor.
-  Descriptor(const DeclTy &D, UnknownSize);
+  /// Make this descriptor a dummy descriptor.
+  void makeDummy() { IsDummy = true; }
 
   QualType getType() const;
   QualType getElemQualType() const;
@@ -228,6 +254,8 @@ public:
   bool isArray() const { return IsArray; }
   /// Checks if the descriptor is of a record.
   bool isRecord() const { return !IsArray && ElemRecord; }
+  /// Checks if the descriptor is of a union.
+  bool isUnion() const;
   /// Checks if this is a dummy descriptor.
   bool isDummy() const { return IsDummy; }
 

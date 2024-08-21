@@ -222,13 +222,13 @@ func.func @test_binary_i32(%arg0 : tensor<4xi32>, %arg1 : tensor<i32>) -> () {
 
 // CHECK-LABEL: @test_binary_i1
 func.func @test_binary_i1(%arg0 : tensor<4xi1>, %arg1 : tensor<i1>) -> () {
-  // CHECK tosa.logical_and %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<4xi1>
+  // CHECK: tosa.logical_and %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<4xi1>
   %0 = tosa.logical_and %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<*xi1>
 
-  // CHECK tosa.logical_or %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<4xi1>
+  // CHECK: tosa.logical_or %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<4xi1>
   %1 = tosa.logical_or %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<*xi1>
 
-  // CHECK tosa.logical_xor %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<*4i1>
+  // CHECK: tosa.logical_xor %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<4xi1>
   %2 = tosa.logical_xor %arg0, %arg1 : (tensor<4xi1>, tensor<i1>) -> tensor<*xi1>
 
   return
@@ -1373,30 +1373,4 @@ func.func @test_tosa_use_def_chain(%arg0: tensor<1x32x32x3xf32>, %arg1: tensor<1
   // CHECK: (tensor<1x32x32x16xf32>) -> tensor<1x16x16x16xf32>
   %1 = tosa.max_pool2d %0 {kernel = array<i64: 2, 2>, pad = array<i64: 0, 0, 0, 0>, stride = array<i64: 2, 2>} : (tensor<?x32x32x16xf32>) -> tensor<?x16x16x16xf32>
   return %1 : tensor<?x16x16x16xf32>
-}
-
-// -----
-
-// CHECK-LABEL: test_rank_size_constant_permutation
-func.func @test_rank_size_constant_permutation() {
-  %c6 = arith.constant 6 : index
-  %cst_26 = arith.constant dense<[0, 2]> : tensor<2xi32>
-  %14 = tensor.empty(%c6) : tensor<?x27xi64>
-  // Fail to infer the shape but not crash.
-  // CHECK: (tensor<?x27xi64>, tensor<2xi32>) -> tensor<?x27xi64>
-  %72 = tosa.transpose %14, %cst_26 : (tensor<?x27xi64>, tensor<2xi32>) -> tensor<?x27xi64>
-  return
-}
-
-// -----
-
-// CHECK-LABEL: test_large_constant_permutation
-func.func @test_large_constant_permutation() {
-  %c6 = arith.constant 6 : index
-  %cst_26 = arith.constant dense<[1185677355, 332462212]> : tensor<2xi32>
-  %14 = tensor.empty(%c6) : tensor<?x27xi64>
-  // Fail to infer the shape but not crash.
-  // CHECK: (tensor<?x27xi64>, tensor<2xi32>) -> tensor<?x27xi64>
-  %72 = tosa.transpose %14, %cst_26 : (tensor<?x27xi64>, tensor<2xi32>) -> tensor<?x27xi64>
-  return
 }
