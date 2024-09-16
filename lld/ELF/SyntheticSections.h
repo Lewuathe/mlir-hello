@@ -523,7 +523,8 @@ public:
   }
   /// Add a dynamic relocation using the target address of \p sym as the addend
   /// if \p sym is non-preemptible. Otherwise add a relocation against \p sym.
-  void addAddendOnlyRelocIfNonPreemptible(RelType dynType, GotSection &sec,
+  void addAddendOnlyRelocIfNonPreemptible(RelType dynType,
+                                          InputSectionBase &isec,
                                           uint64_t offsetInSec, Symbol &sym,
                                           RelType addendRelType);
   template <bool shard = false>
@@ -1470,14 +1471,12 @@ struct Partition {
   std::unique_ptr<SyntheticSection> verNeed;
   std::unique_ptr<VersionTableSection> verSym;
 
-  unsigned getNumber() const { return this - &partitions[0] + 1; }
+  unsigned getNumber() const { return this - &ctx.partitions[0] + 1; }
 };
-
-LLVM_LIBRARY_VISIBILITY extern Partition *mainPart;
 
 inline Partition &SectionBase::getPartition() const {
   assert(isLive());
-  return partitions[partition - 1];
+  return ctx.partitions[partition - 1];
 }
 
 // Linker generated sections which can be used as inputs and are not specific to
