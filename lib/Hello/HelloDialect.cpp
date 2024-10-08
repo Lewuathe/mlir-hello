@@ -49,5 +49,5 @@ mlir::Operation *HelloDialect::materializeConstant(mlir::OpBuilder &builder,
                                                    mlir::Type type,
                                                    mlir::Location loc) {
   return builder.create<hello::ConstantOp>(
-      loc, type, value.cast<mlir::DenseElementsAttr>());
+      loc, type, mlir::cast<mlir::DenseElementsAttr>(value));
 }
