@@ -59,7 +59,7 @@ class ConstantOpLowering : public mlir::OpRewritePattern<hello::ConstantOp> {
 
     // When lowering the constant operation, we allocate and assign the constant
     // values to a corresponding memref allocation.
-    auto tensorType = op.getType().cast<mlir::TensorType>();
+    auto tensorType = mlir::cast<mlir::TensorType>(op.getType());
     auto memRefType = convertTensorToMemRef(tensorType);
     auto alloc = insertAllocAndDealloc(memRefType, loc, rewriter);
 
@@ -166,7 +166,7 @@ void HelloToAffineLowerPass::runOnOperation() {
                          mlir::memref::MemRefDialect>();
   target.addDynamicallyLegalOp<hello::PrintOp>([](hello::PrintOp op) {
     return llvm::none_of(op->getOperandTypes(), [](mlir::Type type) {
-      return type.isa<mlir::TensorType>();
+      return mlir::isa<mlir::TensorType>(type);
     });
   });
   target.addLegalOp<hello::WorldOp>();
