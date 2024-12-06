@@ -13,9 +13,9 @@
 
 #include "AMDGPU.h"
 #include "GCNSubtarget.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/Attributes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/MDBuilder.h"
@@ -171,8 +171,8 @@ public:
   // Try to allocate SGPRs to preload implicit kernel arguments.
   void tryAllocImplicitArgPreloadSGPRs(uint64_t ImplicitArgsBaseOffset,
                                        IRBuilder<> &Builder) {
-    StringRef Name = Intrinsic::getName(Intrinsic::amdgcn_implicitarg_ptr);
-    Function *ImplicitArgPtr = F.getParent()->getFunction(Name);
+    Function *ImplicitArgPtr = Intrinsic::getDeclarationIfExists(
+        F.getParent(), Intrinsic::amdgcn_implicitarg_ptr);
     if (!ImplicitArgPtr)
       return;
 
@@ -416,6 +416,16 @@ static bool lowerKernelArguments(Function &F, const TargetMachine &TM) {
     Load->setMetadata(LLVMContext::MD_invariant_load, MDNode::get(Ctx, {}));
 
     MDBuilder MDB(Ctx);
+
+    if (Arg.hasAttribute(Attribute::NoUndef))
+      Load->setMetadata(LLVMContext::MD_noundef, MDNode::get(Ctx, {}));
+
+    if (Arg.hasAttribute(Attribute::Range)) {
+      const ConstantRange &Range =
+          Arg.getAttribute(Attribute::Range).getValueAsConstantRange();
+      Load->setMetadata(LLVMContext::MD_range,
+                        MDB.createRange(Range.getLower(), Range.getUpper()));
+    }
 
     if (isa<PointerType>(ArgTy)) {
       if (Arg.hasNonNullAttr())

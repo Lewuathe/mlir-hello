@@ -27,6 +27,7 @@
 #include "flang/Optimizer/Dialect/Support/FIRContext.h"
 #include "flang/Optimizer/Support/DataLayout.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/STLExtras.h"
@@ -142,20 +143,16 @@ public:
 
   mlir::ModuleOp getModule() { return getOperation(); }
 
-  template <typename A, typename B, typename C>
+  template <typename Ty, typename Callback>
   std::optional<std::function<mlir::Value(mlir::Operation *)>>
-  rewriteCallComplexResultType(
-      mlir::Location loc, A ty, B &newResTys,
-      fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs, C &newOpers,
-      mlir::Value &savedStackPtr) {
-    if (noComplexConversion) {
-      newResTys.push_back(ty);
-      return std::nullopt;
-    }
-    auto m = specifics->complexReturnType(loc, ty.getElementType());
-    // Currently targets mandate COMPLEX is a single aggregate or packed
-    // scalar, including the sret case.
-    assert(m.size() == 1 && "target of complex return not supported");
+  rewriteCallResultType(mlir::Location loc, mlir::Type originalResTy,
+                        Ty &newResTys,
+                        fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs,
+                        Callback &newOpers, mlir::Value &savedStackPtr,
+                        fir::CodeGenSpecifics::Marshalling &m) {
+    // Currently, targets mandate COMPLEX or STRUCT is a single aggregate or
+    // packed scalar, including the sret case.
+    assert(m.size() == 1 && "return type not supported on this target");
     auto resTy = std::get<mlir::Type>(m[0]);
     auto attr = std::get<fir::CodeGenSpecifics::Attributes>(m[0]);
     if (attr.isSRet()) {
@@ -170,7 +167,7 @@ public:
       newInTyAndAttrs.push_back(m[0]);
       newOpers.push_back(stack);
       return [=](mlir::Operation *) -> mlir::Value {
-        auto memTy = fir::ReferenceType::get(ty);
+        auto memTy = fir::ReferenceType::get(originalResTy);
         auto cast = rewriter->create<fir::ConvertOp>(loc, memTy, stack);
         return rewriter->create<fir::LoadOp>(loc, cast);
       };
@@ -180,9 +177,39 @@ public:
       // We are going to generate an alloca, so save the stack pointer.
       if (!savedStackPtr)
         savedStackPtr = genStackSave(loc);
-      return this->convertValueInMemory(loc, call->getResult(0), ty,
+      return this->convertValueInMemory(loc, call->getResult(0), originalResTy,
                                         /*inputMayBeBigger=*/true);
     };
+  }
+
+  template <typename Ty, typename Callback>
+  std::optional<std::function<mlir::Value(mlir::Operation *)>>
+  rewriteCallComplexResultType(
+      mlir::Location loc, mlir::ComplexType ty, Ty &newResTys,
+      fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs, Callback &newOpers,
+      mlir::Value &savedStackPtr) {
+    if (noComplexConversion) {
+      newResTys.push_back(ty);
+      return std::nullopt;
+    }
+    auto m = specifics->complexReturnType(loc, ty.getElementType());
+    return rewriteCallResultType(loc, ty, newResTys, newInTyAndAttrs, newOpers,
+                                 savedStackPtr, m);
+  }
+
+  template <typename Ty, typename Callback>
+  std::optional<std::function<mlir::Value(mlir::Operation *)>>
+  rewriteCallStructResultType(
+      mlir::Location loc, fir::RecordType recTy, Ty &newResTys,
+      fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs, Callback &newOpers,
+      mlir::Value &savedStackPtr) {
+    if (noStructConversion) {
+      newResTys.push_back(recTy);
+      return std::nullopt;
+    }
+    auto m = specifics->structReturnType(loc, recTy);
+    return rewriteCallResultType(loc, recTy, newResTys, newInTyAndAttrs,
+                                 newOpers, savedStackPtr, m);
   }
 
   void passArgumentOnStackOrWithNewType(
@@ -356,6 +383,11 @@ public:
                                                 newInTyAndAttrs, newOpers,
                                                 savedStackPtr);
           })
+          .template Case<fir::RecordType>([&](fir::RecordType recTy) {
+            wrap = rewriteCallStructResultType(loc, recTy, newResTys,
+                                               newInTyAndAttrs, newOpers,
+                                               savedStackPtr);
+          })
           .Default([&](mlir::Type ty) { newResTys.push_back(ty); });
     } else if (fnTy.getResults().size() > 1) {
       TODO(loc, "multiple results not supported yet");
@@ -372,7 +404,6 @@ public:
       unsigned index = e.index();
       llvm::TypeSwitch<mlir::Type>(ty)
           .template Case<fir::BoxCharType>([&](fir::BoxCharType boxTy) {
-            bool sret;
             if constexpr (std::is_same_v<std::decay_t<A>, fir::CallOp>) {
               if (noCharacterConversion) {
                 newInTyAndAttrs.push_back(
@@ -380,17 +411,14 @@ public:
                 newOpers.push_back(oper);
                 return;
               }
-              sret = callOp.getCallee() &&
-                     functionArgIsSRet(
-                         index, getModule().lookupSymbol<mlir::func::FuncOp>(
-                                    *callOp.getCallee()));
             } else {
-              // TODO: dispatch case; how do we put arguments on a call?
-              // We cannot put both an sret and the dispatch object first.
-              sret = false;
-              TODO(loc, "dispatch + sret not supported yet");
+              // TODO: dispatch case; it used to be a to-do because of sret,
+              // but is not tested and maybe should be removed. This pass is
+              // anyway ran after lowering fir.dispatch in flang, so maybe that
+              // should just be a requirement of the pass.
+              TODO(loc, "ABI of fir.dispatch with character arguments");
             }
-            auto m = specifics->boxcharArgumentType(boxTy.getEleTy(), sret);
+            auto m = specifics->boxcharArgumentType(boxTy.getEleTy());
             auto unbox = rewriter->create<fir::UnboxCharOp>(
                 loc, std::get<mlir::Type>(m[0]), std::get<mlir::Type>(m[1]),
                 oper);
@@ -562,6 +590,24 @@ public:
     }
   }
 
+  template <typename Ty>
+  void
+  lowerStructSignatureRes(mlir::Location loc, fir::RecordType recTy,
+                          Ty &newResTys,
+                          fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs) {
+    if (noComplexConversion) {
+      newResTys.push_back(recTy);
+      return;
+    } else {
+      for (auto &tup : specifics->structReturnType(loc, recTy)) {
+        if (std::get<fir::CodeGenSpecifics::Attributes>(tup).isSRet())
+          newInTyAndAttrs.push_back(tup);
+        else
+          newResTys.push_back(std::get<mlir::Type>(tup));
+      }
+    }
+  }
+
   void
   lowerStructSignatureArg(mlir::Location loc, fir::RecordType recTy,
                           fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs) {
@@ -594,6 +640,9 @@ public:
       llvm::TypeSwitch<mlir::Type>(ty)
           .Case<mlir::ComplexType>([&](mlir::ComplexType ty) {
             lowerComplexSignatureRes(loc, ty, newResTys, newInTyAndAttrs);
+          })
+          .Case<fir::RecordType>([&](fir::RecordType ty) {
+            lowerStructSignatureRes(loc, ty, newResTys, newInTyAndAttrs);
           })
           .Default([&](mlir::Type ty) { newResTys.push_back(ty); });
     }
@@ -672,6 +721,11 @@ public:
 
       convertSignature(fn);
     }
+
+    for (auto gpuMod : mod.getOps<mlir::gpu::GPUModuleOp>())
+      for (auto fn : gpuMod.getOps<mlir::func::FuncOp>())
+        convertSignature(fn);
+
     return mlir::success();
   }
 
@@ -696,7 +750,8 @@ public:
     for (auto ty : func.getResults())
       if ((mlir::isa<fir::BoxCharType>(ty) && !noCharacterConversion) ||
           (fir::isa_complex(ty) && !noComplexConversion) ||
-          (mlir::isa<mlir::IntegerType>(ty) && hasCCallingConv)) {
+          (mlir::isa<mlir::IntegerType>(ty) && hasCCallingConv) ||
+          (mlir::isa<fir::RecordType>(ty) && !noStructConversion)) {
         LLVM_DEBUG(llvm::dbgs() << "rewrite " << signature << " for target\n");
         return false;
       }
@@ -770,6 +825,9 @@ public:
                                                 rewriter->getUnitAttr()));
             newResTys.push_back(retTy);
           })
+          .Case<fir::RecordType>([&](fir::RecordType recTy) {
+            doStructReturn(func, recTy, newResTys, newInTyAndAttrs, fixups);
+          })
           .Default([&](mlir::Type ty) { newResTys.push_back(ty); });
 
     // Saved potential shift in argument. Handling of result can add arguments
@@ -790,24 +848,16 @@ public:
               // Convert a CHARACTER argument type. This can involve separating
               // the pointer and the LEN into two arguments and moving the LEN
               // argument to the end of the arg list.
-              bool sret = functionArgIsSRet(index, func);
-              for (auto e : llvm::enumerate(specifics->boxcharArgumentType(
-                       boxTy.getEleTy(), sret))) {
-                auto &tup = e.value();
-                auto index = e.index();
+              for (auto &tup :
+                   specifics->boxcharArgumentType(boxTy.getEleTy())) {
                 auto attr = std::get<fir::CodeGenSpecifics::Attributes>(tup);
                 auto argTy = std::get<mlir::Type>(tup);
                 if (attr.isAppend()) {
                   trailingTys.push_back(argTy);
                 } else {
-                  if (sret) {
-                    fixups.emplace_back(FixupTy::Codes::CharPair,
-                                        newInTyAndAttrs.size(), index);
-                  } else {
-                    fixups.emplace_back(FixupTy::Codes::Trailing,
-                                        newInTyAndAttrs.size(),
-                                        trailingTys.size());
-                  }
+                  fixups.emplace_back(FixupTy::Codes::Trailing,
+                                      newInTyAndAttrs.size(),
+                                      trailingTys.size());
                   newInTyAndAttrs.push_back(tup);
                 }
               }
@@ -1056,27 +1106,12 @@ public:
         (*fixup.finalizer)(func);
   }
 
-  inline bool functionArgIsSRet(unsigned index, mlir::func::FuncOp func) {
-    if (auto attr = func.getArgAttrOfType<mlir::TypeAttr>(index, "llvm.sret"))
-      return true;
-    return false;
-  }
-
-  /// Convert a complex return value. This can involve converting the return
-  /// value to a "hidden" first argument or packing the complex into a wide
-  /// GPR.
   template <typename Ty, typename FIXUPS>
-  void doComplexReturn(mlir::func::FuncOp func, mlir::ComplexType cmplx,
-                       Ty &newResTys,
-                       fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs,
-                       FIXUPS &fixups) {
-    if (noComplexConversion) {
-      newResTys.push_back(cmplx);
-      return;
-    }
-    auto m =
-        specifics->complexReturnType(func.getLoc(), cmplx.getElementType());
-    assert(m.size() == 1);
+  void doReturn(mlir::func::FuncOp func, Ty &newResTys,
+                fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs,
+                FIXUPS &fixups, fir::CodeGenSpecifics::Marshalling &m) {
+    assert(m.size() == 1 &&
+           "expect result to be turned into single argument or result so far");
     auto &tup = m[0];
     auto attr = std::get<fir::CodeGenSpecifics::Attributes>(tup);
     auto argTy = std::get<mlir::Type>(tup);
@@ -1115,6 +1150,36 @@ public:
     else
       fixups.emplace_back(FixupTy::Codes::ReturnType, newResTys.size());
     newResTys.push_back(argTy);
+  }
+
+  /// Convert a complex return value. This can involve converting the return
+  /// value to a "hidden" first argument or packing the complex into a wide
+  /// GPR.
+  template <typename Ty, typename FIXUPS>
+  void doComplexReturn(mlir::func::FuncOp func, mlir::ComplexType cmplx,
+                       Ty &newResTys,
+                       fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs,
+                       FIXUPS &fixups) {
+    if (noComplexConversion) {
+      newResTys.push_back(cmplx);
+      return;
+    }
+    auto m =
+        specifics->complexReturnType(func.getLoc(), cmplx.getElementType());
+    doReturn(func, newResTys, newInTyAndAttrs, fixups, m);
+  }
+
+  template <typename Ty, typename FIXUPS>
+  void doStructReturn(mlir::func::FuncOp func, fir::RecordType recTy,
+                      Ty &newResTys,
+                      fir::CodeGenSpecifics::Marshalling &newInTyAndAttrs,
+                      FIXUPS &fixups) {
+    if (noStructConversion) {
+      newResTys.push_back(recTy);
+      return;
+    }
+    auto m = specifics->structReturnType(func.getLoc(), recTy);
+    doReturn(func, newResTys, newInTyAndAttrs, fixups, m);
   }
 
   template <typename FIXUPS>
