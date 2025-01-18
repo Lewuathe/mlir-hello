@@ -297,6 +297,14 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
     case llvm::Triple::NaCl:
       return std::make_unique<NaClTargetInfo<NaClMips32TargetInfo>>(Triple,
                                                                     Opts);
+    case llvm::Triple::Win32:
+      switch (Triple.getEnvironment()) {
+      case llvm::Triple::GNU:
+        return std::make_unique<MinGWMipsTargetInfo>(Triple, Opts);
+      case llvm::Triple::MSVC:
+      default: // Assume MSVC for unknown environments
+        return std::make_unique<MicrosoftMipsTargetInfo>(Triple, Opts);
+      }
     default:
       return std::make_unique<MipsTargetInfo>(Triple, Opts);
     }
@@ -726,6 +734,9 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
     case llvm::Triple::Linux:
         return std::make_unique<LinuxTargetInfo<LoongArch32TargetInfo>>(Triple,
                                                                         Opts);
+    case llvm::Triple::FreeBSD:
+      return std::make_unique<FreeBSDTargetInfo<LoongArch32TargetInfo>>(Triple,
+                                                                        Opts);
     default:
         return std::make_unique<LoongArch32TargetInfo>(Triple, Opts);
     }
@@ -733,6 +744,9 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
     switch (os) {
     case llvm::Triple::Linux:
         return std::make_unique<LinuxTargetInfo<LoongArch64TargetInfo>>(Triple,
+                                                                        Opts);
+    case llvm::Triple::FreeBSD:
+      return std::make_unique<FreeBSDTargetInfo<LoongArch64TargetInfo>>(Triple,
                                                                         Opts);
     default:
         return std::make_unique<LoongArch64TargetInfo>(Triple, Opts);

@@ -1,4 +1,4 @@
-// RUN: mlir-opt --convert-func-to-llvm %s | FileCheck %s
+// RUN: mlir-opt --convert-func-to-llvm --convert-arith-to-llvm %s | FileCheck %s
 
 module {
   func.func @main() -> i32 {
