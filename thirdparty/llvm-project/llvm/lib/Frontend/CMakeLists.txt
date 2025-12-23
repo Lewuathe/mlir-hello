@@ -1,6 +1,0 @@
-add_subdirectory(Atomic)
-add_subdirectory(Driver)
-add_subdirectory(HLSL)
-add_subdirectory(OpenACC)
-add_subdirectory(OpenMP)
-add_subdirectory(Offloading)
