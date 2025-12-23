@@ -1,7 +1,0 @@
-add_subdirectory(Breakpad)
-add_subdirectory(CTF)
-add_subdirectory(DWARF)
-add_subdirectory(JSON)
-add_subdirectory(NativePDB)
-add_subdirectory(PDB)
-add_subdirectory(Symtab)

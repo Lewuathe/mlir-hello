@@ -1,5 +1,0 @@
-functions:
-  select:
-    in-latest-posix: ''
-  utimes:
-    in-latest-posix: ''
