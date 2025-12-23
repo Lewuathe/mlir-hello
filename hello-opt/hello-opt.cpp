@@ -35,6 +35,7 @@
 
 #include "Hello/HelloDialect.h"
 #include "Hello/HelloPasses.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 
 namespace cl = llvm::cl;
 static cl::opt<std::string> inputFilename(cl::Positional,
