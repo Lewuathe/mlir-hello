@@ -20,20 +20,20 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: seanmiddleditch/gha-setup-ninja@master
 
       - name: Install prerequisites
         run: |
           sudo apt update
           sudo apt install -y uuid-dev
-      
+
       - name: Clear LLVM
         run: |
           rm -rf ./thirdparty/llvm-project
 
       - name: Checkout the latest LLVM
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: llvm/llvm-project
           ref: main

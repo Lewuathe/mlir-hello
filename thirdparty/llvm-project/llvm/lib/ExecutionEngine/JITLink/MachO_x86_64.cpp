@@ -236,7 +236,7 @@ private:
 
       // Skip relocations virtual sections.
       if (S.isVirtual()) {
-        if (S.relocation_begin() != S.relocation_end())
+        if (!S.relocations().empty())
           return make_error<JITLinkError>("Virtual section contains "
                                           "relocations");
         continue;
@@ -512,6 +512,7 @@ struct CompactUnwindTraits_MachO_x86_64
   constexpr static endianness Endianness = endianness::little;
 
   constexpr static uint32_t EncodingModeMask = 0x0f000000;
+  constexpr static uint32_t DWARFSectionOffsetMask = 0x00ffffff;
 
   using GOTManager = x86_64::GOTTableManager;
 
